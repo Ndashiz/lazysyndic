@@ -115,9 +115,14 @@ const SEED_OPENING = { pay:1358.70, res:358.62 };
 /* ---------- Store ---------- */
 // En ligne (Supabase configuré) : la source de vérité est la base partagée ;
 // hors ligne (preview sans config) : repli localStorage avec données de démo.
+// CONFIGURED : identifiants Supabase présents → connexion OBLIGATOIRE (fail-closed).
+// ONLINE : configuré ET client Supabase chargé.
+const CONFIGURED = !!(window.LS && window.LS.configured);
 const ONLINE = !!(window.LS && window.LS.hasClient);
 const LS_KEY = 'lazysyndic.v1';
-let state = ONLINE ? freshState() : loadState();   // en ligne, remplacé par boot()
+let state = CONFIGURED ? freshState() : loadState();   // si configuré, remplacé par boot()
+const unlockApp = ()=>document.documentElement.classList.remove('ls-locked');
+const lockApp   = ()=>document.documentElement.classList.add('ls-locked');
 
 function freshState(){
   return {
@@ -1238,28 +1243,45 @@ function buildLogin(){
 }
 
 async function boot(){
-  if (!ONLINE){ renderAll(); return; }   // mode démo hors-ligne
+  // Pas d'identifiants Supabase (dev local pur) : mode démo, on déverrouille.
+  if (!CONFIGURED){ unlockApp(); renderAll(); return; }
+
   buildLogin();
   const ov=document.getElementById('loginOverlay'), bar=document.getElementById('sessionBar');
-  const session = await window.LS.auth.session();
-  if (!session){ ov.classList.add('on'); }
+  ov.classList.add('on');            // l'app reste verrouillée (ls-locked) tant qu'on n'est pas membre
+
+  // Configuré mais la lib Supabase n'a pas chargé → on reste verrouillé, message clair.
+  if (!ONLINE){
+    ov.querySelector('#pwBox').style.display='none';
+    ov.querySelector('#magicBox').style.display='none';
+    ov.querySelector('#loginMsg').textContent='Service de connexion indisponible. Vérifiez votre connexion et rechargez la page.';
+    ov.querySelector('#loginMsg').className='login-msg err';
+    return;
+  }
+
   // réagit aux connexions / déconnexions
   window.LS.auth.onChange(async (s)=>{
     if (s){
-      const member = await window.LS.db.loadMember();
+      let member=null;
+      try { member = await window.LS.db.loadMember(); } catch(e){ console.error(e); }
       window.LS.member = member;
       window.LS.canWrite = !!(member && member.role==='admin');
       if (!member){
+        // session valide mais pas membre LazySyndic → on déconnecte et on garde verrouillé
+        lockApp(); bar.classList.remove('on'); ov.classList.add('on');
         ov.querySelector('#loginMsg').textContent='Ce compte n\'a pas accès à LazySyndic.';
         ov.querySelector('#loginMsg').className='login-msg err';
+        await window.LS.auth.signOut();
         return;
       }
+      bar.querySelector('#sbWho').innerHTML = `${member.full_name||member.userEmail} ${member.role==='admin'?'· <b>Syndic</b>':'· <span class="ro">Lecture seule</span>'}`;
+      await bootData();          // charge les données
       ov.classList.remove('on');
       bar.classList.add('on');
-      bar.querySelector('#sbWho').innerHTML = `${member.full_name||member.userEmail} ${member.role==='admin'?'· <b>Syndic</b>':'· <span class="ro">Lecture seule</span>'}`;
-      await bootData();
+      unlockApp();               // l'app n'apparaît qu'ici, membre confirmé + données chargées
     } else {
-      bar.classList.remove('on'); ov.classList.add('on');
+      // déconnecté : on reverrouille et on remet le login
+      lockApp(); bar.classList.remove('on'); ov.classList.add('on');
     }
   });
 }

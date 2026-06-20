@@ -6,8 +6,10 @@
 (function(){
   'use strict';
   const cfg = window.LAZYSYNDIC_CONFIG || {};
-  const hasClient = !!(window.supabase && cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY
-                       && !/VOTRE/.test(cfg.SUPABASE_URL));
+  // « configuré » = identifiants présents → la connexion est OBLIGATOIRE.
+  const configured = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && !/VOTRE/.test(cfg.SUPABASE_URL));
+  // « hasClient » = configuré ET la lib Supabase a bien chargé.
+  const hasClient = !!(configured && window.supabase);
   const sb = hasClient ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY) : null;
   window.sb = sb;
 
@@ -133,5 +135,5 @@
     async updateSettings(patch){ const {error}=await T('ls_settings').update(patch).eq('id',1); if(error)throw error; },
   };
 
-  window.LS = { hasClient, sb, auth, db, member:null, canWrite:false };
+  window.LS = { configured, hasClient, sb, auth, db, member:null, canWrite:false };
 })();

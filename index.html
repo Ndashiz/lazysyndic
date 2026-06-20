@@ -1,5 +1,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Verrou fail-closed : l'app reste masquée tant que la connexion n'est pas établie.
+     Si le JS ou Supabase échoue, rien n'est accessible. -->
+<style>html.ls-locked .app{display:none!important}</style>
+<script>document.documentElement.classList.add('ls-locked')</script>
 <title>LazySyndic — La copropriété en pilote automatique</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
