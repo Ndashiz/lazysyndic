@@ -144,6 +144,7 @@ function freshState(){
     contrib: { Alex:{due:1002, verse:1002}, Sam:{due:503, verse:503}, Lou:{due:499, verse:344.90} },
     ledgerLive: false,
     coproName: 'ACP Démo',
+    reserveTarget: 2000,
     ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
     imports: [
       {v:4, label:'Relevé mai 2026', meta:'2 juin · 5 transactions ajoutées · 2 doublons', cur:true},
