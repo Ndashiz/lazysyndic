@@ -55,7 +55,7 @@
 
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
-    const tables = ['ls_owners','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports'];
+    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports'];
     const res = {};
     await Promise.all(tables.map(async t=>{
       const {data, error} = await sb.from(t).select('*');
@@ -81,8 +81,11 @@
       contrib: settings.contrib || {},
       ledgerLive: !!settings.ledger_live,
       reserveTarget: Number(settings.reserve_target||2000),
+      ibanMap: settings.iban_map || {},
       coproName: settings.copro_name || '',
-      owners: ownersRows.map(r=>({n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53'})),
+      budgetKeys: settings.budget_keys || {},
+      owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53'})),
+      lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
     };
   }
 

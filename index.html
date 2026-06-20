@@ -509,12 +509,7 @@
 
       <!-- ARCHIVE -->
       <div class="mini-h" style="margin-top:36px">AG précédentes — finalisées</div>
-      <div class="card">
-        <div class="hist"><span class="v" style="width:auto">2025</span><div><b>AG ordinaire — 18 juin 2025</b><div class="meta">3 présents · 6 points · tous adoptés</div></div>
-          <div style="margin-left:auto;display:flex;gap:8px"><button class="rb">📄 PV</button><button class="rb">✉ Convocation</button><button class="rb ag-annexes" data-year="2025">📊 Annexes</button></div></div>
-        <div class="hist"><span class="v" style="width:auto">2024</span><div><b>AG ordinaire — 20 juin 2024</b><div class="meta">2 présents, 1 représenté · 5 points</div></div>
-          <div style="margin-left:auto;display:flex;gap:8px"><button class="rb">📄 PV</button><button class="rb">✉ Convocation</button><button class="rb ag-annexes" data-year="2024">📊 Annexes</button></div></div>
-      </div>
+      <div class="card" id="agArchive"></div>
     </section>
 
     <!-- ============ CONTRATS ============ -->
@@ -563,33 +558,17 @@
 
       <div class="budpanel" data-bud="own">
         <div class="card" style="margin-bottom:16px;padding:8px 14px">
-          <table>
-            <tr><th>Lot</th><th>Désignation</th><th class="num">Quotité</th><th>Identifiant parcellaire</th><th>Propriétaire</th></tr>
-            <tr><td>Lot 1</td><td>Appartement RDC</td><td class="num">448</td><td>PARCELLE-0001</td><td><b>Alex Martin</b></td></tr>
-            <tr><td>Lot 2</td><td>Logement 1er étage</td><td class="num">251</td><td>PARCELLE-0002</td><td><b>Sam Bernard</b></td></tr>
-            <tr><td>Lot 3</td><td>Logement 2ème étage</td><td class="num">249</td><td>PARCELLE-0003</td><td><b>Lou Petit</b></td></tr>
-            <tr><td>Lot 4</td><td>Garage</td><td class="num">52</td><td>PARCELLE-0004</td><td><b>Alex Martin</b></td></tr>
-            <tr><td colspan="2"><b>Total</b></td><td class="num"><b>1000</b></td><td colspan="2" class="sub">Acte de base — source faisant foi</td></tr>
-          </table>
+          <table id="budLotsTable"></table>
         </div>
         <div class="mini-h">Propriétaires (unité de répartition)</div>
-        <div class="card" style="padding:8px 14px"><table>
-          <tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th><th>Accès</th></tr>
-          <tr><td><div class="who"><span class="a" style="background:#2F6B53">S</span> Alex Martin</div></td><td>RDC + Garage</td><td class="num">500</td><td><span class="badge b-ok">Syndic · Admin</span></td></tr>
-          <tr><td><div class="who"><span class="a" style="background:#5B4B86">P</span> Sam Bernard</div></td><td>1er étage</td><td class="num">251</td><td><span class="badge" style="background:var(--green-soft);color:var(--green-deep)">Lecture</span></td></tr>
-          <tr><td><div class="who"><span class="a" style="background:#C9854A">A</span> Lou Petit</div></td><td>2ème étage</td><td class="num">249</td><td><span class="badge" style="background:var(--green-soft);color:var(--green-deep)">Lecture · Commissaire</span></td></tr>
-        </table></div>
+        <div class="card" style="padding:8px 14px"><table id="budOwnersRefTable"></table></div>
       </div>
 
       <div class="budpanel" data-bud="keys" style="display:none">
         <div class="card" style="padding:8px 14px">
-          <table>
-            <tr><th>Clé</th><th>Mode de répartition</th><th>Exemple sur 300 €</th><th>Statut</th></tr>
-            <tr><td><b>Acte de base</b></td><td>Quote-part — au prorata des millièmes (× /1000)</td><td class="sub">Alex 150 € · Sam 75,30 € · Lou 74,70 €</td><td><span class="badge b-ok">Active</span></td></tr>
-            <tr><td><b>Individuelle</b></td><td>À parts égales — ÷ nombre de propriétaires (÷ 3)</td><td class="sub">Alex 100 € · Sam 100 € · Lou 100 €</td><td><span class="badge b-ok">Active</span></td></tr>
-          </table>
+          <table id="budKeysTable"></table>
         </div>
-        <div class="note">La clé Individuelle compte chaque propriétaire une seule fois — Alex (2 lots) paie une part, pas deux.</div>
+        <div class="note" id="budKeysNote">La clé Individuelle compte chaque propriétaire une seule fois.</div>
       </div>
 
       <div class="budpanel" data-bud="bud" style="display:none">

@@ -136,6 +136,7 @@ function freshState(){
     // remplacé par le calcul dérivé quand ledgerLive passe à true.
     contrib: { Alex:{due:1002, verse:1002}, Sam:{due:503, verse:503}, Lou:{due:499, verse:344.90} },
     ledgerLive: false,
+    ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
     imports: [
       {v:4, label:'Relevé mai 2026', meta:'2 juin · 5 transactions ajoutées · 2 doublons', cur:true},
       {v:3, label:'Relevé mars 2026', meta:'4 avr. · 7 transactions'},
@@ -437,6 +438,8 @@ let parsedHeaders = null;  // en-têtes de la table de transactions
 let mapping = null;        // {date,tiers,amount,credit,debit,note,type}
 let dateOrder = 'dmy';     // 'dmy' ou 'mdy' (détecté sur le fichier)
 let importMeta = null;     // {opening,closing,from,to,iban,holder} si dispo
+let ibanDetected = false;  // compte déduit automatiquement de l'IBAN ?
+const normIban = s => String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'');
 
 // Parse CSV : détecte le séparateur, gère les guillemets.
 function parseCSV(text){
@@ -620,8 +623,10 @@ function signature(t){
 // identique existe DÉJÀ dans le store (les doublons légitimes intra-fichier,
 // ex. deux virements identiques le même jour, sont conservés).
 function interpret(){
-  const existingCount = {};
-  state.tx.forEach(t=>{ const s=signature(t); existingCount[s]=(existingCount[s]||0)+1; });
+  // index des transactions déjà en mémoire, par signature (multiset)
+  const existingBySig = {};
+  state.tx.forEach(t=>{ const s=signature(t); (existingBySig[s]=existingBySig[s]||[]).push(t); });
+  const usedCount = {};
   const out = [];
   parsedRows.forEach(cells=>{
     const d = parseImportDate(cells[mapping.date], dateOrder);
@@ -640,8 +645,12 @@ function interpret(){
     const cat = categorize(extractTiers(rawTiers), note, type);
     const t = {date:d.disp, tiers:cat.tiers||rawTiers||'—', high:cat.high, sub:cat.sub, amount, account:importTargetAcct, note};
     const sig = signature(t);
-    if (existingCount[sig] > 0){ t._dupe = true; existingCount[sig]--; }
-    else t._dupe = false;
+    const matches = existingBySig[sig] || [];
+    const used = usedCount[sig] || 0;
+    if (used < matches.length){ t._dupe = true; t._match = matches[used]; usedCount[sig] = used + 1; } // doublon d'une tx existante
+    else { t._dupe = false; }
+    t._skip = false;   // exclu manuellement
+    t._force = false;  // doublon réimporté volontairement
     out.push(t);
   });
   return out;
@@ -662,16 +671,20 @@ function showMapping(){
     <select class="fld mapsel" data-f="${f}" style="width:100%;margin-top:4px">${withNone?'<option value="-1">— aucune —</option>':''}${opt(mapping[f])}</select></div>`;
   // bandeau métadonnées si le préambule en fournit
   const m = importMeta||{};
+  const acctLabel = importTargetAcct==='res'?'compte de réserve':'compte de paiement';
   const metaBanner = (!isNaN(m.opening)||m.iban||m.holder) ? `
     <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)">
       <span class="ic">✓</span><div>Relevé détecté${m.holder?` — <b>${m.holder}</b>`:''}${m.iban?` · ${m.iban}`:''}.
       ${!isNaN(m.opening)?`Solde d'ouverture <b>${eur(m.opening)}</b>`:''}${!isNaN(m.closing)?` → clôture <b>${eur(m.closing)}</b>`:''}.
-      ${(m.from||m.to)?`Période ${m.from} → ${m.to}.`:''}</div></div>` : '';
+      ${(m.from||m.to)?` Période ${m.from} → ${m.to}.`:''}
+      ${m.iban ? (ibanDetected
+        ? `<br><b>Compte reconnu via l'IBAN : ${acctLabel}.</b>`
+        : `<br>IBAN inconnu — choisissez le compte ci-dessous, il sera <b>mémorisé</b> pour cet IBAN.`) : ''}</div></div>` : '';
   live.innerHTML = `
     ${metaBanner}
     <div class="card" style="margin-bottom:16px">
       <div class="h-row"><div><h2>Associer les colonnes</h2><div class="sub">${parsedRows.length} ligne(s) de transaction · format de date détecté : <b>${dateOrder==='mdy'?'mois/jour (US)':'jour/mois'}</b></div></div>
-        <select class="fld" id="mapAcct">
+        <select class="fld" id="mapAcct" title="${ibanDetected?'Détecté via IBAN':'Mémorisé pour cet IBAN'}">
           <option value="pay" ${importTargetAcct==='pay'?'selected':''}>→ Compte de paiement</option>
           <option value="res" ${importTargetAcct==='res'?'selected':''}>→ Compte de réserve</option>
         </select></div>
@@ -700,49 +713,101 @@ function showMapping(){
 }
 
 const IMPORT_OPTS = ['Énergie','Assurance','Frais ACP','Entretien','Charges','Fonds de réserve','À catégoriser'];
-function showPreview(){
-  interpreted = interpret();
-  const box = document.getElementById('previewBox');
-  const nNew = interpreted.filter(t=>!t._dupe).length;
-  const nDupe = interpreted.filter(t=>t._dupe).length;
-  const nUncat = interpreted.filter(t=>!t._dupe && t.high==='?').length;
-  const rows = interpreted.map((t,i)=>{
-    const amtClass = t.amount>=0?'pos':'neg';
-    const sel = t._dupe
-      ? `<span class="cat">${t.high==='?'?'À catégoriser':t.high}</span>`
-      : `<select class="fld previewcat" data-i="${i}">${IMPORT_OPTS.map(o=>{
-          const val = o==='À catégoriser'?'?':o;
-          return `<option value="${val}" ${(t.high===val||(o==='À catégoriser'&&t.high==='?'))?'selected':''}>${o}</option>`;
-        }).join('')}</select>`;
-    return `<tr class="${t._dupe?'dupe':''}"><td>${t.date}</td><td><b>${t.tiers}</b></td>
-      <td class="num ${t._dupe?'':amtClass}">${signed(t.amount)}</td>
-      <td>${sel}</td>
-      <td>${t._dupe?'<span class="badge" style="background:var(--line-2);color:var(--ink-faint)">Doublon écarté</span>':(t.high==='?'?'<span class="badge b-late">À catégoriser</span>':'<span class="badge b-ok">Nouvelle</span>')}</td></tr>`;
-  }).join('');
+let previewCssDone = false;
+function ensurePreviewCss(){
+  if (previewCssDone) return; previewCssDone = true;
+  const s=document.createElement('style');
+  s.textContent=`
+    .pv-row.dup>td{background:var(--coral-soft)}
+    .pv-row.dup>td:first-child{box-shadow:inset 3px 0 0 var(--coral)}
+    .pv-row.skip>td{opacity:.4}
+    .pv-orig{font-size:11.5px;color:var(--coral);margin-top:3px;display:flex;align-items:center;gap:5px}
+    .lk{all:unset;cursor:pointer;font-size:12px;font-weight:600;color:var(--green)}
+    .lk.del{color:var(--coral)} .lk:hover{text-decoration:underline}`;
+  document.head.appendChild(s);
+}
+function importStats(){
+  const active = interpreted.filter(t=>!t._skip);
+  return {
+    nNew:  active.filter(t=>!t._dupe || t._force).length,
+    nDupe: active.filter(t=>t._dupe && !t._force).length,
+    nSkip: interpreted.filter(t=>t._skip).length,
+    nUncat:active.filter(t=>(!t._dupe||t._force) && t.high==='?').length,
+  };
+}
+function renderPreviewRow(t,i){
+  const amtClass=t.amount>=0?'pos':'neg';
+  const isDupe=t._dupe && !t._force;
+  const cls='pv-row'+(t._skip?' skip':(isDupe?' dup':''));
+  const catCell = isDupe
+    ? `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}</span>`
+    : `<select class="fld previewcat" data-i="${i}" ${t._skip?'disabled':''}>${IMPORT_OPTS.map(o=>{
+        const v=o==='À catégoriser'?'?':o;
+        return `<option value="${v}" ${(t.high===v||(o==='À catégoriser'&&t.high==='?'))?'selected':''}>${o}</option>`;
+      }).join('')}</select>`;
+  let status, actions;
+  if (t._skip){
+    status='<span class="badge" style="background:var(--line-2);color:var(--ink-faint)">Ignorée</span>';
+    actions=`<button class="lk" data-act="unskip" data-i="${i}">réintégrer</button>`;
+  } else if (isDupe){
+    status='<span class="badge b-late">Doublon</span>';
+    actions=`<button class="lk" data-act="force" data-i="${i}">importer qd même</button> · <button class="lk del" data-act="skip" data-i="${i}">supprimer</button>`;
+  } else {
+    status = t.high==='?'
+      ? '<span class="badge b-late">À catégoriser</span>'
+      : (t._force?'<span class="badge" style="background:var(--clay-soft);color:#8A551F">Doublon forcé</span>':'<span class="badge b-ok">Nouvelle</span>');
+    actions=`<button class="lk del" data-act="skip" data-i="${i}">supprimer</button>`;
+  }
+  const orig = isDupe && t._match
+    ? `<div class="pv-orig">↳ déjà en mémoire : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
+  return `<tr class="${cls}"><td>${t.date}</td><td><b>${t.tiers}</b>${orig}</td>
+    <td class="num ${isDupe?'':amtClass}">${signed(t.amount)}</td>
+    <td>${catCell}</td><td>${status}</td>
+    <td style="text-align:right;white-space:nowrap">${actions}</td></tr>`;
+}
+function paintPreview(){
+  ensurePreviewCss();
+  const box=document.getElementById('previewBox');
+  const {nNew,nDupe,nSkip,nUncat}=importStats();
   box.innerHTML = `
-    ${nUncat?`<div class="alert"><span class="ic">⚠</span><div><b>${nUncat} transaction(s) non reconnue(s).</b> Choisissez une catégorie ci-dessous, ou ajoutez une règle dans « Règles & alias ».</div></div>`:''}
-    <div class="mini-h">Validation — vérifiez les catégories proposées</div>
+    ${nUncat?`<div class="alert"><span class="ic">⚠</span><div><b>${nUncat} transaction(s) non reconnue(s).</b> Choisissez une catégorie, ou ajoutez une règle dans « Règles & alias ».</div></div>`:''}
+    <div class="mini-h">Validation — catégories, doublons (en rouge) &amp; suppression</div>
     <div class="card" style="padding:8px 14px">
-      <table><tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Catégorie</th><th>Statut</th></tr>
-      <tbody>${rows}</tbody></table>
+      <table><tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Catégorie</th><th>Statut</th><th></th></tr>
+      <tbody>${interpreted.map((t,i)=>renderPreviewRow(t,i)).join('')}</tbody></table>
     </div>
     <div class="save-bar">
-      <div class="n"><b>${nNew} nouvelle(s)</b> transaction(s) · <b>${nDupe} doublon(s)</b> écarté(s) → ${importTargetAcct==='res'?'compte de réserve':'compte de paiement'}</div>
+      <div class="n"><b>${nNew} à importer</b> · ${nDupe} doublon(s) écarté(s)${nSkip?` · ${nSkip} supprimée(s)`:''} → ${importTargetAcct==='res'?'compte de réserve':'compte de paiement'}</div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-ghost" id="cancelImp2">Annuler</button>
-        <button class="btn btn-primary" id="saveImp2">Valider &amp; sauvegarder</button>
+        <button class="btn btn-primary" id="saveImp2" ${nNew?'':'disabled style="opacity:.5"'}>Valider &amp; sauvegarder</button>
       </div>
     </div>`;
-  box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{ interpreted[+s.dataset.i].high = s.value; });
+  box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{ interpreted[+s.dataset.i].high=s.value; paintPreview(); });
+  box.querySelectorAll('.lk').forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.i, t=interpreted[i];
+    if(b.dataset.act==='skip') t._skip=true;
+    else if(b.dataset.act==='unskip'){ t._skip=false; t._force=false; }
+    else if(b.dataset.act==='force') t._force=true;
+    paintPreview();
+  });
   box.querySelector('#cancelImp2').onclick = resetImport;
   box.querySelector('#saveImp2').onclick = commitImport;
 }
+function showPreview(){ interpreted = interpret(); paintPreview(); }
 
 async function commitImport(){
   if(!canWrite()){ alert('Lecture seule : seul le syndic peut importer.'); return; }
-  const toAdd = interpreted.filter(t=>!t._dupe).map(t=>{ const {_dupe, ...rest}=t; return rest; });
+  // à importer = non supprimées ET (nouvelles OU doublons forcés)
+  const toAdd = interpreted
+    .filter(t=>!t._skip && (!t._dupe || t._force))
+    .map(t=>{ const {_dupe,_match,_skip,_force, ...rest}=t; return rest; });
+  if (!toAdd.length){ alert('Aucune transaction à importer.'); return; }
   const nextV = (state.imports[0]?.v || 0) + 1;
   const imp = {v:nextV, label:`Import ${new Date().toLocaleDateString('fr-BE')}`, meta:`${toAdd.length} transaction(s) ajoutée(s)`, cur:true};
+  // mémoriser l'IBAN → compte (détection apprenante)
+  const ibanKey = importMeta && importMeta.iban ? normIban(importMeta.iban) : null;
+  const learnIban = ibanKey && (!state.ibanMap || state.ibanMap[ibanKey]!==importTargetAcct);
   if (ONLINE){
     try {
       const saved = await window.LS.db.addTransactions(toAdd);   // renvoie les lignes avec id
@@ -751,11 +816,16 @@ async function commitImport(){
       const savedImp = await window.LS.db.addImport(imp);
       state.imports.forEach(im=>im.cur=false);
       state.imports.unshift({id:savedImp.id, ...imp});
+      if (learnIban){
+        state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:importTargetAcct};
+        await window.LS.db.updateSettings({iban_map: state.ibanMap});
+      }
     } catch(e){ console.error(e); alert('Import non enregistré : '+(e.message||e)); return; }
   } else {
     state.tx.push(...toAdd);
     state.imports.forEach(im=>im.cur=false);
     state.imports.unshift(imp);
+    if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:importTargetAcct};
     saveState();
   }
   resetImport();
@@ -794,6 +864,10 @@ function handleFile(file){
     if (mapping.date<0) mapping.date=0;
     if (mapping.amount<0 && mapping.credit<0 && mapping.debit<0) mapping.amount=Math.min(parsedHeaders.length-1, 2);
     dateOrder = detectDateOrder(parsedRows.map(r=>r[mapping.date]));
+    // détection du compte via l'IBAN (apprise aux imports précédents)
+    ibanDetected = false;
+    const key = meta && meta.iban ? normIban(meta.iban) : null;
+    if (key && state.ibanMap && state.ibanMap[key]){ importTargetAcct = state.ibanMap[key]; ibanDetected = true; }
     showImportScreen();
     showMapping();
   };
@@ -1118,38 +1192,92 @@ document.getElementById('budseg')?.addEventListener('click',e=>{
   document.querySelectorAll('.budpanel').forEach(p=>p.style.display=p.dataset.bud===b.dataset.bud?'block':'none');
 });
 const MARGIN=1.04;
-const POSTES=[
-  {p:'Eau (Vivaqua)',k:'quote',r:620},
-  {p:'Électricité communs (Electrabel)',k:'quote',r:188},
-  {p:'Assurance habitation',k:'quote',r:430},
-  {p:'RC civile (AXA)',k:'indiv',r:142},
-  {p:'Frais bancaires (Swan)',k:'indiv',r:79},
-  {p:'Frais logiciel (syndic)',k:'indiv',r:120},
-  {p:'Entretien adoucisseur',k:'quote',r:122},
-];
-const RESERVE={Alex:80,Sam:40,Lou:40};
+const ownersById = ()=>{ const m={}; ownersOf().forEach(o=>{ if(o.id) m[o.id]=o; }); return m; };
+const lotsOf = ()=> state.lots || [];
+
+// --- Onglet « Copropriétaires & lots » (référentiel réel) ---
+function renderBudgetOwn(){
+  const lt=document.getElementById('budLotsTable');
+  const by=ownersById();
+  const lots=lotsOf().slice().sort((a,b)=>String(a.label).localeCompare(String(b.label),'fr',{numeric:true}));
+  if (lt){
+    if (!lots.length){
+      lt.innerHTML='<tr><td class="sub" style="padding:14px">Aucun lot enregistré.</td></tr>';
+    } else {
+      const total=sum(lots.map(l=>l.quotite||0));
+      lt.innerHTML='<tr><th>Lot</th><th>Désignation</th><th class="num">Quotité</th><th>Identifiant parcellaire</th><th>Propriétaire</th></tr>'
+        + lots.map(l=>`<tr><td>${l.label||''}</td><td>${l.designation||''}</td><td class="num">${l.quotite||0}</td><td>${l.parcelle||'—'}</td><td><b>${(by[l.owner_id]||{}).n||'—'}</b></td></tr>`).join('')
+        + `<tr><td colspan="2"><b>Total</b></td><td class="num"><b>${total}</b></td><td colspan="2" class="sub">Acte de base — source faisant foi</td></tr>`;
+    }
+  }
+  const ot=document.getElementById('budOwnersRefTable');
+  if (ot){
+    const ow=ownersOf();
+    if (!ow.length){ ot.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
+    ot.innerHTML='<tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th></tr>'
+      + ow.map(o=>{
+          const mine=lotsOf().filter(l=>l.owner_id===o.id).map(l=>l.designation||l.label).join(', ')||'—';
+          return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td><td>${mine}</td><td class="num">${o.q}</td></tr>`;
+        }).join('');
+  }
+}
+
+// --- Onglet « Clés de répartition » (exemple calculé sur les vrais propriétaires) ---
+function renderKeys(){
+  const t=document.getElementById('budKeysTable'); if(!t) return;
+  const ow=ownersOf();
+  if (!ow.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Renseignez les propriétaires pour visualiser les clés.</td></tr>'; return; }
+  const tot=sum(ow.map(o=>o.q))||1000, n=ow.length;
+  const ex=fn=>ow.map(o=>`${o.short||o.n} ${eur(fn(o))}`).join(' · ');
+  t.innerHTML='<tr><th>Clé</th><th>Mode de répartition</th><th>Exemple sur 300 €</th></tr>'
+    + `<tr><td><b>Acte de base</b></td><td>Quote-part — au prorata des millièmes (× /${tot})</td><td class="sub">${ex(o=>300*o.q/tot)}</td></tr>`
+    + `<tr><td><b>Individuelle</b></td><td>À parts égales — ÷ nombre de propriétaires (÷ ${n})</td><td class="sub">${ex(()=>300/n)}</td></tr>`;
+  const note=document.getElementById('budKeysNote');
+  if(note) note.textContent=`La clé Individuelle compte chaque propriétaire une seule fois (÷ ${n}), même s'il détient plusieurs lots.`;
+}
+
+// --- Onglet « Budget » : postes dérivés des vraies dépenses ---
+const defaultKey = high => high==='Frais ACP' ? 'indiv' : 'quote';
+function budgetPostes(){
+  const by={};
+  state.tx.filter(t=>t.amount<0).forEach(t=>{
+    const label=(t.high==='?'?'À catégoriser':t.high)+(t.sub?(' · '+t.sub):'');
+    by[label]=by[label]||{label, high:t.high, r:0};
+    by[label].r+=Math.abs(t.amount);
+  });
+  return Object.values(by).sort((a,b)=>b.r-a.r).map(p=>({...p, k:(state.budgetKeys&&state.budgetKeys[p.label])||defaultKey(p.high)}));
+}
+function persistBudgetKeys(){
+  if(!ONLINE) return;
+  window.LS.db.updateSettings({budget_keys: state.budgetKeys}).catch(()=>{}); // best-effort
+}
 function renderBudget(){
   const t=document.getElementById('budTable'); if(!t) return;
-  t.innerHTML='<tr><th>Poste</th><th>Clé</th><th class="num">Réalité 25</th><th class="num">Budget 26</th></tr>';
-  POSTES.forEach((po,i)=>{
+  const ow=ownersOf(); const tot=sum(ow.map(o=>o.q))||1000, n=ow.length||1;
+  const postes=budgetPostes();
+  t.innerHTML='<tr><th>Poste</th><th>Clé</th><th class="num">Réalité</th><th class="num">Budget (+4 %)</th></tr>';
+  if (!postes.length){
+    t.insertAdjacentHTML('beforeend','<tr><td colspan="4" class="sub" style="padding:14px">Aucune dépense enregistrée — importez un relevé pour bâtir le budget.</td></tr>');
+  }
+  postes.forEach((po,i)=>{
     const bud=po.r*MARGIN;
-    t.insertAdjacentHTML('beforeend',`<tr><td>${po.p}</td>
+    t.insertAdjacentHTML('beforeend',`<tr><td>${po.label}</td>
       <td><select class="fld budkey" data-i="${i}"><option value="quote" ${po.k==='quote'?'selected':''}>Quote-part</option><option value="indiv" ${po.k==='indiv'?'selected':''}>Individuelle</option></select></td>
       <td class="num">${eur(po.r)}</td><td class="num"><b>${eur(bud)}</b></td></tr>`);
   });
-  t.querySelectorAll('.budkey').forEach(s=>s.onchange=()=>{POSTES[s.dataset.i].k=s.value;renderBudget();});
-  const split={Alex:0,Sam:0,Lou:0};
-  POSTES.forEach(po=>{
-    const bud=po.r*MARGIN;
-    if(po.k==='indiv'){const each=bud/3;split.Alex+=each;split.Sam+=each;split.Lou+=each;}
-    else{split.Alex+=bud*500/1000;split.Sam+=bud*251/1000;split.Lou+=bud*249/1000;}
+  t.querySelectorAll('.budkey').forEach(s=>s.onchange=()=>{
+    if(!canWrite()){ s.value=postes[s.dataset.i].k; alert('Lecture seule.'); return; }
+    state.budgetKeys=state.budgetKeys||{}; state.budgetKeys[postes[s.dataset.i].label]=s.value;
+    persistBudgetKeys(); renderBudget();
   });
-  const ot=document.getElementById('budOwners');
-  ot.innerHTML='<tr><th>Propriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th><th class="num">Fonds de réserve</th></tr>';
-  [['Alex','#2F6B53'],['Sam','#5B4B86'],['Lou','#C9854A']].forEach(([n,c])=>{
-    ot.insertAdjacentHTML('beforeend',`<tr><td><div class="who"><span class="a" style="width:24px;height:24px;background:${c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${n[0]}</span> ${n}</div></td>
-      <td class="num"><b>${eur(split[n])}</b></td><td class="num">${eur(split[n]/12)}</td><td class="num">${eur(RESERVE[n])}/mois</td></tr>`);
+  const split={}; ow.forEach(o=>split[o.short||o.n]=0);
+  postes.forEach(po=>{ const bud=po.r*MARGIN;
+    ow.forEach(o=>{ split[o.short||o.n]+= po.k==='indiv' ? bud/n : bud*o.q/tot; });
   });
+  const ot=document.getElementById('budOwners'); if(!ot) return;
+  ot.innerHTML='<tr><th>Propriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>'
+    + ow.map(o=>{ const k=o.short||o.n; return `<tr><td><div class="who"><span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${k[0]}</span> ${o.n}</div></td>
+      <td class="num"><b>${eur(split[k]||0)}</b></td><td class="num">${eur((split[k]||0)/12)}</td></tr>`; }).join('');
 }
 // genBudget câblé dans la section GÉNÉRATEUR DE RAPPORTS (Annexe 4).
 
@@ -1225,6 +1353,10 @@ function renderChrome(){
   const f=document.getElementById('resFill'); if(f){ f.dataset.w=pct; f.style.width=pct+'%'; }
   set('updatedDate', new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'}));
 }
+function renderAGArchive(){
+  const box=document.getElementById('agArchive'); if(!box) return;
+  box.innerHTML='<div class="sub" style="padding:14px">Aucune assemblée archivée pour le moment. Les AG finalisées apparaîtront ici.</div>';
+}
 function renderAll(){
   renderChrome();
   renderDashboard();
@@ -1235,7 +1367,10 @@ function renderAll(){
   renderContracts();
   renderRules();
   renderAliases();
+  renderBudgetOwn();
+  renderKeys();
   renderBudget();
+  renderAGArchive();
   renderImports();
   animateBars();
 }
