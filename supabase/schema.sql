@@ -112,6 +112,7 @@ create table if not exists public.ls_settings (
   opening_res    numeric(12,2) default 0,
   reserve_target numeric(12,2) default 2000,
   contrib        jsonb default '{}'::jsonb,
+  iban_map       jsonb default '{}'::jsonb,   -- IBAN normalisé → 'pay' | 'res'
   ledger_live    boolean default false
 );
 insert into public.ls_settings (id) values (1) on conflict (id) do nothing;
