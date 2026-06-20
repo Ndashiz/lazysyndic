@@ -462,6 +462,67 @@ function parseCSV(text){
   return rows.filter(r=>r.some(c=>String(c).trim()!==''));
 }
 
+// Parse un relevé PDF (Swan/Syndic4you) → mêmes colonnes qu'un CSV :
+// Date | Type | Description | Crédit | Débit. Reconstruit les lignes par
+// position (y = ligne, x = colonne) via pdf.js.
+async function parsePdfStatement(arrayBuffer){
+  if (typeof pdfjsLib === 'undefined') throw new Error('Lecteur PDF non chargé');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+  let items = [];
+  for (let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const vh = page.getViewport({scale:1}).height;
+    const tc = await page.getTextContent();
+    const pageOff = (p-1)*100000;   // pages empilées verticalement
+    tc.items.forEach(it=>{
+      if (!it.str || !it.str.trim()) return;
+      items.push({ str:it.str, x:it.transform[4], y:pageOff + (vh - it.transform[5]) });
+    });
+  }
+  // regrouper en lignes (même y ± tolérance), puis trier par x
+  items.sort((a,b)=> Math.abs(a.y-b.y)>3 ? a.y-b.y : a.x-b.x);
+  const rows=[]; let cur=null;
+  items.forEach(it=>{
+    if (!cur || Math.abs(it.y-cur.y)>3){ cur={y:it.y, items:[it]}; rows.push(cur); }
+    else cur.items.push(it);
+  });
+  rows.forEach(r=>r.items.sort((a,b)=>a.x-b.x));
+  const joined = rows.map(r=>r.items.map(i=>i.str).join(' ')).join('\n');
+
+  // métadonnées
+  const meta={}; let m;
+  if ((m=joined.match(/ouverture[^\d]{0,8}([\d.\s]*\d,\d{2})/i))) meta.opening=parseAmount(m[1]);
+  if ((m=joined.match(/cl[oô]ture[^\d]{0,8}([\d.\s]*\d,\d{2})/i))) meta.closing=parseAmount(m[1]);
+  if ((m=joined.match(/Du\s+(\d{2}\/\d{2}\/\d{4})\s+au\s+(\d{2}\/\d{2}\/\d{4})/i))){ meta.from=m[1]; meta.to=m[2]; }
+  if ((m=joined.match(/IBAN\s+([A-Z]{2}[0-9A-Z][0-9A-Z \t]{8,})/))) meta.iban=m[1].replace(/\s+/g,' ').trim();
+
+  // lignes de transaction : commencent par une date JJ/MM/AAAA, finissent par 2 montants
+  const isNum = s => /^-?\d[\d.\s  ]*,\d{2}$/.test(String(s).trim());
+  const data=[];
+  rows.forEach(r=>{
+    const its=r.items; if(!its.length) return;
+    if(!/^\d{2}\/\d{2}\/\d{4}$/.test(its[0].str.trim())) return;     // pas une ligne de transaction
+    const date=its[0].str.trim();
+    const nums=its.slice(1).filter(i=>isNum(i.str));
+    if(nums.length<2) return;                                        // besoin crédit + débit
+    const credit=nums[nums.length-2].str.trim();
+    const debit =nums[nums.length-1].str.trim();
+    const firstNumX=nums[nums.length-2].x;
+    const middle=its.slice(1).filter(i=>!isNum(i.str) && i.x<firstNumX-1).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
+    let type='', desc=middle;
+    const tm=middle.match(/^(Frais|Virement|Pr[ée]l[èe]vement automatique|Pr[ée]l[èe]vement|Paiement|Domiciliation|Ch[èe]que)\s*(.*)$/i);
+    if(tm){ type=tm[1]; desc=tm[2].trim(); }
+    data.push([date, type, desc||type||'—', credit, debit]);
+  });
+  // solde d'ouverture : déduit de clôture − (Σ crédits − Σ débits) si non lu directement
+  if ((meta.opening===undefined || isNaN(meta.opening)) && !isNaN(meta.closing)){
+    const net = data.reduce((a,r)=> a + (parseAmount(r[3])||0) - (parseAmount(r[4])||0), 0);
+    meta.opening = +(meta.closing - net).toFixed(2);
+  }
+  return { headers:['Date','Type','Description','Crédit','Débit'], data, meta };
+}
+
 // Beaucoup de relevés (Swan/Syndic4you…) ont un préambule de métadonnées
 // avant la vraie table. On localise la ligne d'en-tête et on récupère le reste.
 function detectTable(rows){
@@ -709,14 +770,23 @@ function resetImport(){
   if (after){ after.style.display='none'; const live=document.getElementById('importLive'); if(live) live.remove(); }
 }
 
-// Lecture d'un fichier déposé / choisi
+// Lecture d'un fichier déposé / choisi (CSV ou PDF)
 function handleFile(file){
   if (!file) return;
+  const isPdf = /\.pdf$/i.test(file.name||'') || file.type==='application/pdf';
   const reader = new FileReader();
-  reader.onload = e=>{
-    const rows = parseCSV(e.target.result);
-    if (rows.length < 2){ alert('Fichier vide ou illisible.'); return; }
-    const {headers, data, meta} = detectTable(rows);
+  reader.onload = async e=>{
+    let headers, data, meta;
+    try {
+      if (isPdf){
+        ({headers, data, meta} = await parsePdfStatement(e.target.result));
+      } else {
+        const rows = parseCSV(e.target.result);
+        if (rows.length < 2){ alert('Fichier vide ou illisible.'); return; }
+        ({headers, data, meta} = detectTable(rows));
+      }
+    } catch(err){ console.error(err); alert('Lecture du fichier impossible : '+(err.message||err)); return; }
+    if (!data || !data.length){ alert('Aucune transaction détectée dans ce fichier.'); return; }
     parsedHeaders = headers.map(h=>String(h).trim());
     parsedRows = data;
     importMeta = meta;
@@ -727,14 +797,14 @@ function handleFile(file){
     showImportScreen();
     showMapping();
   };
-  reader.readAsText(file, 'utf-8');
+  if (isPdf) reader.readAsArrayBuffer(file); else reader.readAsText(file, 'utf-8');
 }
 
 let fileInput;
 function pickFile(){
   if (!fileInput){
     fileInput = document.createElement('input');
-    fileInput.type='file'; fileInput.accept='.csv,text/csv,text/plain'; fileInput.style.display='none';
+    fileInput.type='file'; fileInput.accept='.csv,.pdf,text/csv,text/plain,application/pdf'; fileInput.style.display='none';
     fileInput.onchange = e=>{ handleFile(e.target.files[0]); fileInput.value=''; };
     document.body.appendChild(fileInput);
   }
@@ -836,13 +906,13 @@ document.getElementById('genConv')?.addEventListener('click',()=>{
   const points=POINTS.map((p,i)=>`${i+1}. ${p.t}${p.type==='Décision'?' ('+MAJ[p.maj]+')':' (information)'}`).join('\n');
   const eml=`From: Alex Martin (Syndic) <syndic@exemple.be>
 To: Lou Petit <lou@exemple.be>, Sam Bernard <sam@exemple.be>
-Subject: Convocation - Assemblee generale ordinaire - ACP DÃ©mo - 22 juin 2026
+Subject: Convocation - Assemblee generale ordinaire - ACP Démo - 22 juin 2026
 MIME-Version: 1.0
 Content-Type: text/plain; charset="utf-8"
 
 Madame, Monsieur, cher coproprietaire,
 
-En ma qualite de syndic benevole de l'ACP DÃ©mo, j'ai l'honneur de vous
+En ma qualite de syndic benevole de l'ACP Démo, j'ai l'honneur de vous
 convoquer a l'assemblee generale ORDINAIRE qui se tiendra :
 
     Date : le 22 juin 2026 a 19h00
@@ -858,7 +928,7 @@ ${points}
 Tout coproprietaire empeche peut se faire representer par procuration ecrite.
 
 Salutations distinguees,
-Alex Martin - Syndic benevole, ACP DÃ©mo
+Alex Martin - Syndic benevole, ACP Démo
 `;
   const blob=new Blob([eml],{type:'message/rfc822'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG-2026.eml';
@@ -1130,7 +1200,33 @@ document.getElementById('addAlias')?.addEventListener('click',()=>{
 /* ============================================================
    INIT
    ============================================================ */
+// En-têtes pilotés par les données (greeting, sidebar, bannière réserve).
+function renderChrome(){
+  const m = (window.LS && window.LS.member) || null;
+  const prenom = m ? (((m.full_name||'').trim().split(/\s+/)[0]) || m.owner_short || m.userEmail) : '';
+  const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  set('greet', prenom ? `Bonjour ${prenom} 👋` : 'Bonjour 👋');
+  // sidebar : copropriété + utilisateur connecté
+  const ow = ownersOf(); const total = sum(ow.map(o=>o.q||0));
+  set('sideCopro', state.coproName || 'Ma copropriété');
+  set('sideMeta', `${ow.length} propriétaire${ow.length>1?'s':''} · ${total}/1000`);
+  if (m){
+    set('sideAv', (prenom[0]||'·').toUpperCase());
+    set('sideUser', prenom||'—');
+    set('sideRole', m.role==='admin' ? 'Syndic · Admin' : 'Lecture seule');
+  }
+  // bannière fonds de réserve (dérivée)
+  const resBal = balance('res'), tgt = state.reserveTarget||0;
+  const pct = tgt>0 ? Math.min(100, Math.round(resBal/tgt*100)) : 0;
+  set('resAmt', eur(resBal));
+  set('resTarget2', `/ ${tgt.toLocaleString('fr-BE',{maximumFractionDigits:0})} €`);
+  set('resRemain', eur(Math.max(0, tgt-resBal)));
+  set('resPct', `${pct} % de l'objectif atteint`);
+  const f=document.getElementById('resFill'); if(f){ f.dataset.w=pct; f.style.width=pct+'%'; }
+  set('updatedDate', new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'}));
+}
 function renderAll(){
+  renderChrome();
   renderDashboard();
   renderReminders();
   refreshAccountChrome();
@@ -1292,7 +1388,7 @@ boot();
    Tout est dérivé du store, filtré sur la période choisie.
    ============================================================ */
 (function setupReports(){
-  const COPRO = { name:'ACP DÃ©mo', addr:'1 rue Exemple, 1000 Ville', kbo:'BE 0000.000.000' };
+  const COPRO = { name:'ACP Démo', addr:'1 rue Exemple, 1000 Ville', kbo:'BE 0000.000.000' };
 
   /* ---- CSS rapport + impression ---- */
   const css = document.createElement('style');

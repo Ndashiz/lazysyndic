@@ -81,6 +81,7 @@
       contrib: settings.contrib || {},
       ledgerLive: !!settings.ledger_live,
       reserveTarget: Number(settings.reserve_target||2000),
+      coproName: settings.copro_name || '',
       owners: ownersRows.map(r=>({n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53'})),
     };
   }
