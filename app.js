@@ -120,6 +120,13 @@ const SEED_OPENING = { pay:1358.70, res:358.62 };
 const CONFIGURED = !!(window.LS && window.LS.configured);
 const ONLINE = !!(window.LS && window.LS.hasClient);
 const LS_KEY = 'lazysyndic.v1';
+// MODE DÉMO : l'admin teste en prod sur des données fictives locales ;
+// aucune écriture ne part vers Supabase. Activé via l'icône de compte.
+const DEMO_FLAG = 'lazysyndic.demo';
+const DEMO_KEY  = 'lazysyndic.demo.state';
+let demoMode = ONLINE && localStorage.getItem(DEMO_FLAG)==='1';
+// On écrit dans Supabase seulement en ligne ET hors mode démo.
+const writeToDb = () => ONLINE && !demoMode;
 let state = CONFIGURED ? freshState() : loadState();   // si configuré, remplacé par boot()
 const unlockApp = ()=>document.documentElement.classList.remove('ls-locked');
 const lockApp   = ()=>document.documentElement.classList.add('ls-locked');
@@ -136,6 +143,7 @@ function freshState(){
     // remplacé par le calcul dérivé quand ledgerLive passe à true.
     contrib: { Alex:{due:1002, verse:1002}, Sam:{due:503, verse:503}, Lou:{due:499, verse:344.90} },
     ledgerLive: false,
+    coproName: 'ACP Démo',
     ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
     imports: [
       {v:4, label:'Relevé mai 2026', meta:'2 juin · 5 transactions ajoutées · 2 doublons', cur:true},
@@ -153,14 +161,17 @@ function loadState(){
   return freshState();
 }
 function saveState(){
+  if (demoMode){ try { localStorage.setItem(DEMO_KEY, JSON.stringify(state)); } catch(e){} return; }
   if (ONLINE) return; // en ligne, la persistance passe par les écritures Supabase ciblées
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
   catch(e){ console.warn('Sauvegarde impossible', e); }
 }
-const canWrite = () => !ONLINE || (window.LS && window.LS.canWrite);
+// En démo, l'admin peut tout éditer localement. Sinon : hors-ligne, ou admin Supabase.
+const canWrite = () => demoMode || !ONLINE || (window.LS && window.LS.canWrite);
 // Persistance Supabase tolérante : exécute l'écriture, signale et recharge en cas d'échec.
+// En mode démo, on n'écrit jamais dans Supabase (les changements restent locaux).
 async function dbWrite(fn){
-  if (!ONLINE) return;
+  if (!writeToDb()) return;
   try { await fn(window.LS.db); }
   catch(e){ console.error(e); alert('Action non enregistrée : '+(e.message||e)); }
 }
@@ -808,7 +819,7 @@ async function commitImport(){
   // mémoriser l'IBAN → compte (détection apprenante)
   const ibanKey = importMeta && importMeta.iban ? normIban(importMeta.iban) : null;
   const learnIban = ibanKey && (!state.ibanMap || state.ibanMap[ibanKey]!==importTargetAcct);
-  if (ONLINE){
+  if (writeToDb()){
     try {
       const saved = await window.LS.db.addTransactions(toAdd);   // renvoie les lignes avec id
       state.tx.push(...saved);
@@ -822,7 +833,8 @@ async function commitImport(){
       }
     } catch(e){ console.error(e); alert('Import non enregistré : '+(e.message||e)); return; }
   } else {
-    state.tx.push(...toAdd);
+    // démo ou hors-ligne : tout reste local
+    state.tx.push(...toAdd.map((t,i)=>({id:'local-'+Date.now()+'-'+i, ...t})));
     state.imports.forEach(im=>im.cur=false);
     state.imports.unshift(imp);
     if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:importTargetAcct};
@@ -830,7 +842,7 @@ async function commitImport(){
   }
   resetImport();
   renderAll();
-  alert(`✓ ${toAdd.length} transaction(s) sauvegardée(s) — version v${nextV} créée.`);
+  alert(`✓ ${toAdd.length} transaction(s) ${demoMode?'ajoutées (démo, non enregistrées en base)':'sauvegardée(s) — version v'+nextV+' créée'}.`);
 }
 
 function resetImport(){
@@ -1341,7 +1353,15 @@ function renderChrome(){
   if (m){
     set('sideAv', (prenom[0]||'·').toUpperCase());
     set('sideUser', prenom||'—');
-    set('sideRole', m.role==='admin' ? 'Syndic · Admin' : 'Lecture seule');
+    set('sideRole', demoMode ? '🧪 Mode démo — cliquer pour quitter'
+                    : (m.role==='admin' ? 'Syndic · Admin' : 'Lecture seule'));
+  }
+  // icône de compte = bascule du mode démo (admin réel uniquement)
+  const userBox = document.querySelector('.side-foot .user');
+  if (userBox && isRealAdmin()){
+    userBox.classList.add('clickable');
+    userBox.title = demoMode ? 'Quitter le mode démo' : 'Activer le mode démo (test en prod)';
+    userBox.onclick = ()=>toggleDemo();
   }
   // bannière fonds de réserve (dérivée)
   const resBal = balance('res'), tgt = state.reserveTarget||0;
@@ -1385,18 +1405,64 @@ function applyRoleUI(){
   const ro = ONLINE && !canWrite();
   document.body.classList.toggle('readonly', ro);
 }
+function loadDemoState(){
+  try { const raw=localStorage.getItem(DEMO_KEY); if(raw) return JSON.parse(raw); } catch(e){}
+  return freshState();
+}
 async function bootData(){
-  try {
-    state = await window.LS.db.loadAll();
-    if (state.owners && state.owners.length) OWNERS = state.owners;
-  } catch(e){
-    console.error(e);
-    alert('Chargement des données impossible : '+(e.message||e));
-    state = freshState();
+  if (demoMode){
+    state = loadDemoState();
+    OWNERS = (state.owners && state.owners.length) ? state.owners
+      : [{n:'Alex Martin',short:'Alex',q:500,c:'#2F6B53'},{n:'Sam Bernard',short:'Sam',q:251,c:'#5B4B86'},{n:'Lou Petit',short:'Lou',q:249,c:'#C9854A'}];
+  } else {
+    try {
+      state = await window.LS.db.loadAll();
+      if (state.owners && state.owners.length) OWNERS = state.owners;
+    } catch(e){
+      console.error(e);
+      alert('Chargement des données impossible : '+(e.message||e));
+      state = freshState();
+    }
   }
   applyRoleUI();
+  applyDemoUI();
   renderAll();
 }
+
+/* ----- MODE DÉMO ----- */
+function injectDemoCSS(){
+  if (document.getElementById('demoCss')) return;
+  const s=document.createElement('style'); s.id='demoCss';
+  s.textContent=`
+    #demoBanner{position:fixed;top:0;left:0;right:0;z-index:90;display:none;align-items:center;justify-content:center;gap:10px;
+      background:repeating-linear-gradient(45deg,#C9854A,#C9854A 14px,#b9783f 14px,#b9783f 28px);
+      color:#2A1B0C;font-size:12.5px;font-weight:700;padding:5px 12px;letter-spacing:.02em}
+    #demoBanner button{all:unset;cursor:pointer;background:#2A1B0C;color:#F4E9D9;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px}
+    body.demo #demoBanner{display:flex}
+    body.demo .app{outline:3px solid var(--clay);outline-offset:-3px}
+    body.demo{padding-top:0}
+    .side-foot .user.clickable{cursor:pointer;transition:.15s}
+    .side-foot .user.clickable:hover{background:rgba(255,255,255,.12)}`;
+  document.head.appendChild(s);
+  if (!document.getElementById('demoBanner')){
+    const b=document.createElement('div'); b.id='demoBanner';
+    b.innerHTML=`🧪 MODE DÉMO — données fictives, rien n'est enregistré dans la base <button id="demoExit">Quitter la démo</button>`;
+    document.body.appendChild(b);
+    b.querySelector('#demoExit').onclick=()=>toggleDemo(false);
+  }
+}
+function applyDemoUI(){
+  injectDemoCSS();
+  document.body.classList.toggle('demo', !!demoMode);
+}
+function isRealAdmin(){ return !!(window.LS && window.LS.canWrite); }
+function toggleDemo(force){
+  if (!isRealAdmin()) return;                    // réservé à l'admin réel
+  const next = (typeof force==='boolean') ? force : !demoMode;
+  if (next) localStorage.setItem(DEMO_FLAG,'1'); else localStorage.removeItem(DEMO_FLAG);
+  location.reload();                             // boot rechargera dans le bon mode
+}
+window.LazySyndic.toggleDemo = toggleDemo;
 
 /* ----- écran de connexion ----- */
 function injectLoginCSS(){
@@ -1505,7 +1571,10 @@ async function boot(){
         await window.LS.auth.signOut();
         return;
       }
-      bar.querySelector('#sbWho').innerHTML = `${member.full_name||member.userEmail} ${member.role==='admin'?'· <b>Syndic</b>':'· <span class="ro">Lecture seule</span>'}`;
+      // le mode démo est réservé à l'admin réel
+      if (demoMode && member.role!=='admin'){ demoMode=false; localStorage.removeItem(DEMO_FLAG); }
+      const demoTag = demoMode ? ' · <b style="color:var(--clay)">🧪 Démo</b>' : '';
+      bar.querySelector('#sbWho').innerHTML = `${member.full_name||member.userEmail} ${member.role==='admin'?'· <b>Syndic</b>':'· <span class="ro">Lecture seule</span>'}${demoTag}`;
       await bootData();          // charge les données
       ov.classList.remove('on');
       bar.classList.add('on');
@@ -1672,23 +1741,22 @@ boot();
       <table><tr><th>Date</th><th>Tiers</th><th>Catégorie</th><th class="num">Montant</th><th>Communication</th></tr>${rows}</table>`;
   }
   function budgetSection(){
-    const rows = POSTES.map(po=>{
-      const bud = po.r*MARGIN;
-      const key = po.k==='indiv'?'Individuelle (÷3)':'Quote-part (millièmes)';
-      return `<tr><td>${po.p}</td><td>${key}</td><td class="num">${eur(po.r)}</td><td class="num"><b>${eur(bud)}</b></td></tr>`;
-    }).join('');
-    const split={Alex:0,Sam:0,Lou:0};
-    POSTES.forEach(po=>{ const bud=po.r*MARGIN;
-      if(po.k==='indiv'){const e=bud/3;split.Alex+=e;split.Sam+=e;split.Lou+=e;}
-      else{split.Alex+=bud*500/1000;split.Sam+=bud*251/1000;split.Lou+=bud*249/1000;} });
-    const totR=sum(POSTES.map(p=>p.r)), totB=totR*MARGIN;
-    const ow = [['Alex Martin','Alex'],['Sam Bernard','Sam'],['Lou Petit','Lou']].map(([n,k])=>
-      `<tr><td>${n}</td><td class="num"><b>${eur(split[k])}</b></td><td class="num">${eur(split[k]/12)}</td><td class="num">${eur(RESERVE[k])}/mois</td></tr>`).join('');
+    const ow=ownersOf(); const tot=sum(ow.map(o=>o.q))||1000, n=ow.length||1;
+    const postes=budgetPostes();
+    const rows = postes.map(po=>{
+      const bud=po.r*MARGIN;
+      const key = po.k==='indiv'?('Individuelle (÷'+n+')'):'Quote-part (millièmes)';
+      return `<tr><td>${po.label}</td><td>${key}</td><td class="num">${eur(po.r)}</td><td class="num"><b>${eur(bud)}</b></td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="r-sub">Aucune dépense sur la période.</td></tr>';
+    const split={}; ow.forEach(o=>split[o.short||o.n]=0);
+    postes.forEach(po=>{ const bud=po.r*MARGIN; ow.forEach(o=>{ split[o.short||o.n]+= po.k==='indiv'?bud/n:bud*o.q/tot; }); });
+    const totR=sum(postes.map(p=>p.r)), totB=totR*MARGIN;
+    const owRows = ow.map(o=>{ const k=o.short||o.n; return `<tr><td>${o.n}</td><td class="num"><b>${eur(split[k]||0)}</b></td><td class="num">${eur((split[k]||0)/12)}</td></tr>`; }).join('');
     return `<h2>Annexe 4 — Budget prévisionnel (marge +4 %)</h2>
       <table><tr><th>Poste</th><th>Clé de répartition</th><th class="num">Réalité</th><th class="num">Budget</th></tr>
         ${rows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(totR)}</td><td class="num">${eur(totB)}</td></tr></table>
       <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Charge annuelle par copropriétaire</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th><th class="num">Fonds de réserve</th></tr>${ow}</table>`;
+      <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>${owRows}</table>`;
   }
   function signatures(){
     return `<div class="sig">
