@@ -1,0 +1,665 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LazySyndic — Maquette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F4F0E6; --card:#FBF8F1; --card-2:#F7F2E7;
+    --ink:#20251F; --ink-soft:#5C6153; --ink-faint:#8A8F80;
+    --green:#2F6B53; --green-deep:#21503D; --green-soft:#E2ECE3;
+    --clay:#C9854A; --clay-soft:#F2E2CE;
+    --coral:#C2564A; --coral-soft:#F4DCD6;
+    --line:#E6DECE; --line-2:#EFE9DB;
+    --shadow:0 1px 2px rgba(33,40,30,.04),0 8px 24px rgba(33,40,30,.06);
+    --radius:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Hanken Grotesk',sans-serif;background:var(--paper);color:var(--ink);
+    -webkit-font-smoothing:antialiased;line-height:1.5;
+    background-image:radial-gradient(circle at 1px 1px, rgba(33,40,30,.025) 1px, transparent 0);
+    background-size:22px 22px;}
+  .app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+
+  /* ---- Sidebar ---- */
+  .side{background:var(--green-deep);color:#EAF1E8;padding:26px 18px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+  .brand{font-family:'Fraunces',serif;font-size:25px;font-weight:600;letter-spacing:-.01em;padding:0 8px 4px;display:flex;align-items:center;gap:9px}
+  .brand .z{font-style:italic;color:var(--clay)}
+  .brand-sub{font-size:11.5px;color:#9DB6A6;padding:0 8px 22px;letter-spacing:.02em}
+  .nav{display:flex;flex-direction:column;gap:3px}
+  .nav button{all:unset;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;font-size:14.5px;font-weight:500;color:#C8D6CC;cursor:pointer;transition:.18s}
+  .nav button .ic{width:18px;text-align:center;opacity:.85}
+  .nav button:hover{background:rgba(255,255,255,.06);color:#fff}
+  .nav button.on{background:var(--clay);color:#2A1B0C;font-weight:600}
+  .nav button.on .ic{opacity:1}
+  .side-foot{margin-top:auto;padding:14px 10px 2px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;color:#9DB6A6}
+  .side-foot b{color:#EAF1E8;font-weight:600}
+  .user{display:flex;align-items:center;gap:10px;margin-top:14px;padding:8px 10px;background:rgba(255,255,255,.06);border-radius:12px}
+  .av{width:30px;height:30px;border-radius:50%;background:var(--clay);color:#2A1B0C;display:grid;place-items:center;font-weight:700;font-size:13px}
+
+  /* ---- Main ---- */
+  .main{padding:30px 40px 60px;max-width:1180px}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:26px;flex-wrap:wrap;gap:12px}
+  .top h1{font-family:'Fraunces',serif;font-size:30px;font-weight:600;letter-spacing:-.015em}
+  .top .crumb{font-size:12.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
+  .updated{font-size:12.5px;color:var(--ink-soft);background:var(--card);border:1px solid var(--line);padding:7px 13px;border-radius:30px;display:flex;align-items:center;gap:7px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+
+  .screen{display:none;animation:fade .5s ease both}
+  .screen.on{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  .grid{display:grid;gap:18px}
+  .g2{grid-template-columns:1.3fr 1fr}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow)}
+  .card h2{font-family:'Fraunces',serif;font-size:17px;font-weight:600;margin-bottom:2px}
+  .card .h-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}
+  .card .sub{font-size:12.5px;color:var(--ink-faint)}
+  .pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:30px;background:var(--green-soft);color:var(--green-deep)}
+
+  /* reserve target */
+  .reserve-banner{background:linear-gradient(105deg,var(--green-deep),var(--green));color:#EAF1E8;border:none}
+  .reserve-banner h2{color:#fff}
+  .rb-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
+  .rb-amt{font-family:'Fraunces',serif;font-size:30px;font-weight:600;color:#fff}
+  .rb-amt span{font-size:15px;color:#A9C6B5;font-weight:400}
+  .rb-goal{text-align:right;font-size:13px;color:#BFD6C7}
+  .track{height:12px;border-radius:30px;background:rgba(255,255,255,.16);overflow:hidden}
+  .fill{height:100%;border-radius:30px;background:var(--clay);width:0;transition:width 1.2s cubic-bezier(.2,.7,.2,1)}
+  .rb-meta{display:flex;justify-content:space-between;font-size:12px;color:#BFD6C7;margin-top:9px}
+
+  /* KPI row */
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  .kpi{background:var(--card-2);border:1px solid var(--line-2);border-radius:14px;padding:13px 15px}
+  .kpi .l{font-size:12px;color:var(--ink-faint)}
+  .kpi .v{font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:2px}
+
+  /* AG widget */
+  .ag{display:flex;gap:14px;align-items:center;padding:13px;border:1px dashed var(--line);border-radius:13px;background:var(--card-2)}
+  .ag .cal{width:50px;height:54px;border-radius:11px;background:var(--coral-soft);color:var(--coral);display:grid;place-items:center;text-align:center;flex:0 0 auto}
+  .ag .cal b{font-family:'Fraunces',serif;font-size:21px;display:block;line-height:1}
+  .ag .cal span{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
+  .ag .info b{font-size:14.5px}
+  .ag .info div{font-size:12.5px;color:var(--ink-soft)}
+  .countdown{margin-left:auto;text-align:right}
+  .countdown b{font-family:'Fraunces',serif;font-size:20px;color:var(--clay)}
+  .countdown span{font-size:11px;color:var(--ink-faint);display:block}
+
+  /* owners table */
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+  td{padding:11px 10px;font-size:13.5px;border-bottom:1px solid var(--line-2)}
+  tr:last-child td{border-bottom:none}
+  .num{font-variant-numeric:tabular-nums;text-align:right}
+  .badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:30px}
+  .b-ok{background:var(--green-soft);color:var(--green-deep)}
+  .b-late{background:var(--coral-soft);color:var(--coral)}
+  .who{display:flex;align-items:center;gap:9px}
+  .who .a{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff}
+
+  /* donut */
+  .donut-wrap{display:flex;gap:22px;align-items:center}
+  .donut{width:120px;height:120px;border-radius:50%;flex:0 0 auto;
+    background:conic-gradient(var(--green) 0 56%,var(--clay) 56% 78%,#7BA98E 78% 90%,var(--coral) 90% 100%);
+    position:relative;mask:radial-gradient(circle 34px at 50% 50%,transparent 98%,#000 100%)}
+  .legend{display:flex;flex-direction:column;gap:9px;font-size:13px}
+  .legend div{display:flex;align-items:center;gap:9px}
+  .sw{width:11px;height:11px;border-radius:3px}
+  .legend .pct{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+
+  /* reminders */
+  .rem{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--line-2);cursor:pointer}
+  .rem:last-child{border-bottom:none}
+  .chk{width:20px;height:20px;border-radius:6px;border:2px solid var(--ink-faint);flex:0 0 auto;display:grid;place-items:center;transition:.15s;color:#fff;font-size:12px}
+  .rem.done .chk{background:var(--green);border-color:var(--green)}
+  .rem.done .tx{text-decoration:line-through;color:var(--ink-faint)}
+  .rem .tx{font-size:13.5px}
+  .rem .due{margin-left:auto;font-size:11.5px;color:var(--ink-faint)}
+  .add-rem{margin-top:12px;font-size:13px;color:var(--green);font-weight:600;cursor:pointer;background:none;border:none;padding:4px}
+
+  /* filters / controls */
+  .controls{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .seg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:11px;padding:3px}
+  .seg button{all:unset;padding:7px 15px;font-size:13px;font-weight:600;color:var(--ink-soft);border-radius:8px;cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+  select,.fld{font-family:inherit;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
+  .toggle{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none}
+  .tg{width:38px;height:22px;border-radius:30px;background:var(--line);position:relative;transition:.2s}
+  .tg::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .toggle.on .tg{background:var(--coral)}
+  .toggle.on .tg::after{left:19px}
+
+  /* transactions */
+  .cat{font-size:11px;font-weight:600;padding:3px 9px;border-radius:8px;background:var(--green-soft);color:var(--green-deep);white-space:nowrap}
+  .cat.ass{background:#E6E0F0;color:#5B4B86}
+  .cat.acp{background:var(--clay-soft);color:#8A551F}
+  .cat.ent{background:#DCEBEE;color:#36707C}
+  .cat.in{background:#DDEBDD;color:#2F6B53}
+  .tx-row td{transition:background .2s}
+  .tx-row.flag td{background:var(--clay-soft)}
+  .tx-row.flag td:first-child{box-shadow:inset 3px 0 0 var(--clay)}
+  .flagbtn{all:unset;cursor:pointer;font-size:15px;opacity:.3;transition:.15s}
+  .flagbtn:hover{opacity:.7}
+  .tx-row.flag .flagbtn{opacity:1}
+  .neg{color:var(--coral);font-weight:600}
+  .pos{color:var(--green);font-weight:600}
+  .cmt{font-size:12px;color:var(--clay);font-style:italic;margin-top:3px;display:flex;align-items:center;gap:5px}
+  .cmt-add{font-size:11.5px;color:var(--ink-faint);cursor:pointer;margin-top:3px}
+
+  /* import */
+  .drop{border:2px dashed var(--line);border-radius:var(--radius);background:var(--card-2);padding:46px;text-align:center;transition:.2s;cursor:pointer}
+  .drop:hover,.drop.hot{border-color:var(--green);background:var(--green-soft)}
+  .drop .big{font-size:34px;margin-bottom:8px}
+  .drop b{font-family:'Fraunces',serif;font-size:18px}
+  .drop p{font-size:13px;color:var(--ink-soft);margin-top:4px}
+  .alert{display:flex;gap:11px;align-items:center;background:var(--coral-soft);border:1px solid #E8BDB4;color:#8C342A;padding:12px 16px;border-radius:13px;font-size:13.5px;margin:18px 0}
+  .alert .ic{font-size:18px}
+  .dupe td{opacity:.45;font-style:italic}
+  .dupe .cat{background:var(--line-2);color:var(--ink-faint)}
+  .btn{font-family:inherit;font-weight:600;font-size:14px;padding:11px 22px;border-radius:11px;border:none;cursor:pointer;transition:.18s}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-primary:hover{background:var(--green-deep)}
+  .btn-ghost{background:var(--card);border:1px solid var(--line);color:var(--ink)}
+  .save-bar{display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding:16px 20px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
+  .save-bar .n{font-size:13.5px;color:var(--ink-soft)}
+  .save-bar .n b{color:var(--ink)}
+
+  .hist{display:flex;align-items:center;gap:14px;padding:13px 4px;border-bottom:1px solid var(--line-2);font-size:13.5px}
+  .hist:last-child{border-bottom:none}
+  .hist .v{font-family:'Fraunces',serif;font-weight:600;width:46px}
+  .hist .meta{color:var(--ink-soft);font-size:12.5px}
+  .hist .rb{margin-left:auto;font-size:12.5px;color:var(--green);font-weight:600;background:var(--green-soft);border:none;padding:6px 13px;border-radius:9px;cursor:pointer}
+  .hist.cur .v{color:var(--green)}
+  .hist.cur .now{margin-left:auto;font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.05em}
+
+  .note{font-size:12px;color:var(--ink-faint);margin-top:18px;text-align:center;font-style:italic}
+  .mini-h{font-family:'Fraunces',serif;font-size:13px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;margin:26px 0 10px}
+  @media(max-width:860px){.app{grid-template-columns:1fr}.side{display:none}.g2{grid-template-columns:1fr}.main{padding:22px}}
+</style>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="side">
+    <div class="brand">Lazy<span class="z">Syndic</span></div>
+    <div class="brand-sub">La copro en pilote automatique</div>
+    <nav class="nav">
+      <button class="on" data-s="dash"><span class="ic">◆</span> Accueil</button>
+      <button data-s="acc"><span class="ic">▤</span> Comptes</button>
+      <button data-s="imp"><span class="ic">↧</span> Import</button>
+      <button data-s="ag"><span class="ic">◷</span> Assemblées</button>
+      <button data-s="ct"><span class="ic">▦</span> Contrats</button>
+      <button data-s="budget"><span class="ic">⚖</span> Budget &amp; copro</button>
+      <button data-s="rules"><span class="ic">⚲</span> Règles &amp; alias</button>
+    </nav>
+    <div class="side-foot">
+      ACP <b>DÃ©mo</b><br>3 propriétaires · 1000/1000
+      <div class="user"><div class="av">S</div><div style="font-size:13px;color:#EAF1E8;font-weight:600">Alex<br><span style="font-size:11px;color:#9DB6A6;font-weight:400">Admin</span></div></div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ============ DASHBOARD ============ -->
+    <section class="screen on" id="dash">
+      <div class="top">
+        <div><div class="crumb">Page de garde</div><h1>Bonjour Alex 👋</h1></div>
+        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b style="margin-left:3px">2 juin 2026</b></div>
+      </div>
+
+      <div class="grid g2" style="margin-bottom:18px">
+        <!-- reserve target -->
+        <div class="card reserve-banner">
+          <div class="h-row"><h2>Fonds de réserve</h2><span class="pill" style="background:rgba(255,255,255,.18);color:#fff">Objectif global</span></div>
+          <div class="rb-top">
+            <div class="rb-amt">496,43 € <span>/ 2 000 €</span></div>
+            <div class="rb-goal">Reste à constituer<br><b style="color:#fff;font-size:15px">1 503,57 €</b></div>
+          </div>
+          <div class="track"><div class="fill" data-w="25"></div></div>
+          <div class="rb-meta"><span>25 % de l'objectif atteint</span><span>Cible fixée en AG</span></div>
+        </div>
+        <!-- kpis -->
+        <div class="card">
+          <div class="h-row"><h2>Soldes</h2><span class="sub">au 2 juin</span></div>
+          <div class="kpis">
+            <div class="kpi"><div class="l">Compte de paiement</div><div class="v">895,25 €</div></div>
+            <div class="kpi"><div class="l">Compte de réserve</div><div class="v">496,43 €</div></div>
+            <div class="kpi"><div class="l">À recevoir</div><div class="v" style="color:var(--green)">+154,10 €</div></div>
+            <div class="kpi"><div class="l">À payer</div><div class="v" style="color:var(--coral)">−0,00 €</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-bottom:18px">
+        <!-- owners -->
+        <div class="card">
+          <div class="h-row"><div><h2>Qui paie quoi</h2><div class="sub">Exercice 2025 · par propriétaire</div></div></div>
+          <table>
+            <tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû</th><th class="num">Versé</th><th class="num">Solde</th><th></th></tr>
+            <tr><td><div class="who"><span class="a" style="background:#2F6B53">S</span> Alex Martin</div></td><td class="num">500</td><td class="num">1 002 €</td><td class="num">1 002 €</td><td class="num">0 €</td><td><span class="badge b-ok">À jour</span></td></tr>
+            <tr><td><div class="who"><span class="a" style="background:#5B4B86">P</span> Sam Bernard</div></td><td class="num">251</td><td class="num">503 €</td><td class="num">503 €</td><td class="num">0 €</td><td><span class="badge b-ok">À jour</span></td></tr>
+            <tr><td><div class="who"><span class="a" style="background:#C9854A">A</span> Lou Petit</div></td><td class="num">249</td><td class="num">499 €</td><td class="num">345 €</td><td class="num" style="color:var(--coral)">−154 €</td><td><span class="badge b-late">En retard</span></td></tr>
+          </table>
+        </div>
+        <!-- reminders -->
+        <div class="card">
+          <div class="h-row"><h2>Pense-bête</h2><span class="sub">2 / 4 faits</span></div>
+          <div id="rems">
+            <div class="rem done"><div class="chk">✓</div><div class="tx">Envoyer la convocation AG 2026</div><div class="due">fait</div></div>
+            <div class="rem"><div class="chk"></div><div class="tx">Contacter le plombier — fuite cave</div><div class="due">cette sem.</div></div>
+            <div class="rem"><div class="chk"></div><div class="tx">Relancer Sam pour le solde</div><div class="due">15 juin</div></div>
+            <div class="rem done"><div class="chk">✓</div><div class="tx">Importer relevé Swan de mai</div><div class="due">fait</div></div>
+          </div>
+          <button class="add-rem">+ Ajouter un rappel</button>
+        </div>
+      </div>
+
+      <!-- transactions / donut -->
+      <div class="card">
+        <div class="h-row"><div><h2>Répartition des dépenses</h2><div class="sub">Exercice 2025 · par catégorie</div></div>
+          <select class="fld"><option>Toutes catégories</option><option>Énergie</option><option>Assurance</option><option>Frais ACP</option></select></div>
+        <div class="donut-wrap">
+          <div class="donut"></div>
+          <div class="legend" style="flex:1">
+            <div><span class="sw" style="background:var(--green)"></span> Énergie (Eau + Électricité) <span class="pct">56 %</span></div>
+            <div><span class="sw" style="background:var(--clay)"></span> Assurance <span class="pct">22 %</span></div>
+            <div><span class="sw" style="background:#7BA98E"></span> Entretien (adoucisseur) <span class="pct">12 %</span></div>
+            <div><span class="sw" style="background:var(--coral)"></span> Frais ACP (banque, logiciel) <span class="pct">10 %</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ COMPTES ============ -->
+    <section class="screen" id="acc">
+      <div class="top">
+        <div><div class="crumb">Comptes</div><h1>Transactions</h1></div>
+        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b style="margin-left:3px">2 juin 2026</b></div>
+      </div>
+
+      <div class="controls">
+        <div class="seg" id="acctseg">
+          <button class="on" data-acct="pay">Compte de paiement · 895,25 €</button>
+          <button data-acct="res">Compte de réserve · 496,43 €</button>
+        </div>
+      </div>
+
+      <!-- report generation -->
+      <div class="card" style="margin-bottom:16px;display:flex;align-items:end;gap:14px;flex-wrap:wrap">
+        <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Rapports — période</div>
+          <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
+            <input class="fld" id="repFrom" value="01/01/2025" style="width:120px"><span style="color:var(--ink-faint)">→</span><input class="fld" id="repTo" value="31/12/2025" style="width:120px">
+          </div>
+        </div>
+        <button class="btn btn-ghost" id="repPay">⬇ Rapport compte de paiement</button>
+        <button class="btn btn-ghost" id="repRes">⬇ Rapport compte de résultats</button>
+        <button class="btn btn-primary" id="repAG">📄 Rapport d'AG complet</button>
+      </div>
+
+      <!-- per-account import dropzone -->
+      <div class="drop" id="acctDrop" style="padding:22px;margin-bottom:16px">
+        <div style="font-size:24px">↧</div>
+        <b style="font-size:15px">Mettre à jour <span id="dropAcct">le compte de paiement</span></b>
+        <p>Glissez-déposez le relevé CSV de ce compte — doublons, trous et catégories sont vérifiés avant sauvegarde</p>
+      </div>
+
+      <!-- reserve target shows only on reserve tab -->
+      <div class="card reserve-banner" id="resTarget" style="display:none;margin-bottom:16px">
+        <div class="h-row"><h2>Objectif du fonds de réserve</h2><span class="pill" style="background:rgba(255,255,255,.18);color:#fff">Global</span></div>
+        <div class="rb-top"><div class="rb-amt">496,43 € <span>/ 2 000 €</span></div></div>
+        <div class="track"><div class="fill" data-w="25" style="width:25%"></div></div>
+        <div class="rb-meta"><span>25 % atteint</span><span>Reste 1 503,57 €</span></div>
+      </div>
+
+      <!-- key stats (payment account) -->
+      <div class="grid" id="statRow" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépenses moy. / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">111 €</div><div class="sub" style="margin-top:2px">sur 6 mois</div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrées moy. / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--green);margin-top:3px">119 €</div><div class="sub" style="margin-top:2px">écart +8 € · s'autofinance</div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Besoin en fonds de roulement <span title="Dépenses moy./mois × mois de couverture. Coussin pour payer les fournisseurs entre deux rentrées." style="cursor:help;color:var(--clay)">ⓘ</span></div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">333 €</div><div class="sub" style="margin-top:2px">couverture : <select class="fld" style="padding:2px 6px;font-size:12px;display:inline-block"><option>3 mois</option><option>1 mois</option><option>2 mois</option><option>6 mois</option></select></div></div>
+      </div>
+
+      <!-- key stats (payment account) -->
+      <div class="grid" id="statRow" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépense moyenne / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">−111 €</div><div class="sub" style="margin-top:2px">sur 6 mois · exercice 2025</div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrée moyenne / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--green);margin-top:3px">+119 €</div><div class="sub" style="margin-top:2px">provisions des copropriétaires</div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Besoin en fonds de roulement <span title="Découvert maximal cumulé sur l'exercice : le matelas à garder d'avance pour absorber les dépenses ponctuelles." style="cursor:help;color:var(--clay);font-weight:700">ⓘ</span></div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">≈ 380 €</div><div class="sub" style="margin-top:2px">creux de trésorerie atteint en mars</div></div>
+      </div>
+
+      <!-- monthly evolution chart -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="h-row"><div><h2>Évolution mensuelle</h2><div class="sub" id="chartSub">Compte de paiement · entrées, sorties &amp; solde</div></div>
+          <div style="display:flex;gap:14px;font-size:12px;color:var(--ink-soft)">
+            <span><span class="sw" style="display:inline-block;background:var(--green)"></span> Entrées</span>
+            <span><span class="sw" style="display:inline-block;background:var(--coral)"></span> Sorties</span>
+            <span><span class="sw" style="display:inline-block;background:var(--clay);border-radius:50%"></span> Solde</span>
+          </div>
+        </div>
+        <div id="chart"></div>
+      </div>
+
+      <div class="controls">
+        <select class="fld"><option>Toutes catégories</option><option>Énergie</option><option>Assurance</option><option>Frais ACP</option><option>Entretien</option><option>Charges</option></select>
+        <select class="fld"><option>Entrées + sorties</option><option>Sorties uniquement</option><option>Entrées uniquement</option></select>
+        <div class="toggle" id="flagFilter"><span class="tg"></span> Afficher seulement les transactions flaggées</div>
+      </div>
+
+      <div class="card" style="padding:8px 14px">
+        <table id="txtable">
+          <tr><th style="width:30px"></th><th>Date</th><th>Tiers</th><th>Catégorie</th><th class="num">Montant</th><th>Notes (banque)</th></tr>
+          <tbody id="txbody"></tbody>
+        </table>
+      </div>
+      <div class="note">Cliquez sur le ⚑ pour flagger une ligne · cliquez « + commentaire » pour annoter une transaction à revoir en AG.</div>
+
+      <!-- annual note -->
+      <div class="card" style="margin-top:8px">
+        <div class="h-row"><div><h2>Note annuelle</h2><div class="sub">Commentaire global sur l'évolution de l'exercice — repris en AG</div></div>
+          <select class="fld" style="font-size:12px"><option>Exercice 2025</option><option>Exercice 2024</option></select></div>
+        <div contenteditable class="fld" style="width:100%;min-height:74px;cursor:text;line-height:1.6;color:var(--ink-soft)">2025 : hausse sensible du poste Eau (Vivaqua) au T3. Fuite en cave réparée en mars (+ frais plombier). Régularisation Electrabel en notre faveur. Réserve en progression vers l'objectif de 2 000 €.</div>
+      </div>
+
+      <!-- global annual comment -->
+      <div class="card" style="margin-top:16px">
+        <div class="h-row"><div><h2>Note annuelle — évolution 2025</h2><div class="sub">Commentaire global du compte, repris dans le rapport d'AG</div></div><span class="pill" style="background:var(--clay-soft);color:#8A551F">Compte de paiement</span></div>
+        <textarea class="fld" style="width:100%;min-height:84px;resize:vertical;cursor:text;line-height:1.55" placeholder="Ex. : 2025 marquée par la régularisation Engie en mars (+368 €). Hausse de l'énergie à surveiller en 2026. Réserve en bonne progression.">2025 marquée par la régularisation Engie de mars. Énergie en hausse, à surveiller pour le budget 2026. Trésorerie saine, écart positif.</textarea>
+      </div>
+    </section>
+
+    <!-- ============ IMPORT ============ -->
+    <section class="screen" id="imp">
+      <div class="top">
+        <div><div class="crumb">Import</div><h1>Importer un relevé</h1></div>
+        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b style="margin-left:3px">2 juin 2026</b></div>
+      </div>
+
+      <div class="drop" id="drop">
+        <div class="big">↧</div>
+        <b>Glissez-déposez votre fichier CSV ici</b>
+        <p>Export Swan · ou cliquez pour parcourir — seules les données interprétées sont sauvegardées, pas le fichier</p>
+      </div>
+
+      <div id="afterDrop" style="display:none">
+        <div class="alert"><span class="ic">⚠</span> <div><b>Trou de période détecté.</b> Vos données s'arrêtaient au <b>31 mars</b> ; ce fichier démarre au <b>1ᵉʳ mai</b>. Le mois d'<b>avril</b> semble manquant.</div></div>
+
+        <div class="mini-h">Validation — vérifiez les catégories proposées</div>
+        <div class="card" style="padding:8px 14px">
+          <table>
+            <tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Catégorie proposée</th><th>Statut</th></tr>
+            <tbody id="valbody"></tbody>
+          </table>
+        </div>
+
+        <div class="save-bar">
+          <div class="n"><b>5 nouvelles</b> transactions · <b>2 doublons</b> écartés · période 01/05 → 31/05</div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-ghost" id="cancelImp">Annuler</button>
+            <button class="btn btn-primary" id="saveImp">Valider &amp; sauvegarder</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mini-h">Historique des imports &amp; versions</div>
+      <div class="card">
+        <div class="hist cur"><span class="v">v4</span><div><b>Relevé mai 2026</b><div class="meta">2 juin · 5 transactions ajoutées · 2 doublons</div></div><span class="now">Version actuelle</span></div>
+        <div class="hist"><span class="v">v3</span><div><b>Relevé mars 2026</b><div class="meta">4 avr. · 7 transactions</div></div><button class="rb">↺ Revenir à cette version</button></div>
+        <div class="hist"><span class="v">v2</span><div><b>Relevé février 2026</b><div class="meta">3 mars · 6 transactions</div></div><button class="rb">↺ Revenir à cette version</button></div>
+        <div class="hist"><span class="v">v1</span><div><b>Import initial 2025</b><div class="meta">12 janv. · 38 transactions</div></div><button class="rb">↺ Revenir à cette version</button></div>
+      </div>
+    </section>
+
+    <!-- ============ ASSEMBLÉES ============ -->
+    <section class="screen" id="ag">
+      <div class="top">
+        <div><div class="crumb">Assemblées générales</div><h1 id="agTitle">AG ordinaire 2026</h1></div>
+        <div class="updated" id="agStatus" style="background:var(--coral-soft);border-color:#E8BDB4;color:#8C342A"><span class="dot" style="background:var(--coral);box-shadow:0 0 0 3px var(--coral-soft)"></span> En cours de préparation</div>
+      </div>
+
+      <!-- STEPPER -->
+      <div class="card stepper" id="stepper">
+        <div class="step on" data-step="1"><div class="circ">1</div><div class="lbl">Configurer<br>l'agenda</div></div>
+        <div class="bar"></div>
+        <div class="step" data-step="2"><div class="circ">2</div><div class="lbl">Envoyer les<br>convocations</div></div>
+        <div class="bar"></div>
+        <div class="step" data-step="3"><div class="circ">3</div><div class="lbl">Enregistrer<br>les présences</div></div>
+        <div class="bar"></div>
+        <div class="step" data-step="4"><div class="circ">4</div><div class="lbl">Séance<br>en cours</div></div>
+        <div class="bar"></div>
+        <div class="step" data-step="5"><div class="circ">5</div><div class="lbl">Finaliser</div></div>
+      </div>
+
+      <!-- STEP 1 : agenda -->
+      <div class="agpanel" data-panel="1">
+        <div class="card" style="margin-bottom:16px">
+          <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:16px">
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date &amp; heure</div><input class="fld" style="width:100%;margin-top:4px" value="22 juin 2026 · 19h00"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Lieu</div><input class="fld" style="width:100%;margin-top:4px" value="Appartement RDC — sur place"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Type</div><select class="fld" style="width:100%;margin-top:4px"><option>Ordinaire</option><option>Extraordinaire</option></select></div>
+          </div>
+        </div>
+        <div class="mini-h">Ordre du jour — points ouverts &amp; documentés</div>
+        <div id="agenda"></div>
+        <button class="btn btn-ghost" id="addPoint" style="margin-top:6px">+ Ajouter un point</button>
+        <div class="save-bar" style="margin-top:18px">
+          <div class="n"><b id="ptCount">6 points</b> · une fois validé, on passe à l'envoi des convocations</div>
+          <button class="btn btn-primary nextStep">Valider l'agenda →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2 : send invites -->
+      <div class="agpanel" data-panel="2" style="display:none">
+        <div class="card">
+          <h2>Envoyer les convocations</h2>
+          <div class="sub" style="margin-bottom:16px">L'ordre du jour est figé. Choisissez la date d'envoi, générez le .eml et passez à la suite.</div>
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date d'envoi de l'email</div><input class="fld" type="text" style="width:100%;margin-top:4px" value="5 juin 2026"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Destinataires</div><input class="fld" style="width:100%;margin-top:4px" value="Lou Petit, Sam Bernard"></div>
+          </div>
+          <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)"><span class="ic">✓</span> Délai légal respecté : envoi 17 jours avant la séance (minimum 15 jours).</div>
+          <button class="btn btn-ghost" id="genConv">✉ Générer le .eml de convocation</button>
+        </div>
+        <div class="save-bar" style="margin-top:18px">
+          <div class="n">Convocations prêtes</div>
+          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary nextStep">Convocations envoyées →</button></div>
+        </div>
+      </div>
+
+      <!-- STEP 3 : presences -->
+      <div class="agpanel" data-panel="3" style="display:none">
+        <div class="card" id="quorumCard" style="margin-bottom:16px;background:var(--green-soft);border-color:#BcD6c2">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div><h2 style="font-family:'Fraunces',serif;font-size:16px">Quorum</h2><div class="sub" id="quorumTxt">—</div></div>
+            <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;color:var(--green-deep)"><span id="quorumNum">1000</span> / 1000 <span style="font-size:13px;font-weight:400;color:var(--ink-soft)">millièmes</span></div>
+          </div>
+        </div>
+        <div class="mini-h">Présences par propriétaire</div>
+        <div id="presences"></div>
+        <div class="save-bar" style="margin-top:18px">
+          <div class="n">Présences enregistrées</div>
+          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary nextStep">Ouvrir la séance →</button></div>
+        </div>
+      </div>
+
+      <!-- STEP 4 : in progress (vote) -->
+      <div class="agpanel" data-panel="4" style="display:none">
+        <div class="mini-h">Séance en cours — vote &amp; notes point par point</div>
+        <div id="seance"></div>
+        <div class="save-bar" style="margin-top:18px">
+          <div class="n">Votes et notes saisis pendant la séance</div>
+          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary nextStep">Clôturer la séance →</button></div>
+        </div>
+      </div>
+
+      <!-- STEP 5 : finish -->
+      <div class="agpanel" data-panel="5" style="display:none">
+        <div class="card" style="text-align:center;padding:36px">
+          <div style="font-size:40px">📄</div>
+          <h2 style="font-family:'Fraunces',serif;font-size:20px;margin-top:8px">Générer le procès-verbal</h2>
+          <div class="sub" style="max-width:460px;margin:8px auto 20px">Le PV reprend l'ordre du jour, les présences, les votes en quotités et les décisions. Vous obtenez un <b>document Word éditable</b> que vous pouvez retoucher avant diffusion.</div>
+          <button class="btn btn-primary" id="genPV">⬇ Générer le PV (Word)</button>
+        </div>
+        <div class="save-bar" style="margin-top:18px">
+          <div class="n">Document généré et relu ?</div>
+          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary" id="completeAG" style="background:var(--clay)">✓ AG complétée</button></div>
+        </div>
+      </div>
+
+      <!-- ARCHIVE -->
+      <div class="mini-h" style="margin-top:36px">AG précédentes — finalisées</div>
+      <div class="card">
+        <div class="hist"><span class="v" style="width:auto">2025</span><div><b>AG ordinaire — 18 juin 2025</b><div class="meta">3 présents · 6 points · tous adoptés</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px"><button class="rb">📄 PV</button><button class="rb">✉ Convocation</button><button class="rb ag-annexes" data-year="2025">📊 Annexes</button></div></div>
+        <div class="hist"><span class="v" style="width:auto">2024</span><div><b>AG ordinaire — 20 juin 2024</b><div class="meta">2 présents, 1 représenté · 5 points</div></div>
+          <div style="margin-left:auto;display:flex;gap:8px"><button class="rb">📄 PV</button><button class="rb">✉ Convocation</button><button class="rb ag-annexes" data-year="2024">📊 Annexes</button></div></div>
+      </div>
+    </section>
+
+    <!-- ============ CONTRATS ============ -->
+    <section class="screen" id="ct">
+      <div class="top">
+        <div><div class="crumb">Contrats</div><h1>Registre des contrats</h1></div>
+        <button class="btn btn-ghost" id="genCtReport">⬇ Générer un rapport</button>
+      </div>
+
+      <!-- add form -->
+      <div class="card" style="margin-bottom:18px">
+        <h2 style="margin-bottom:14px">Ajouter un contrat</h2>
+        <div class="grid" style="grid-template-columns:1.4fr 1fr 1fr 1fr;gap:12px;align-items:end">
+          <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Nom du contrat</div><input class="fld" id="ctName" style="width:100%;margin-top:4px" placeholder="Ex. Electrabel"></div>
+          <div><div class="l" style="font-size:12px;color:var(--ink-faint)">N° de référence</div><input class="fld" id="ctRef" style="width:100%;margin-top:4px" placeholder="8767id"></div>
+          <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Type</div><select class="fld" id="ctType" style="width:100%;margin-top:4px"><option>Énergie</option><option>Assurance</option><option>Entretien</option><option>Autre</option></select></div>
+          <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date de début</div><input class="fld" id="ctStart" type="text" style="width:100%;margin-top:4px" placeholder="21/01/25"></div>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:12px;align-items:end">
+          <div style="flex:1"><div class="l" style="font-size:12px;color:var(--ink-faint)">Commentaire</div><input class="fld" id="ctNote" style="width:100%;margin-top:4px" placeholder="Ex. électricité communs"></div>
+          <button class="btn btn-primary" id="ctAdd">+ Ajouter</button>
+        </div>
+      </div>
+
+      <div class="mini-h">Contrats actifs (<span id="ctActiveN">0</span>)</div>
+      <div class="card" style="padding:8px 14px"><table><tbody id="ctActiveBody"></tbody></table></div>
+
+      <div class="mini-h" style="margin-top:22px">Contrats clôturés (<span id="ctClosedN">0</span>)</div>
+      <div class="card" style="padding:8px 14px"><table><tbody id="ctClosedBody"></tbody></table></div>
+    </section>
+
+    <!-- ============ BUDGET & COPRO ============ -->
+    <section class="screen" id="budget">
+      <div class="top">
+        <div><div class="crumb">Budget &amp; copropriété</div><h1>Charges &amp; répartition</h1></div>
+        <button class="btn btn-ghost" id="genBudget">⬇ Générer le budget (Annexe 4)</button>
+      </div>
+
+      <div class="controls">
+        <div class="seg" id="budseg">
+          <button class="on" data-bud="own">Copropriétaires &amp; lots</button>
+          <button data-bud="keys">Clés de répartition</button>
+          <button data-bud="bud">Budget 2026</button>
+        </div>
+      </div>
+
+      <div class="budpanel" data-bud="own">
+        <div class="card" style="margin-bottom:16px;padding:8px 14px">
+          <table>
+            <tr><th>Lot</th><th>Désignation</th><th class="num">Quotité</th><th>Identifiant parcellaire</th><th>Propriétaire</th></tr>
+            <tr><td>Lot 1</td><td>Appartement RDC</td><td class="num">448</td><td>PARCELLE-0001</td><td><b>Alex Martin</b></td></tr>
+            <tr><td>Lot 2</td><td>Logement 1er étage</td><td class="num">251</td><td>PARCELLE-0002</td><td><b>Sam Bernard</b></td></tr>
+            <tr><td>Lot 3</td><td>Logement 2ème étage</td><td class="num">249</td><td>PARCELLE-0003</td><td><b>Lou Petit</b></td></tr>
+            <tr><td>Lot 4</td><td>Garage</td><td class="num">52</td><td>PARCELLE-0004</td><td><b>Alex Martin</b></td></tr>
+            <tr><td colspan="2"><b>Total</b></td><td class="num"><b>1000</b></td><td colspan="2" class="sub">Acte de base — source faisant foi</td></tr>
+          </table>
+        </div>
+        <div class="mini-h">Propriétaires (unité de répartition)</div>
+        <div class="card" style="padding:8px 14px"><table>
+          <tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th><th>Accès</th></tr>
+          <tr><td><div class="who"><span class="a" style="background:#2F6B53">S</span> Alex Martin</div></td><td>RDC + Garage</td><td class="num">500</td><td><span class="badge b-ok">Syndic · Admin</span></td></tr>
+          <tr><td><div class="who"><span class="a" style="background:#5B4B86">P</span> Sam Bernard</div></td><td>1er étage</td><td class="num">251</td><td><span class="badge" style="background:var(--green-soft);color:var(--green-deep)">Lecture</span></td></tr>
+          <tr><td><div class="who"><span class="a" style="background:#C9854A">A</span> Lou Petit</div></td><td>2ème étage</td><td class="num">249</td><td><span class="badge" style="background:var(--green-soft);color:var(--green-deep)">Lecture · Commissaire</span></td></tr>
+        </table></div>
+      </div>
+
+      <div class="budpanel" data-bud="keys" style="display:none">
+        <div class="card" style="padding:8px 14px">
+          <table>
+            <tr><th>Clé</th><th>Mode de répartition</th><th>Exemple sur 300 €</th><th>Statut</th></tr>
+            <tr><td><b>Acte de base</b></td><td>Quote-part — au prorata des millièmes (× /1000)</td><td class="sub">Alex 150 € · Sam 75,30 € · Lou 74,70 €</td><td><span class="badge b-ok">Active</span></td></tr>
+            <tr><td><b>Individuelle</b></td><td>À parts égales — ÷ nombre de propriétaires (÷ 3)</td><td class="sub">Alex 100 € · Sam 100 € · Lou 100 €</td><td><span class="badge b-ok">Active</span></td></tr>
+          </table>
+        </div>
+        <div class="note">La clé Individuelle compte chaque propriétaire une seule fois — Alex (2 lots) paie une part, pas deux.</div>
+      </div>
+
+      <div class="budpanel" data-bud="bud" style="display:none">
+        <div class="card" style="margin-bottom:16px;padding:8px 14px">
+          <div class="h-row" style="padding:10px 4px 0"><h2 style="font-size:15px">Postes — réalité 2025 → budget 2026</h2><span class="sub">marge +4 % · changez la clé pour recalculer</span></div>
+          <table id="budTable"><tr><th>Poste</th><th>Clé</th><th class="num">Réalité 25</th><th class="num">Budget 26</th></tr></table>
+        </div>
+        <div class="mini-h">Charge annuelle par propriétaire (calculée en direct)</div>
+        <div class="card" style="padding:8px 14px"><table id="budOwners">
+          <tr><th>Propriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th><th class="num">Fonds de réserve</th></tr>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ============ RÈGLES & ALIAS ============ -->
+    <section class="screen" id="rules">
+      <div class="top"><div><div class="crumb">Paramètres</div><h1>Règles &amp; alias</h1></div></div>
+      <div class="mini-h">Règles de catégorisation — Tiers → Catégorie</div>
+      <div class="card" style="padding:8px 14px;margin-bottom:6px"><table id="ruleTable">
+        <tr><th>Tiers (libellé)</th><th>Catégorie</th><th>Sous-catégorie</th><th></th></tr>
+      </table></div>
+      <button class="btn btn-ghost" id="addRule" style="margin-bottom:24px">+ Ajouter une règle</button>
+      <div class="mini-h">Alias de tiers — Libellé bancaire → Entité</div>
+      <div class="card" style="padding:8px 14px;margin-bottom:6px"><table id="aliasTable">
+        <tr><th>Libellé tel qu'il apparaît à la banque</th><th>Rattaché à</th><th></th></tr>
+      </table></div>
+      <button class="btn btn-ghost" id="addAlias">+ Ajouter un alias</button>
+      <div class="note">Ces règles préremplissent automatiquement la catégorie et l'identité lors de chaque import.</div>
+    </section>
+
+  </main>
+</div>
+
+<!-- close-contract modal -->
+<div id="ctModal" style="display:none;position:fixed;inset:0;background:rgba(33,40,30,.4);z-index:50;align-items:center;justify-content:center">
+  <div class="card" style="width:420px;max-width:90vw">
+    <h2 id="ctModalTitle">Clôturer le contrat</h2>
+    <div class="sub" style="margin-bottom:14px" id="ctModalSub">—</div>
+    <div class="l" style="font-size:12px;color:var(--ink-faint)">Date de fin</div>
+    <input class="fld" id="ctEndDate" style="width:100%;margin:4px 0 12px" placeholder="31/12/25">
+    <div class="l" style="font-size:12px;color:var(--ink-faint)">Commentaire de clôture</div>
+    <input class="fld" id="ctEndNote" style="width:100%;margin:4px 0 16px" placeholder="Ex. résiliation, changement de fournisseur">
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" id="ctModalCancel">Annuler</button>
+      <button class="btn btn-primary" id="ctModalConfirm" style="background:var(--coral)">Clôturer</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="db.js"></script>
+<script src="app.js"></script>
+
+<style>
+  .vote{padding:2px}
+  .vote button{padding:5px 11px !important;font-size:12px !important}
+  .vote .vp.on{background:var(--green) !important;color:#fff !important}
+  .vote .vc.on{background:var(--coral) !important;color:#fff !important}
+  .vote .va.on{background:var(--ink-faint) !important;color:#fff !important}
+  /* stepper */
+  .stepper{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;padding:22px 26px}
+  .stepper .step{display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;flex:0 0 auto;width:90px}
+  .stepper .circ{width:34px;height:34px;border-radius:50%;background:var(--line);color:var(--ink-faint);display:grid;place-items:center;font-weight:700;font-size:14px;transition:.2s}
+  .stepper .lbl{font-size:12px;text-align:center;color:var(--ink-faint);line-height:1.25;font-weight:500}
+  .stepper .step.on .circ{background:var(--green);color:#fff;box-shadow:0 0 0 4px var(--green-soft)}
+  .stepper .step.on .lbl{color:var(--green-deep);font-weight:700}
+  .stepper .step.done .circ{background:var(--clay);color:#fff}
+  .stepper .step.done .lbl{color:var(--ink-soft)}
+  .stepper .bar{flex:1;height:2px;background:var(--line);margin-top:16px;min-width:18px}
+  .pres button{padding:6px 12px !important;font-size:12px !important}
+  .pres .p-pre.on{background:var(--green) !important;color:#fff !important}
+  .pres .p-rep.on{background:var(--clay) !important;color:#fff !important}
+  .pres .p-exc.on{background:#5B4B86 !important;color:#fff !important}
+  .pres .p-abs.on{background:var(--coral) !important;color:#fff !important}
+  @media(max-width:760px){.stepper{flex-wrap:wrap;gap:10px;justify-content:center}.stepper .bar{display:none}}
+</style>

@@ -1,0 +1,19 @@
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Node (si une stack JS est ajoutée plus tard)
+node_modules/
+dist/
+.env
+.env.local
+*.log
+
+# Données réelles — ne jamais committer de relevés bancaires / exports
+*.csv
+*.coda
+relevés/
+data-réelle/
