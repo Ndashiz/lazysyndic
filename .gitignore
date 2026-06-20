@@ -17,3 +17,6 @@ dist/
 *.coda
 relevés/
 data-réelle/
+
+# Relevés bancaires (jamais committer)
+*.pdf
