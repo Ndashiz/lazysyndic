@@ -235,13 +235,20 @@ let OWNERS = [
 const ownersOf = () => (state.owners && state.owners.length) ? state.owners : OWNERS;
 // Un virement entrant est rattaché à un copro si son tiers (résolu via alias)
 // contient le nom court OU le nom complet du copro.
-function ownerMatch(t, o){
+// Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
+function detectOwner(t){
   const hay = norm(t.tiers);
-  return hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n)));
+  const o = ownersOf().find(o => hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n))));
+  return o ? o.short : '';
 }
-// Versé = somme des entrées (amount>0) rattachées au copro, sur un compte (ou tous).
+// Copropriétaire effectif : attribution explicite (t.owner) sinon auto.
+function ownerOfTx(t){ return (t.owner!==undefined && t.owner!=='') ? t.owner : detectOwner(t); }
+function ownerOptions(sel){
+  return '<option value="">—</option>' + ownersOf().map(o=>`<option value="${o.short}" ${o.short===sel?'selected':''}>${o.n}</option>`).join('');
+}
+// Versé = somme des entrées attribuées au copro, sur un compte (ou tous).
 function verseFromTx(o, acct){
-  return sum(state.tx.filter(t => t.amount>0 && (!acct||t.account===acct) && ownerMatch(t,o)).map(t=>t.amount));
+  return sum(state.tx.filter(t => t.amount>0 && (!acct||t.account===acct) && ownerOfTx(t)===o.short).map(t=>t.amount));
 }
 function ownerLedger(){
   return ownersOf().map(o => {
@@ -321,13 +328,28 @@ function renderDonut(scope, acct){
 
 /* ---------- Pense-bête ---------- */
 let showRemHistory = false;
+// Échéance : date ISO → JJ/MM/AAAA + indice (en retard / aujourd'hui / dans Nj).
+// Tolère l'ancien texte libre (« cette sem. »).
+function fmtDue(due){
+  if(!due) return '';
+  const m=String(due).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) return due;
+  const label=`${m[3]}/${m[2]}/${m[1]}`;
+  const d=new Date(+m[1],+m[2]-1,+m[3]); const today=new Date(); today.setHours(0,0,0,0);
+  const diff=Math.round((d-today)/86400000);
+  if(diff<0)  return `<span style="color:var(--coral);font-weight:600">${label} · en retard</span>`;
+  if(diff===0)return `<span style="color:var(--clay);font-weight:600">aujourd'hui</span>`;
+  if(diff<=7) return `<span style="color:var(--clay)">${label} · dans ${diff}j</span>`;
+  return label;
+}
 function renderReminders(){
   const box = document.getElementById('rems'); if (!box) return;
-  const active = state.reminders.filter(r=>!r.done);
+  const active = state.reminders.filter(r=>!r.done)
+    .sort((a,b)=>(a.due||'￿').localeCompare(b.due||'￿'));
   const doneList = state.reminders.filter(r=>r.done);
   box.innerHTML = active.length
     ? active.map(r=>{ const i=state.reminders.indexOf(r);
-        return `<div class="rem" data-i="${i}"><div class="chk"></div><div class="tx">${r.tx}</div><div class="due">${r.due||''}</div></div>`; }).join('')
+        return `<div class="rem" data-i="${i}"><div class="chk"></div><div class="tx">${r.tx}</div><div class="due">${fmtDue(r.due)}</div></div>`; }).join('')
     : '<div class="sub" style="padding:8px 4px">Rien à faire 🎉</div>';
   const hist = document.getElementById('remsHistory');
   if (hist) hist.innerHTML = doneList.map(r=>{ const i=state.reminders.indexOf(r);
@@ -393,12 +415,15 @@ function renderTx(acct){
     const cmt = t.flag && t.comment
       ? `<div class="cmt">✎ ${t.comment}</div>`
       : (t.flag ? '' : '<div class="cmt-add">+ commentaire</div>');
+    const ownerSel = t.amount>0
+      ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner" ${canWrite()?'':'disabled'}>${ownerOptions(ownerOfTx(t))}</select></div>`
+      : '';
     tr.innerHTML = `<td><button class="flagbtn">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
       <td><span class="cat ${catClass(t.high)}">${catLabel}</span></td>
       <td class="num ${amtClass}">${signed(t.amount)}</td>
-      <td>${note}${cmt}</td>`;
+      <td>${ownerSel}${note}${cmt}</td>`;
     tr.querySelector('.flagbtn').onclick=()=>{
       if(!canWrite()) return;
       t.flag = !t.flag; saveState(); renderTx(acct);
@@ -410,6 +435,14 @@ function renderTx(acct){
       const c = prompt('Commentaire (la ligne sera flaggée) :', '');
       if (c!==null){ t.flag=true; t.comment=c; saveState(); renderTx(acct);
         dbWrite(db=>db.updateTransaction(t.id, {flag:true, comment:c})); }
+    };
+    const osel = tr.querySelector('.tx-owner');
+    if (osel) osel.onchange = ()=>{
+      if(!canWrite()) return;
+      t.owner = osel.value;
+      saveState();
+      dbWrite(db=>db.updateTransaction(t.id, {owner: osel.value}));
+      renderDashboard(); renderProvisions();
     };
     tb.appendChild(tr);
   });

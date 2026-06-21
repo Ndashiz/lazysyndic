@@ -71,7 +71,7 @@
     return {
       tx: res.ls_transactions.map(r=>({
         id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
-        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||''
+        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||''
       })),
       rules:   res.ls_rules.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.high, r.sub||'', r.id]),
       aliases: res.ls_aliases.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.entity, !!r.is_owner, r.short||'', r.id]),
@@ -116,12 +116,12 @@
     async addTransactions(rows){
       const payload = rows.map(t=>({
         tx_date:dispToIso(t.date), tiers:t.tiers, high:t.high, sub:t.sub||'',
-        amount:t.amount, account:t.account, note:t.note||'', flag:!!t.flag, comment:t.comment||''
+        amount:t.amount, account:t.account, note:t.note||'', flag:!!t.flag, comment:t.comment||'', owner:t.owner||''
       }));
       const {data, error} = await T('ls_transactions').insert(payload).select();
       if (error) throw error;
       return data.map(r=>({id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
-        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||''}));
+        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||''}));
     },
     async updateTransaction(id, patch){
       const {error} = await T('ls_transactions').update(patch).eq('id', id); if (error) throw error;
