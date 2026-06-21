@@ -320,25 +320,54 @@ function renderDonut(scope, acct){
 }
 
 /* ---------- Pense-bête ---------- */
+let showRemHistory = false;
 function renderReminders(){
-  const box = document.getElementById('rems');
-  if (!box) return;
-  box.innerHTML = state.reminders.map((r,i)=>
-    `<div class="rem${r.done?' done':''}" data-i="${i}"><div class="chk">${r.done?'✓':''}</div><div class="tx">${r.tx}</div><div class="due">${r.done?'fait':r.due}</div></div>`).join('');
-  const done = state.reminders.filter(r=>r.done).length;
-  const sub = document.querySelector('#dash .card .h-row .sub');
-  // (le sous-titre "2 / 4 faits" est sur la carte pense-bête)
-  document.querySelectorAll('#dash .card').forEach(c=>{
-    const h = c.querySelector('h2');
-    if (h && h.textContent.trim()==='Pense-bête'){ const s=c.querySelector('.sub'); if(s) s.textContent = `${done} / ${state.reminders.length} faits`; }
-  });
+  const box = document.getElementById('rems'); if (!box) return;
+  const active = state.reminders.filter(r=>!r.done);
+  const doneList = state.reminders.filter(r=>r.done);
+  box.innerHTML = active.length
+    ? active.map(r=>{ const i=state.reminders.indexOf(r);
+        return `<div class="rem" data-i="${i}"><div class="chk"></div><div class="tx">${r.tx}</div><div class="due">${r.due||''}</div></div>`; }).join('')
+    : '<div class="sub" style="padding:8px 4px">Rien à faire 🎉</div>';
+  const hist = document.getElementById('remsHistory');
+  if (hist) hist.innerHTML = doneList.map(r=>{ const i=state.reminders.indexOf(r);
+    return `<div class="rem done" data-i="${i}"><div class="chk">✓</div><div class="tx">${r.tx}</div><div class="due">fait · cliquer pour rouvrir</div></div>`; }).join('');
+  const count=document.getElementById('remCount');
+  if (count) count.textContent = `${active.length} à faire · ${doneList.length} fait${doneList.length>1?'s':''}`;
+  const tgl=document.getElementById('remHistoryToggle');
+  if (tgl){ tgl.style.display = doneList.length?'block':'none'; tgl.textContent = (showRemHistory?'Masquer':'Voir')+` l'historique (${doneList.length})`; }
+  const wrap=document.getElementById('remHistoryWrap');
+  if (wrap) wrap.style.display = (showRemHistory && doneList.length)?'block':'none';
 }
-document.getElementById('rems')?.addEventListener('click',e=>{
-  const r=e.target.closest('.rem'); if(!r) return;
-  if(!canWrite()) return;
-  const i=+r.dataset.i; const rem=state.reminders[i]; rem.done = !rem.done; saveState(); renderReminders();
+function toggleReminder(i){
+  if(!canWrite()){ return; }
+  const rem=state.reminders[i]; if(!rem) return;
+  rem.done=!rem.done; saveState(); renderReminders();
   dbWrite(db=>db.updateReminder(rem.id, {done:rem.done}));
+}
+function addReminderFromInput(){
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const inp=document.getElementById('remAddInput'), dueInp=document.getElementById('remAddDue');
+  const tx=inp.value.trim(); if(!tx){ inp.focus(); return; }
+  const rem={tx, due:dueInp.value.trim(), done:false};
+  state.reminders.push(rem);
+  inp.value=''; dueInp.value='';
+  document.getElementById('remAddRow').style.display='none';
+  document.getElementById('remAddBtn').style.display='block';
+  saveState(); renderReminders();
+  dbWrite(async db=>{ const saved=await db.addReminder({tx:rem.tx, due:rem.due, done:false}); rem.id=saved.id; });
+}
+document.getElementById('rems')?.addEventListener('click',e=>{ const r=e.target.closest('.rem'); if(r) toggleReminder(+r.dataset.i); });
+document.getElementById('remsHistory')?.addEventListener('click',e=>{ const r=e.target.closest('.rem'); if(r) toggleReminder(+r.dataset.i); });
+document.getElementById('remHistoryToggle')?.addEventListener('click',()=>{ showRemHistory=!showRemHistory; renderReminders(); });
+document.getElementById('remAddBtn')?.addEventListener('click',()=>{
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  document.getElementById('remAddRow').style.display='flex';
+  document.getElementById('remAddBtn').style.display='none';
+  document.getElementById('remAddInput').focus();
 });
+document.getElementById('remAddSave')?.addEventListener('click', addReminderFromInput);
+document.getElementById('remAddInput')?.addEventListener('keydown',e=>{ if(e.key==='Enter') addReminderFromInput(); });
 
 /* ============================================================
    COMPTES — table de transactions (dérivée)

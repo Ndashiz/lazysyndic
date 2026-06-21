@@ -247,14 +247,19 @@
         </div>
         <!-- reminders -->
         <div class="card">
-          <div class="h-row"><h2>Pense-bête</h2><span class="sub">2 / 4 faits</span></div>
-          <div id="rems">
-            <div class="rem done"><div class="chk">✓</div><div class="tx">Envoyer la convocation AG 2026</div><div class="due">fait</div></div>
-            <div class="rem"><div class="chk"></div><div class="tx">Contacter le plombier — fuite cave</div><div class="due">cette sem.</div></div>
-            <div class="rem"><div class="chk"></div><div class="tx">Relancer Sam pour le solde</div><div class="due">15 juin</div></div>
-            <div class="rem done"><div class="chk">✓</div><div class="tx">Importer relevé Swan de mai</div><div class="due">fait</div></div>
+          <div class="h-row"><h2>Pense-bête</h2><span class="sub" id="remCount">—</span></div>
+          <div id="rems"></div>
+          <div id="remAddRow" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <input class="fld" id="remAddInput" placeholder="Nouveau rappel…" style="flex:1;min-width:160px">
+            <input class="fld" id="remAddDue" placeholder="échéance (option.)" style="width:130px">
+            <button class="btn btn-primary" id="remAddSave" style="padding:8px 16px">Ajouter</button>
           </div>
-          <button class="add-rem">+ Ajouter un rappel</button>
+          <button class="add-rem" id="remAddBtn">+ Ajouter un rappel</button>
+          <div id="remHistoryWrap" style="display:none;margin-top:8px">
+            <div class="mini-h" style="margin:8px 0 4px">Faits</div>
+            <div id="remsHistory"></div>
+          </div>
+          <button class="add-rem" id="remHistoryToggle" style="color:var(--ink-faint);display:none">Voir l'historique (0)</button>
         </div>
       </div>
 
