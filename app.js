@@ -822,6 +822,8 @@ function interpret(){
     const type = (mapping.type>=0 ? cells[mapping.type] : '').trim();
     const cat = categorize(extractTiers(rawTiers), note, type);
     const t = {date:d.disp, tiers:cat.tiers||rawTiers||'—', high:cat.high, sub:cat.sub, amount, account:importTargetAcct, note};
+    // Entrée venant d'un copropriétaire → proposer « Charges » (paiement de charge) + l'attribuer.
+    if (amount>0){ const det=detectOwner(t); if(det){ t.owner=det; if(t.high==='?'){ t.high='Charges'; t.sub=''; } } }
     const sig = signature(t);
     const matches = existingBySig[sig] || [];
     const used = usedCount[sig] || 0;
@@ -938,7 +940,9 @@ function renderPreviewRow(t,i){
   }
   const orig = isDupe && t._match
     ? `<div class="pv-orig">↳ déjà en mémoire : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
-  return `<tr class="${cls}"><td>${t.date}</td><td><b>${t.tiers}</b>${orig}</td>
+  const ownerCell = (t.amount>0 && !t._skip && !isDupe)
+    ? `<div class="cmt" style="font-style:normal;margin-top:3px"><span style="color:var(--ink-faint)">Versé par :</span> <select class="pv-owner" data-i="${i}">${ownerOptions(t.owner||'')}</select></div>` : '';
+  return `<tr class="${cls}"><td>${t.date}</td><td><b>${t.tiers}</b>${ownerCell}${orig}</td>
     <td class="num ${isDupe?'':amtClass}">${signed(t.amount)}</td>
     <td>${catCell}</td><td>${status}</td>
     <td style="text-align:right;white-space:nowrap">${actions}</td></tr>`;
@@ -987,6 +991,7 @@ function paintPreview(){
     </div>`;
   box.querySelector('#pvAcct').onchange = e=>{ importTargetAcct=e.target.value; ibanDetected=false; showPreview(); };
   box.querySelector('#toMapping').onclick = ()=>showMapping();
+  box.querySelectorAll('.pv-owner').forEach(s=>s.onchange=()=>{ interpreted[+s.dataset.i].owner=s.value; });
   box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{
     if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name) interpreted[+s.dataset.i].high=name; paintPreview(); return; }
     interpreted[+s.dataset.i].high=s.value; paintPreview();
