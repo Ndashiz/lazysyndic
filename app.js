@@ -508,7 +508,7 @@ document.getElementById('acctseg')?.addEventListener('click',e=>{
   document.getElementById('statRow') && (document.querySelectorAll('#statRow').forEach(r=>r.style.display = acct==='res'?'none':'grid'));
   document.getElementById('dropAcct').textContent = acct==='res'?'le compte de réserve':'le compte de paiement';
   importTargetAcct = acct;
-  renderChart(acct); renderTx(acct); renderAcctInfo(acct);
+  renderChart(acct); renderTx(acct); renderAcctInfo(acct); renderAccountStats(acct);
 });
 
 /* filtre flaggées */
@@ -1097,19 +1097,27 @@ function renderAgenda(){
 document.getElementById('addPoint')?.addEventListener('click',()=>{POINTS.push({t:'Nouveau point',type:'Décision',maj:'simple',key:'Acte de base'});renderAgenda();});
 document.getElementById('genConv')?.addEventListener('click',()=>{
   const points=POINTS.map((p,i)=>`${i+1}. ${p.t}${p.type==='Décision'?' ('+MAJ[p.maj]+')':' (information)'}`).join('\n');
-  const eml=`From: Alex Martin (Syndic) <syndic@exemple.be>
-To: Lou Petit <lou@exemple.be>, Sam Bernard <sam@exemple.be>
-Subject: Convocation - Assemblee generale ordinaire - ACP Démo - 22 juin 2026
+  const val=(id,d)=>{ const e=document.getElementById(id); return (e&&e.value.trim())||d; };
+  const cn = (state.coproName||'').trim() || 'la copropriété';
+  const m = (window.LS && window.LS.member) || {};
+  const syndic = (m.full_name||'').trim() || 'Le syndic';
+  const syndicEmail = m.userEmail || m.email || 'syndic@exemple.be';
+  const dateHeure = val('agDate','(date à préciser)');
+  const lieu = val('agLieu','(lieu à préciser)');
+  const dest = val('agDest', ownersOf().map(o=>o.n).filter(n=>n!==m.full_name).join(', '));
+  const eml=`From: ${syndic} (Syndic) <${syndicEmail}>
+To: ${dest}
+Subject: Convocation - Assemblee generale ordinaire - ${cn} - ${dateHeure}
 MIME-Version: 1.0
 Content-Type: text/plain; charset="utf-8"
 
 Madame, Monsieur, cher coproprietaire,
 
-En ma qualite de syndic benevole de l'ACP Démo, j'ai l'honneur de vous
+En ma qualite de syndic benevole de ${cn}, j'ai l'honneur de vous
 convoquer a l'assemblee generale ORDINAIRE qui se tiendra :
 
-    Date : le 22 juin 2026 a 19h00
-    Lieu : Appartement RDC, 1 rue Exemple, 1000 Ville
+    Date : ${dateHeure}
+    Lieu : ${lieu}
 
 Conformement au reglement d'ordre interieur, cette convocation vous est adressee
 au moins 15 jours avant l'assemblee.
@@ -1121,10 +1129,10 @@ ${points}
 Tout coproprietaire empeche peut se faire representer par procuration ecrite.
 
 Salutations distinguees,
-Alex Martin - Syndic benevole, ACP Démo
+${syndic} - Syndic benevole, ${cn}
 `;
   const blob=new Blob([eml],{type:'message/rfc822'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG-2026.eml';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG.eml';
   document.body.appendChild(a); a.click(); a.remove();
 });
 
@@ -1505,8 +1513,40 @@ function renderChrome(){
   set('resRemain', eur(Math.max(0, tgt-resBal)));
   set('resPct', `${pct} % de l'objectif atteint`);
   const f=document.getElementById('resFill'); if(f){ f.dataset.w=pct; f.style.width=pct+'%'; }
-  set('updatedDate', new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'}));
+  // dates de mise à jour (aujourd'hui) sur tous les écrans
+  const today = new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'});
+  set('updatedDate', today); set('updatedAcc', today); set('updatedImp', today);
+  set('soldesAsOf', 'au '+new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long'}));
+  // note annuelle (ne pas écraser pendant la saisie)
+  const an=document.getElementById('annualNote');
+  if (an && document.activeElement!==an) an.value = state.annualNote || '';
+  renderAccountStats(curAcct);
 }
+// Statistiques clés du compte, dérivées des transactions réelles.
+function renderAccountStats(acct){
+  acct = acct || curAcct || 'pay';
+  const set=(id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
+  const txs = txOf(acct).map(t=>({a:t.amount, d:parseDate(t.date)})).filter(x=>x.d)
+                        .sort((x,y)=>x.d.iso.localeCompare(y.d.iso));
+  if (!txs.length){ ['statDep','statEnt','statTrough'].forEach(id=>set(id,'—'));
+    set('statDepSub','pas de données'); set('statEntSub',''); set('statTroughSub',''); return; }
+  const n = new Set(txs.map(t=>t.d.iso.slice(0,7))).size || 1;
+  const dep = sum(txs.filter(t=>t.a<0).map(t=>-t.a)), ent = sum(txs.filter(t=>t.a>0).map(t=>t.a));
+  const depMoy = dep/n, entMoy = ent/n, ecart = entMoy-depMoy;
+  set('statDep', '−'+eur(depMoy)); set('statDepSub', `sur ${n} mois`);
+  set('statEnt', '+'+eur(entMoy)); set('statEntSub', `écart ${ecart>=0?'+':'−'}${eur(Math.abs(ecart))}/mois · ${ecart>=0?"s'autofinance":'déficitaire'}`);
+  const MON=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+  let run=(state.opening&&state.opening[acct])||0, trough=run, tm=null;
+  txs.forEach(t=>{ run+=t.a; if(run<trough){ trough=run; tm=t.d; } });
+  set('statTrough', eur(trough));
+  set('statTroughSub', tm?`creux atteint en ${MON[tm.m-1]} ${tm.y}`:'jamais sous le solde d\'ouverture');
+}
+// Note annuelle — persistée (settings.annual_note)
+document.getElementById('annualNote')?.addEventListener('change', function(){
+  if(!canWrite()){ this.value = state.annualNote||''; return; }
+  state.annualNote = this.value;
+  dbWrite(db=>db.updateSettings({annual_note: this.value}));
+});
 function renderAGArchive(){
   const box=document.getElementById('agArchive'); if(!box) return;
   box.innerHTML='<div class="sub" style="padding:14px">Aucune assemblée archivée pour le moment. Les AG finalisées apparaîtront ici.</div>';
@@ -1727,7 +1767,12 @@ boot();
    Tout est dérivé du store, filtré sur la période choisie.
    ============================================================ */
 (function setupReports(){
-  const COPRO = { name:'ACP Démo', addr:'1 rue Exemple, 1000 Ville', kbo:'BE 0000.000.000' };
+  // Identité de la copropriété, lue dans l'état (Supabase) au moment du rapport.
+  const COPRO = () => ({
+    name: (typeof state!=='undefined' && state.coproName) || 'Ma copropriété',
+    addr: (typeof state!=='undefined' && state.coproAddr) || '',
+    kbo:  (typeof state!=='undefined' && state.coproKbo)  || '',
+  });
 
   /* ---- CSS rapport + impression ---- */
   const css = document.createElement('style');
@@ -1811,7 +1856,7 @@ boot();
   function headEl(title, p){
     return `<div class="r-head">
       <div><div class="r-brand">Lazy<span class="z">Syndic</span></div>
-        <div style="margin-top:6px"><b>${COPRO.name}</b><div class="r-sub">${COPRO.addr} · ${COPRO.kbo}</div></div></div>
+        <div style="margin-top:6px"><b>${COPRO().name}</b>${(COPRO().addr||COPRO().kbo)?`<div class="r-sub">${[COPRO().addr,COPRO().kbo].filter(Boolean).join(' · ')}</div>`:''}</div></div>
       <div style="text-align:right"><span class="chip">${title}</span>
         <div class="r-sub" style="margin-top:8px">Période : <b>${p.label}</b></div>
         <div class="r-sub">Édité le 4 juin 2026</div></div>
@@ -1898,7 +1943,7 @@ boot();
       <div>Le président de séance</div><div>Le secrétaire</div><div>Le commissaire aux comptes</div>
     </div>`;
   }
-  function foot(){ return `<div class="r-foot">Document généré par LazySyndic — ${COPRO.name}. Les annexes 2, 3 et 4 sont calculées depuis le registre des transactions sur la période indiquée.</div>`; }
+  function foot(){ return `<div class="r-foot">Document généré par LazySyndic — ${COPRO().name}. Les annexes 2, 3 et 4 sont calculées depuis le registre des transactions sur la période indiquée.</div>`; }
 
   /* ---- assemblage par type ---- */
   const PAY = {key:'pay', label:'Compte de paiement'};

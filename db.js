@@ -86,6 +86,7 @@
       budgetKeys: settings.budget_keys || {},
       ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
       recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
+      annualNote: settings.annual_note || '',
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0)})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),

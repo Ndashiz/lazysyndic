@@ -224,7 +224,7 @@
         </div>
         <!-- kpis -->
         <div class="card">
-          <div class="h-row"><h2>Soldes</h2><span class="sub">au 2 juin</span></div>
+          <div class="h-row"><h2>Soldes</h2><span class="sub" id="soldesAsOf">—</span></div>
           <div class="kpis">
             <div class="kpi"><div class="l">Compte de paiement</div><div class="v">895,25 €</div></div>
             <div class="kpi"><div class="l">Compte de réserve</div><div class="v">496,43 €</div></div>
@@ -283,7 +283,7 @@
     <section class="screen" id="acc">
       <div class="top">
         <div><div class="crumb">Comptes</div><h1>Transactions</h1></div>
-        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b style="margin-left:3px">2 juin 2026</b></div>
+        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedAcc" style="margin-left:3px">—</b></div>
       </div>
 
       <div class="controls">
@@ -323,18 +323,11 @@
         <div class="rb-meta"><span>25 % atteint</span><span>Reste 1 503,57 €</span></div>
       </div>
 
-      <!-- key stats (payment account) -->
+      <!-- key stats — dérivées des vraies transactions -->
       <div class="grid" id="statRow" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépenses moy. / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">111 €</div><div class="sub" style="margin-top:2px">sur 6 mois</div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrées moy. / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--green);margin-top:3px">119 €</div><div class="sub" style="margin-top:2px">écart +8 € · s'autofinance</div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Besoin en fonds de roulement <span title="Dépenses moy./mois × mois de couverture. Coussin pour payer les fournisseurs entre deux rentrées." style="cursor:help;color:var(--clay)">ⓘ</span></div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">333 €</div><div class="sub" style="margin-top:2px">couverture : <select class="fld" style="padding:2px 6px;font-size:12px;display:inline-block"><option>3 mois</option><option>1 mois</option><option>2 mois</option><option>6 mois</option></select></div></div>
-      </div>
-
-      <!-- key stats (payment account) -->
-      <div class="grid" id="statRow" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépense moyenne / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">−111 €</div><div class="sub" style="margin-top:2px">sur 6 mois · exercice 2025</div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrée moyenne / mois</div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--green);margin-top:3px">+119 €</div><div class="sub" style="margin-top:2px">provisions des copropriétaires</div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Besoin en fonds de roulement <span title="Découvert maximal cumulé sur l'exercice : le matelas à garder d'avance pour absorber les dépenses ponctuelles." style="cursor:help;color:var(--clay);font-weight:700">ⓘ</span></div><div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">≈ 380 €</div><div class="sub" style="margin-top:2px">creux de trésorerie atteint en mars</div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépense moyenne / mois</div><div id="statDep" style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">—</div><div class="sub" id="statDepSub" style="margin-top:2px"></div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrée moyenne / mois</div><div id="statEnt" style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--green);margin-top:3px">—</div><div class="sub" id="statEntSub" style="margin-top:2px"></div></div>
+        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Creux de trésorerie <span title="Point le plus bas du solde sur la période : le matelas minimal à garder d'avance." style="cursor:help;color:var(--clay)">ⓘ</span></div><div id="statTrough" style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">—</div><div class="sub" id="statTroughSub" style="margin-top:2px"></div></div>
       </div>
 
       <!-- monthly evolution chart -->
@@ -364,16 +357,10 @@
       <div class="note">Cliquez sur le ⚑ pour flagger une ligne · cliquez « + commentaire » pour annoter une transaction à revoir en AG.</div>
 
       <!-- annual note -->
-      <div class="card" style="margin-top:8px">
-        <div class="h-row"><div><h2>Note annuelle</h2><div class="sub">Commentaire global sur l'évolution de l'exercice — repris en AG</div></div>
-          <select class="fld" style="font-size:12px"><option>Exercice 2025</option><option>Exercice 2024</option></select></div>
-        <div contenteditable class="fld" style="width:100%;min-height:74px;cursor:text;line-height:1.6;color:var(--ink-soft)">2025 : hausse sensible du poste Eau (Vivaqua) au T3. Fuite en cave réparée en mars (+ frais plombier). Régularisation Electrabel en notre faveur. Réserve en progression vers l'objectif de 2 000 €.</div>
-      </div>
-
-      <!-- global annual comment -->
+      <!-- note annuelle (persistée, reprise dans le rapport d'AG) -->
       <div class="card" style="margin-top:16px">
-        <div class="h-row"><div><h2>Note annuelle — évolution 2025</h2><div class="sub">Commentaire global du compte, repris dans le rapport d'AG</div></div><span class="pill" style="background:var(--clay-soft);color:#8A551F">Compte de paiement</span></div>
-        <textarea class="fld" style="width:100%;min-height:84px;resize:vertical;cursor:text;line-height:1.55" placeholder="Ex. : 2025 marquée par la régularisation Engie en mars (+368 €). Hausse de l'énergie à surveiller en 2026. Réserve en bonne progression.">2025 marquée par la régularisation Engie de mars. Énergie en hausse, à surveiller pour le budget 2026. Trésorerie saine, écart positif.</textarea>
+        <div class="h-row"><div><h2>Note annuelle</h2><div class="sub">Commentaire global sur l'évolution de l'exercice — repris dans le rapport d'AG</div></div></div>
+        <textarea class="fld" id="annualNote" style="width:100%;min-height:84px;resize:vertical;cursor:text;line-height:1.55" placeholder="Ex. : 2026 marquée par la régularisation Engie en mars. Énergie en hausse à surveiller. Réserve en bonne progression."></textarea>
       </div>
     </section>
 
@@ -381,7 +368,7 @@
     <section class="screen" id="imp">
       <div class="top">
         <div><div class="crumb">Import</div><h1>Importer un relevé</h1></div>
-        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b style="margin-left:3px">2 juin 2026</b></div>
+        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedImp" style="margin-left:3px">—</b></div>
       </div>
 
       <div class="drop" id="drop">
@@ -443,8 +430,8 @@
       <div class="agpanel" data-panel="1">
         <div class="card" style="margin-bottom:16px">
           <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:16px">
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date &amp; heure</div><input class="fld" style="width:100%;margin-top:4px" value="22 juin 2026 · 19h00"></div>
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Lieu</div><input class="fld" style="width:100%;margin-top:4px" value="Appartement RDC — sur place"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date &amp; heure</div><input class="fld" id="agDate" style="width:100%;margin-top:4px" value="22 juin 2026 · 19h00"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Lieu</div><input class="fld" id="agLieu" style="width:100%;margin-top:4px" value="Appartement RDC — sur place"></div>
             <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Type</div><select class="fld" style="width:100%;margin-top:4px"><option>Ordinaire</option><option>Extraordinaire</option></select></div>
           </div>
         </div>
@@ -464,7 +451,7 @@
           <div class="sub" style="margin-bottom:16px">L'ordre du jour est figé. Choisissez la date d'envoi, générez le .eml et passez à la suite.</div>
           <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
             <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date d'envoi de l'email</div><input class="fld" type="text" style="width:100%;margin-top:4px" value="5 juin 2026"></div>
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Destinataires</div><input class="fld" style="width:100%;margin-top:4px" value="Lou Petit, Sam Bernard"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Destinataires</div><input class="fld" id="agDest" style="width:100%;margin-top:4px" value=""></div>
           </div>
           <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)"><span class="ic">✓</span> Délai légal respecté : envoi 17 jours avant la séance (minimum 15 jours).</div>
           <button class="btn btn-ghost" id="genConv">✉ Générer le .eml de convocation</button>
