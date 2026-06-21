@@ -84,7 +84,10 @@
       ibanMap: settings.iban_map || {},
       coproName: settings.copro_name || '',
       budgetKeys: settings.budget_keys || {},
-      owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53'})),
+      ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
+      recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
+      owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
+        due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0)})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
     };
   }
@@ -137,6 +140,7 @@
     async deleteAlias(id){ const {error}=await T('ls_aliases').delete().eq('id',id); if(error)throw error; },
 
     async updateSettings(patch){ const {error}=await T('ls_settings').update(patch).eq('id',1); if(error)throw error; },
+    async updateOwner(id, patch){ const {error}=await T('ls_owners').update(patch).eq('id',id); if(error)throw error; },
   };
 
   window.LS = { configured, hasClient, sb, auth, db, member:null, canWrite:false };

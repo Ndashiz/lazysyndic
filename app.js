@@ -233,15 +233,21 @@ let OWNERS = [
   {n:'Lou Petit',short:'Lou', q:249, c:'#C9854A'},
 ];
 const ownersOf = () => (state.owners && state.owners.length) ? state.owners : OWNERS;
-function verseFromTx(short){
-  return sum(state.tx.filter(t => t.amount>0 && isIncomeCat(t.high) && norm(t.tiers).includes(norm(short)))
-                     .map(t=>t.amount));
+// Un virement entrant est rattaché à un copro si son tiers (résolu via alias)
+// contient le nom court OU le nom complet du copro.
+function ownerMatch(t, o){
+  const hay = norm(t.tiers);
+  return hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n)));
+}
+// Versé = somme des entrées (amount>0) rattachées au copro, sur un compte (ou tous).
+function verseFromTx(o, acct){
+  return sum(state.tx.filter(t => t.amount>0 && (!acct||t.account===acct) && ownerMatch(t,o)).map(t=>t.amount));
 }
 function ownerLedger(){
   return ownersOf().map(o => {
-    const c = (state.contrib && state.contrib[o.short]) || {due:0, verse:0};
-    const verse = state.ledgerLive ? verseFromTx(o.short) : c.verse;
-    return {...o, due:c.due, verse, solde: verse - c.due};
+    const duePay = +(o.due_pay||0), dueRes = +(o.due_res||0), due = duePay+dueRes;
+    const versePay = verseFromTx(o,'pay'), verseRes = verseFromTx(o,'res'), verse = versePay+verseRes;
+    return {...o, duePay, dueRes, due, versePay, verseRes, verse, solde: verse-due};
   });
 }
 
@@ -417,6 +423,50 @@ function refreshAccountChrome(){
   const segBtns = document.querySelectorAll('#acctseg button');
   if (segBtns[0]) segBtns[0].textContent = `Compte de paiement · ${eur(balance('pay'))}`;
   if (segBtns[1]) segBtns[1].textContent = `Compte de réserve · ${eur(balance('res'))}`;
+  renderAcctInfo(curAcct);
+}
+
+// Statut de réconciliation : solde calculé vs clôture du dernier relevé.
+function reconStatus(acct){
+  const r = (state.recon||{})[acct];
+  if (!r || r.closing===undefined || r.closing===null) return null;
+  const diff = +(balance(acct) - Number(r.closing)).toFixed(2);
+  return {closing:Number(r.closing), asOf:r.asOf||'', diff, ok:Math.abs(diff)<0.01};
+}
+// Carte d'info compte : IBAN + solde d'ouverture (éditables) + solde calculé + réconciliation.
+function renderAcctInfo(acct){
+  const box=document.getElementById('acctInfo'); if(!box) return;
+  acct = acct || curAcct || 'pay';
+  const ed = canWrite();
+  const iban = (state.ibans&&state.ibans[acct])||'';
+  const open = (state.opening&&state.opening[acct])||0;
+  const bal = balance(acct);
+  const rs = reconStatus(acct);
+  const reconHtml = rs
+    ? (rs.ok
+        ? `<span class="badge b-ok">✓ Réconcilié</span> <span class="sub">solde calculé = clôture du relevé (${eur(rs.closing)}${rs.asOf?' au '+rs.asOf:''})</span>`
+        : `<span class="badge b-late">⚠ Déséquilibre ${rs.diff>0?'+':''}${eur(rs.diff)}</span> <span class="sub">calculé ${eur(bal)} ≠ clôture du relevé ${eur(rs.closing)}${rs.asOf?' au '+rs.asOf:''} — transaction manquante ou en trop ?</span>`)
+    : '<span class="sub">Aucun relevé importé pour ce compte — pas encore de réconciliation.</span>';
+  box.innerHTML = `
+    <div class="grid" style="grid-template-columns:1.4fr 1fr 1fr;gap:14px;align-items:end">
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">IBAN du ${acct==='res'?'compte de réserve':'compte de paiement'}</div>
+        <input class="fld" id="acctIban" ${ed?'':'disabled'} style="width:100%;margin-top:4px;font-family:monospace;font-size:12.5px" value="${iban}" placeholder="BE00 0000 0000 0000"></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde d'ouverture</div>
+        <input class="fld" id="acctOpening" ${ed?'':'disabled'} style="width:100%;margin-top:4px" value="${eur(open)}"></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde calculé (ouverture + transactions)</div>
+        <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:2px">${eur(bal)}</div></div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}</div>`;
+  if (ed){
+    const ib=box.querySelector('#acctIban');
+    ib.onchange=()=>{ const v=ib.value.trim(); state.ibans=state.ibans||{}; state.ibans[acct]=v;
+      dbWrite(db=>db.updateSettings(acct==='res'?{iban_res:v}:{iban_pay:v})); };
+    const op=box.querySelector('#acctOpening');
+    op.onchange=()=>{ const v=parseAmount(op.value); if(isNaN(v)){op.value=eur(open);return;}
+      state.opening=state.opening||{}; state.opening[acct]=v;
+      dbWrite(db=>db.updateSettings(acct==='res'?{opening_res:v}:{opening_pay:v}));
+      refreshAccountChrome(); renderTx(acct); renderChart(acct); renderDashboard(); };
+  }
 }
 
 /* onglets compte paiement / réserve */
@@ -429,7 +479,7 @@ document.getElementById('acctseg')?.addEventListener('click',e=>{
   document.getElementById('statRow') && (document.querySelectorAll('#statRow').forEach(r=>r.style.display = acct==='res'?'none':'grid'));
   document.getElementById('dropAcct').textContent = acct==='res'?'le compte de réserve':'le compte de paiement';
   importTargetAcct = acct;
-  renderChart(acct); renderTx(acct);
+  renderChart(acct); renderTx(acct); renderAcctInfo(acct);
 });
 
 /* filtre flaggées */
@@ -818,8 +868,27 @@ async function commitImport(){
   const nextV = (state.imports[0]?.v || 0) + 1;
   const imp = {v:nextV, label:`Import ${new Date().toLocaleDateString('fr-BE')}`, meta:`${toAdd.length} transaction(s) ajoutée(s)`, cur:true};
   // mémoriser l'IBAN → compte (détection apprenante)
+  const acct = importTargetAcct;
   const ibanKey = importMeta && importMeta.iban ? normIban(importMeta.iban) : null;
-  const learnIban = ibanKey && (!state.ibanMap || state.ibanMap[ibanKey]!==importTargetAcct);
+  const learnIban = ibanKey && (!state.ibanMap || state.ibanMap[ibanKey]!==acct);
+
+  // Solde d'ouverture (au 1er relevé du compte), IBAN du compte, et clôture
+  // du relevé (pour la réconciliation) — alimentés depuis le relevé.
+  const settingsPatch = {};
+  if (importMeta && !isNaN(importMeta.opening) && !((state.opening||{})[acct])){
+    state.opening = {...(state.opening||{}), [acct]: importMeta.opening};
+    settingsPatch[acct==='res'?'opening_res':'opening_pay'] = importMeta.opening;
+  }
+  if (importMeta && importMeta.iban && !((state.ibans||{})[acct])){
+    state.ibans = {...(state.ibans||{}), [acct]: importMeta.iban};
+    settingsPatch[acct==='res'?'iban_res':'iban_pay'] = importMeta.iban;
+  }
+  if (importMeta && !isNaN(importMeta.closing)){
+    const asOf = importMeta.to || (toAdd.length ? toAdd[toAdd.length-1].date : '');
+    state.recon = {...(state.recon||{}), [acct]: {closing: importMeta.closing, asOf}};
+    settingsPatch.recon = state.recon;
+  }
+
   if (writeToDb()){
     try {
       const saved = await window.LS.db.addTransactions(toAdd);   // renvoie les lignes avec id
@@ -828,22 +897,30 @@ async function commitImport(){
       const savedImp = await window.LS.db.addImport(imp);
       state.imports.forEach(im=>im.cur=false);
       state.imports.unshift({id:savedImp.id, ...imp});
-      if (learnIban){
-        state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:importTargetAcct};
-        await window.LS.db.updateSettings({iban_map: state.ibanMap});
-      }
+      if (learnIban){ state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:acct}; settingsPatch.iban_map = state.ibanMap; }
+      if (Object.keys(settingsPatch).length) await window.LS.db.updateSettings(settingsPatch);
     } catch(e){ console.error(e); alert('Import non enregistré : '+(e.message||e)); return; }
   } else {
     // démo ou hors-ligne : tout reste local
     state.tx.push(...toAdd.map((t,i)=>({id:'local-'+Date.now()+'-'+i, ...t})));
     state.imports.forEach(im=>im.cur=false);
     state.imports.unshift(imp);
-    if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:importTargetAcct};
+    if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:acct};
     saveState();
   }
   resetImport();
   renderAll();
-  alert(`✓ ${toAdd.length} transaction(s) ${demoMode?'ajoutées (démo, non enregistrées en base)':'sauvegardée(s) — version v'+nextV+' créée'}.`);
+  // Alerte de réconciliation : solde calculé vs clôture du relevé
+  const rs = reconStatus(acct);
+  let msg = `✓ ${toAdd.length} transaction(s) ${demoMode?'ajoutées (démo, non enregistrées en base)':'sauvegardée(s) — version v'+nextV+' créée'}.`;
+  if (rs && !rs.ok){
+    msg += `\n\n⚠ DÉSÉQUILIBRE sur le ${acct==='res'?'compte de réserve':'compte de paiement'} : `
+      + `solde calculé ${eur(balance(acct))} ≠ clôture du relevé ${eur(rs.closing)} (écart ${rs.diff>0?'+':''}${eur(rs.diff)}).`
+      + `\nVérifiez une transaction manquante, en double, ou un solde d'ouverture erroné.`;
+  } else if (rs && rs.ok){
+    msg += `\n\n✓ Réconcilié : le solde calculé correspond à la clôture du relevé.`;
+  }
+  alert(msg);
 }
 
 function resetImport(){
@@ -1292,6 +1369,33 @@ function renderBudget(){
     + ow.map(o=>{ const k=o.short||o.n; return `<tr><td><div class="who"><span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${k[0]}</span> ${o.n}</div></td>
       <td class="num"><b>${eur(split[k]||0)}</b></td><td class="num">${eur((split[k]||0)/12)}</td></tr>`; }).join('');
 }
+// Provisions attendues par copropriétaire (le « dû »), éditable par l'admin.
+function renderProvisions(){
+  const t=document.getElementById('provTable'); if(!t) return;
+  const ed=canWrite(); const led=ownerLedger();
+  if(!led.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
+  t.innerHTML='<tr><th>Propriétaire</th><th class="num">Dû — paiement</th><th class="num">Dû — réserve</th><th class="num">Total dû</th><th class="num">Versé</th><th class="num">Solde</th></tr>'
+    + led.map(o=>{
+      const late=o.solde<-0.005;
+      return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td>
+        <td class="num"><input class="fld prov-pay" ${ed?'':'disabled'} data-id="${o.id||''}" value="${(o.due_pay||0).toFixed(2)}" style="width:92px;text-align:right"></td>
+        <td class="num"><input class="fld prov-res" ${ed?'':'disabled'} data-id="${o.id||''}" value="${(o.due_res||0).toFixed(2)}" style="width:92px;text-align:right"></td>
+        <td class="num">${eur(o.due)}</td>
+        <td class="num">${eur(o.verse)}</td>
+        <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td></tr>`;
+    }).join('');
+  if(ed){
+    t.querySelectorAll('.prov-pay').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_pay'));
+    t.querySelectorAll('.prov-res').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_res'));
+  }
+}
+function saveProvision(inp, field){
+  const id=inp.dataset.id, v=parseAmount(inp.value);
+  if(isNaN(v)){ renderProvisions(); return; }
+  const o=(state.owners||[]).find(x=>x.id===id); if(o) o[field]=v;
+  dbWrite(db=>db.updateOwner(id,{[field]:v}));
+  renderProvisions(); renderDashboard();
+}
 // genBudget câblé dans la section GÉNÉRATEUR DE RAPPORTS (Annexe 4).
 
 /* ============================================================
@@ -1391,6 +1495,7 @@ function renderAll(){
   renderBudgetOwn();
   renderKeys();
   renderBudget();
+  renderProvisions();
   renderAGArchive();
   renderImports();
   animateBars();
