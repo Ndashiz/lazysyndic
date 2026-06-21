@@ -93,6 +93,7 @@
       ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
       recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
       annualNote: settings.annual_note || '',
+      categories: settings.categories || [],
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0)})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
@@ -126,6 +127,8 @@
     async updateTransaction(id, patch){
       const {error} = await T('ls_transactions').update(patch).eq('id', id); if (error) throw error;
     },
+    async deleteTransaction(id){ const {error}=await T('ls_transactions').delete().eq('id',id); if(error)throw error; },
+    async deleteTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').delete().in('id',ids); if(error)throw error; },
 
     async addImport(row){
       const {data, error} = await T('ls_imports').insert(row).select().single(); if (error) throw error; return data;

@@ -60,6 +60,15 @@ const CAT_META = {
 const CATS = Object.keys(CAT_META);
 function catClass(high){ return (CAT_META[high]||{}).cls || ''; }
 function isIncomeCat(high){ return high === 'Charges' || high === 'Fonds de réserve'; }
+// Catégories = défauts + catégories personnalisées (settings.categories).
+function allCats(){ const custom=((typeof state!=='undefined'&&state&&state.categories)||[]); return [...CATS, ...custom.filter(c=>c&&!CATS.includes(c))]; }
+function addCategory(name){
+  name=(name||'').trim(); if(!name) return '';
+  if(allCats().includes(name)) return name;
+  state.categories=state.categories||[]; state.categories.push(name);
+  saveState(); dbWrite(db=>db.updateSettings({categories: state.categories}));
+  return name;
+}
 
 /* ---------- État par défaut (graine = données de démo) ---------- */
 // Transactions de démo (issues des annexes réelles, montants anonymisés).
@@ -418,7 +427,8 @@ function renderTx(acct){
     const ownerSel = t.amount>0
       ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner" ${canWrite()?'':'disabled'}>${ownerOptions(ownerOfTx(t))}</select></div>`
       : '';
-    tr.innerHTML = `<td><button class="flagbtn">⚑</button></td>
+    tr.innerHTML = `<td class="tx-selcell">${canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
+      <td><button class="flagbtn">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
       <td><span class="cat ${catClass(t.high)}">${catLabel}</span></td>
@@ -447,8 +457,51 @@ function renderTx(acct){
     tb.appendChild(tr);
   });
   if (!tb.children.length){
-    tb.innerHTML = `<tr><td colspan="6" class="sub" style="padding:16px">Aucune transaction${flagOnly?' flaggée':''} sur ce compte.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="7" class="sub" style="padding:16px">Aucune transaction${flagOnly?' flaggée':''} sur ce compte.</td></tr>`;
   }
+  renderTxTools(acct);
+}
+
+// Barre d'outils de suppression (admin) : sélection + tout supprimer.
+function renderTxTools(acct){
+  const head=document.getElementById('txSelHead'), tools=document.getElementById('txTools');
+  if(!tools) return;
+  if(!canWrite()){ tools.style.display='none'; if(head) head.innerHTML=''; return; }
+  const all=txOf(acct);
+  if(head) head.innerHTML = all.length?'<input type="checkbox" id="txSelAll" title="Tout sélectionner">':'';
+  const selAll=document.getElementById('txSelAll');
+  if(selAll) selAll.onchange=()=>{ document.querySelectorAll('#txbody .tx-sel').forEach(c=>{ if(!c.closest('tr').style.display) c.checked=selAll.checked; }); updateTxToolsCount(); };
+  tools.style.display=all.length?'flex':'none';
+  tools.innerHTML = `<button class="btn btn-ghost" id="txDelSel" disabled style="opacity:.5">🗑 Supprimer la sélection (<span id="txSelN">0</span>)</button>
+    <button class="btn btn-ghost" id="txDelAll" style="color:var(--coral)">🗑 Tout supprimer ce compte (${all.length})</button>`;
+  document.getElementById('txDelSel').onclick=()=>deleteSelectedTx(acct);
+  document.getElementById('txDelAll').onclick=()=>deleteAllTx(acct);
+  document.querySelectorAll('#txbody .tx-sel').forEach(c=>c.onchange=updateTxToolsCount);
+  updateTxToolsCount();
+}
+function updateTxToolsCount(){
+  const n=document.querySelectorAll('#txbody .tx-sel:checked').length;
+  const span=document.getElementById('txSelN'); if(span) span.textContent=n;
+  const btn=document.getElementById('txDelSel'); if(btn){ btn.disabled=!n; btn.style.opacity=n?'1':'.5'; }
+}
+function removeTxLocal(ids){ const set=new Set(ids); state.tx=state.tx.filter(t=>!set.has(t.id)); }
+function deleteSelectedTx(acct){
+  if(!canWrite()) return;
+  const ids=[...document.querySelectorAll('#txbody .tx-sel:checked')].map(c=>c.dataset.id);
+  if(!ids.length) return;
+  if(!confirm(`Supprimer définitivement ${ids.length} transaction(s) ?`)) return;
+  removeTxLocal(ids); saveState();
+  dbWrite(db=>db.deleteTransactions(ids));
+  renderAll();
+}
+function deleteAllTx(acct){
+  if(!canWrite()) return;
+  const ids=txOf(acct).map(t=>t.id);
+  if(!ids.length) return;
+  if(!confirm(`Supprimer TOUTES les ${ids.length} transactions du ${acct==='res'?'compte de réserve':'compte de paiement'} ?\nAction irréversible.`)) return;
+  removeTxLocal(ids); saveState();
+  dbWrite(db=>db.deleteTransactions(ids));
+  renderAll();
 }
 
 /* ---------- graphe évolution mensuelle ---------- */
@@ -563,6 +616,7 @@ let mapping = null;        // {date,tiers,amount,credit,debit,note,type}
 let dateOrder = 'dmy';     // 'dmy' ou 'mdy' (détecté sur le fichier)
 let importMeta = null;     // {opening,closing,from,to,iban,holder} si dispo
 let ibanDetected = false;  // compte déduit automatiquement de l'IBAN ?
+let recognizedFormat = false; // format relevé reconnu → aperçu direct (pas de mapping manuel)
 const normIban = s => String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'');
 
 // Parse CSV : détecte le séparateur, gère les guillemets.
@@ -865,10 +919,10 @@ function renderPreviewRow(t,i){
   const cls='pv-row'+(t._skip?' skip':(isDupe?' dup':''));
   const catCell = isDupe
     ? `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}</span>`
-    : `<select class="fld previewcat" data-i="${i}" ${t._skip?'disabled':''}>${IMPORT_OPTS.map(o=>{
-        const v=o==='À catégoriser'?'?':o;
-        return `<option value="${v}" ${(t.high===v||(o==='À catégoriser'&&t.high==='?'))?'selected':''}>${o}</option>`;
-      }).join('')}</select>`;
+    : `<select class="fld previewcat" data-i="${i}" ${t._skip?'disabled':''}>${
+        [...allCats().map(c=>({v:c,l:c})), {v:'?',l:'À catégoriser'}, {v:'__new__',l:'➕ Nouvelle catégorie…'}].map(o=>
+          `<option value="${o.v}" ${(t.high===o.v||(o.v==='?'&&t.high==='?'))?'selected':''}>${o.l}</option>`
+        ).join('')}</select>`;
   let status, actions;
   if (t._skip){
     status='<span class="badge" style="background:var(--line-2);color:var(--ink-faint)">Ignorée</span>';
@@ -893,9 +947,33 @@ function paintPreview(){
   ensurePreviewCss();
   const box=document.getElementById('previewBox');
   const {nNew,nDupe,nSkip,nUncat}=importStats();
+  const m = importMeta||{};
+  const ibanTail = m.iban ? normIban(m.iban).slice(-4) : '';
+  const period = (m.from||m.to) ? `${m.from||'?'} → ${m.to||'?'}` : '';
+  const balLine = !isNaN(m.opening) ? `ouverture ${eur(m.opening)} → clôture ${eur(m.closing)}` : '';
+  // En-tête « relevé reconnu » + choix du compte (au lieu des 8 menus)
+  const header = `
+    <div class="card" style="margin-bottom:14px;background:var(--green-soft);border-color:#BcD6c2">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div style="font-size:26px;line-height:1">✓</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:var(--green-deep)">Relevé reconnu${m.holder?` — ${m.holder}`:''}</div>
+          <div class="sub" style="color:var(--green-deep)">${parsedRows.length} mouvement(s)${ibanTail?` · IBAN …${ibanTail}`:''}${period?` · ${period}`:''}${balLine?` · ${balLine}`:''}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="l" style="font-size:11px;color:var(--green-deep)">${ibanDetected?'Compte (reconnu via l’IBAN)':'Sur quel compte ? (mémorisé)'}</div>
+          <select class="fld" id="pvAcct" style="margin-top:4px;font-weight:600${ibanDetected?'':';border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)'}">
+            <option value="pay" ${importTargetAcct==='pay'?'selected':''}>💳 Compte de paiement</option>
+            <option value="res" ${importTargetAcct==='res'?'selected':''}>🏦 Compte de réserve</option>
+          </select>
+        </div>
+      </div>
+    </div>`;
   box.innerHTML = `
+    ${header}
     ${nUncat?`<div class="alert"><span class="ic">⚠</span><div><b>${nUncat} transaction(s) non reconnue(s).</b> Choisissez une catégorie, ou ajoutez une règle dans « Règles & alias ».</div></div>`:''}
-    <div class="mini-h">Validation — catégories, doublons (en rouge) &amp; suppression</div>
+    <div class="h-row" style="margin:4px 0 6px"><div class="mini-h" style="margin:0">Vérifiez et validez — doublons en rouge</div>
+      <a class="lk" id="toMapping" style="font-size:11.5px;color:var(--ink-faint)">⚙ ajuster les colonnes</a></div>
     <div class="card" style="padding:8px 14px">
       <table><tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Catégorie</th><th>Statut</th><th></th></tr>
       <tbody>${interpreted.map((t,i)=>renderPreviewRow(t,i)).join('')}</tbody></table>
@@ -907,7 +985,12 @@ function paintPreview(){
         <button class="btn btn-primary" id="saveImp2" ${nNew?'':'disabled style="opacity:.5"'}>Valider &amp; sauvegarder</button>
       </div>
     </div>`;
-  box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{ interpreted[+s.dataset.i].high=s.value; paintPreview(); });
+  box.querySelector('#pvAcct').onchange = e=>{ importTargetAcct=e.target.value; ibanDetected=false; showPreview(); };
+  box.querySelector('#toMapping').onclick = ()=>showMapping();
+  box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{
+    if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name) interpreted[+s.dataset.i].high=name; paintPreview(); return; }
+    interpreted[+s.dataset.i].high=s.value; paintPreview();
+  });
   box.querySelectorAll('.lk').forEach(b=>b.onclick=()=>{
     const i=+b.dataset.i, t=interpreted[i];
     if(b.dataset.act==='skip') t._skip=true;
@@ -1020,8 +1103,12 @@ function handleFile(file){
     ibanDetected = false;
     const key = meta && meta.iban ? normIban(meta.iban) : null;
     if (key && state.ibanMap && state.ibanMap[key]){ importTargetAcct = state.ibanMap[key]; ibanDetected = true; }
+    // Format Syndic4you/Swan reconnu (Date + Crédit + Débit présents) → on saute
+    // l'association manuelle et on va droit à l'aperçu. Sinon : mapping manuel.
+    recognizedFormat = mapping.date>=0 && mapping.credit>=0 && mapping.debit>=0;
     showImportScreen();
-    showMapping();
+    if (recognizedFormat) showPreview();
+    else showMapping();
   };
   if (isPdf) reader.readAsArrayBuffer(file); else reader.readAsText(file, 'utf-8');
 }
@@ -1635,7 +1722,7 @@ function renderRules(){
   const t=document.getElementById('ruleTable'); if(!t) return;
   t.innerHTML='<tr><th>Tiers (libellé)</th><th>Catégorie</th><th>Sous-catégorie</th><th></th></tr>';
   state.rules.forEach((r,i)=>t.insertAdjacentHTML('beforeend',`<tr data-i="${i}"><td><input class="fld rl-label" value="${r[0]}" style="width:160px;font-weight:600"></td>
-    <td><select class="fld rl-cat">${CATS.map(c=>`<option ${c===r[1]?'selected':''}>${c}</option>`).join('')}</select></td>
+    <td><select class="fld rl-cat">${allCats().map(c=>`<option ${c===r[1]?'selected':''}>${c}</option>`).join('')}</select></td>
     <td><input class="fld rl-sub" value="${r[2]||''}" style="width:140px"></td>
     <td style="text-align:right"><button class="flagbtn rl-del" style="opacity:.5">✕</button></td></tr>`));
   t.querySelectorAll('tr[data-i]').forEach(tr=>{
