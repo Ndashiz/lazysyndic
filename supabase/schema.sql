@@ -150,13 +150,13 @@ end $$;
 --  sans dépendre d'aucun trigger :
 -- ============================================================
 -- insert into public.ls_members (id, email, full_name, role, owner_short)
---   select id, email, 'Alex Martin', 'admin', 'Alex' from auth.users where email='EMAIL_SIMON'
+--   select id, email, 'Alex Martin', 'admin', 'Alex' from auth.users where email='EMAIL_ADMIN'
 --   on conflict (id) do update set role=excluded.role, owner_short=excluded.owner_short, full_name=excluded.full_name;
 -- insert into public.ls_members (id, email, full_name, role, owner_short)
---   select id, email, 'Sam Bernard', 'read', 'Sam' from auth.users where email='EMAIL_PENG'
+--   select id, email, 'Sam Bernard', 'read', 'Sam' from auth.users where email='EMAIL_LECTEUR_1'
 --   on conflict (id) do update set role=excluded.role, owner_short=excluded.owner_short, full_name=excluded.full_name;
 -- insert into public.ls_members (id, email, full_name, role, owner_short)
---   select id, email, 'Lou Petit', 'read', 'Lou' from auth.users where email='EMAIL_AUDE'
+--   select id, email, 'Lou Petit', 'read', 'Lou' from auth.users where email='EMAIL_LECTEUR_2'
 --   on conflict (id) do update set role=excluded.role, owner_short=excluded.owner_short, full_name=excluded.full_name;
 
 -- ============================================================
