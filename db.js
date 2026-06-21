@@ -83,6 +83,8 @@
       reserveTarget: Number(settings.reserve_target||2000),
       ibanMap: settings.iban_map || {},
       coproName: settings.copro_name || '',
+      coproAddr: settings.copro_addr || '',
+      coproKbo:  settings.copro_kbo  || '',
       budgetKeys: settings.budget_keys || {},
       ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
       recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
