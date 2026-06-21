@@ -34,10 +34,12 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.ls_members where id = auth.uid());
 $$;
 
-drop policy if exists ls_members_read   on public.ls_members;
-drop policy if exists ls_members_self    on public.ls_members;
+drop policy if exists ls_members_read on public.ls_members;
+drop policy if exists ls_members_self on public.ls_members;   -- supprimée : empêchait pas l'auto-élévation de rôle
+-- Lecture seule pour le client. AUCUNE policy d'écriture : ls_members (rôles)
+-- est géré exclusivement côté serveur (SQL editor / service role). Sans cela,
+-- un membre « read » pouvait se mettre role='admin' sur sa propre ligne.
 create policy ls_members_read on public.ls_members for select using (id = auth.uid() or public.ls_is_admin());
-create policy ls_members_self on public.ls_members for update using (id = auth.uid());
 
 -- ============================================================
 --  2. RÉFÉRENTIEL COPRO
