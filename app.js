@@ -1001,7 +1001,16 @@ function paintPreview(){
   box.querySelector('#cancelImp2').onclick = resetImport;
   box.querySelector('#saveImp2').onclick = commitImport;
 }
-function showPreview(){ interpreted = interpret(); paintPreview(); }
+function showPreview(){
+  // S'assure que le conteneur existe même quand le mapping manuel a été sauté
+  // (format reconnu → aperçu direct).
+  const after=document.getElementById('afterDrop');
+  if(after){ after.style.display='block'; after.querySelectorAll(':scope > *').forEach(el=>{ if(el.id!=='importLive') el.style.display='none'; }); }
+  let live=document.getElementById('importLive');
+  if(!live){ live=document.createElement('div'); live.id='importLive'; after && after.prepend(live); }
+  if(!document.getElementById('previewBox')){ live.innerHTML='<div id="previewBox"></div>'; }
+  interpreted = interpret(); paintPreview();
+}
 
 async function commitImport(){
   if(!canWrite()){ alert('Lecture seule : seul le syndic peut importer.'); return; }
