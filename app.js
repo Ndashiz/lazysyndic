@@ -246,9 +246,29 @@ const ownersOf = () => (state.owners && state.owners.length) ? state.owners : OW
 // contient le nom court OU le nom complet du copro.
 // Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
 function detectOwner(t){
-  const hay = norm(t.tiers);
+  const hay = norm(t.tiers + ' ' + (t.note||''));
+  const om = (typeof state!=='undefined'&&state&&state.ownerRules)||{};
+  for (const lbl in om){ if(lbl && hay.includes(lbl)) return om[lbl]; }   // libellés déjà normalisés
   const o = ownersOf().find(o => hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n))));
   return o ? o.short : '';
+}
+// Options de catégorie réutilisables (import + liste).
+function categoryOptions(sel){
+  return [...allCats().map(c=>({v:c,l:c})), {v:'?',l:'À catégoriser'}, {v:'__new__',l:'➕ Nouvelle catégorie…'}]
+    .map(o=>`<option value="${o.v}" ${(sel===o.v||(o.v==='?'&&(sel==='?'||!sel)))?'selected':''}>${o.l}</option>`).join('');
+}
+// Apprentissage : mémorise libellé→catégorie (règle) et libellé→copro (owner_rules).
+function learnCategory(label, high){
+  if(!canWrite()||!label||!high||high==='?') return;
+  const ln=norm(label); const r=state.rules.find(r=>norm(r[0])===ln);
+  if(r){ if(r[1]!==high){ r[1]=high; r[2]=''; dbWrite(db=>db.updateRule(r[3],{high,sub:''})); } }
+  else { const nr=[label,high,'',null]; state.rules.push(nr); dbWrite(async db=>{ const s=await db.addRule({label,high,sub:''}); nr[3]=s.id; }); }
+}
+function learnOwner(label, short){
+  if(!canWrite()||!label) return;
+  state.ownerRules=state.ownerRules||{}; const ln=norm(label);
+  if(short) state.ownerRules[ln]=short; else delete state.ownerRules[ln];
+  dbWrite(db=>db.updateSettings({owner_rules: state.ownerRules}));
 }
 // Copropriétaire effectif : attribution explicite (t.owner) sinon auto.
 function ownerOfTx(t){ return (t.owner!==undefined && t.owner!=='') ? t.owner : detectOwner(t); }
@@ -431,7 +451,7 @@ function renderTx(acct){
       <td><button class="flagbtn">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
-      <td><span class="cat ${catClass(t.high)}">${catLabel}</span></td>
+      <td>${canWrite()?`<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>`:`<span class="cat ${catClass(t.high)}">${catLabel}</span>`}</td>
       <td class="num ${amtClass}">${signed(t.amount)}</td>
       <td>${ownerSel}${note}${cmt}</td>`;
     tr.querySelector('.flagbtn').onclick=()=>{
@@ -452,7 +472,18 @@ function renderTx(acct){
       t.owner = osel.value;
       saveState();
       dbWrite(db=>db.updateTransaction(t.id, {owner: osel.value}));
+      learnOwner(t.tiers, osel.value);
       renderDashboard(); renderProvisions();
+    };
+    const csel = tr.querySelector('.tx-cat');
+    if (csel) csel.onchange = ()=>{
+      if(!canWrite()) return;
+      let val=csel.value;
+      if(val==='__new__'){ const name=addCategory(prompt('Nouvelle catégorie :','')||''); if(!name){ renderTx(acct); return; } val=name; }
+      t.high=val; t.sub='';
+      saveState(); dbWrite(db=>db.updateTransaction(t.id,{high:val, sub:''}));
+      learnCategory(t.tiers, val);
+      renderAll();
     };
     tb.appendChild(tr);
   });
@@ -991,10 +1022,11 @@ function paintPreview(){
     </div>`;
   box.querySelector('#pvAcct').onchange = e=>{ importTargetAcct=e.target.value; ibanDetected=false; showPreview(); };
   box.querySelector('#toMapping').onclick = ()=>showMapping();
-  box.querySelectorAll('.pv-owner').forEach(s=>s.onchange=()=>{ interpreted[+s.dataset.i].owner=s.value; });
+  box.querySelectorAll('.pv-owner').forEach(s=>s.onchange=()=>{ const t=interpreted[+s.dataset.i]; t.owner=s.value; learnOwner(t.tiers, s.value); });
   box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{
-    if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name) interpreted[+s.dataset.i].high=name; paintPreview(); return; }
-    interpreted[+s.dataset.i].high=s.value; paintPreview();
+    const t=interpreted[+s.dataset.i];
+    if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name){ t.high=name; learnCategory(t.tiers,name); } paintPreview(); return; }
+    t.high=s.value; learnCategory(t.tiers, s.value); paintPreview();
   });
   box.querySelectorAll('.lk').forEach(b=>b.onclick=()=>{
     const i=+b.dataset.i, t=interpreted[i];
