@@ -1042,79 +1042,173 @@ function renderImports(){
 /* ============================================================
    ASSEMBLÉES GÉNÉRALES  (inchangé — démo interactive)
    ============================================================ */
+/* ===== Assemblées générales (persistées en base) ===== */
 const MAJ={simple:'Majorité simple',absolue:'Majorité absolue',deuxtiers:'Double tiers',quatrecinq:'Quatre cinquièmes',unanime:'Unanimité'};
 const MAJPCT={simple:50,absolue:51,deuxtiers:67,quatrecinq:80,unanime:100};
-const MAJTHRESH={simple:501,absolue:501,deuxtiers:667,quatrecinq:800,unanime:1000};
-const POINTS=[
-  {t:'Désignation du président et du secrétaire de séance',type:'Décision',maj:'simple',key:'Acte de base'},
-  {t:'Approbation des comptes de l’exercice 2025',type:'Décision',maj:'absolue',key:'Acte de base'},
-  {t:'Décharge au syndic bénévole',type:'Décision',maj:'simple',key:'Acte de base'},
-  {t:'Approbation du budget prévisionnel 2026',type:'Décision',maj:'absolue',key:'Acte de base'},
-  {t:'Réfection de la toiture — choix du devis',type:'Décision',maj:'deuxtiers',key:'Acte de base'},
-  {t:'Divers',type:'Information',maj:null,key:null},
-];
-const AG_OWNERS=[{n:'Alex',q:500,c:'#2F6B53'},{n:'Sam',q:251,c:'#5B4B86'},{n:'Lou',q:249,c:'#C9854A'}];
-
+const AG_STATUS={prep:'En cours de préparation',convoquee:'Convocations envoyées',tenue:'Séance tenue',finalisee:'AG finalisée'};
+function agTotalQuot(){ return sum(ownersOf().map(o=>o.q))||1000; }
+function majNeed(maj){ const tot=agTotalQuot();
+  if(maj==='unanime') return tot;
+  if(maj==='quatrecinq') return Math.ceil(tot*4/5);
+  if(maj==='deuxtiers') return Math.ceil(tot*2/3);
+  return Math.floor(tot/2)+1; // simple / absolue : > moitié
+}
+function agOwnerList(){ return ownersOf().map(o=>({n:o.n, short:o.short||o.n, q:o.q, c:o.c})); }
 function majOptions(sel){return Object.entries(MAJ).map(([k,v])=>`<option value="${k}" ${k===sel?'selected':''}>${v}</option>`).join('');}
+
+let curStep=1;
+let currentAG=null;
+function pickCurrentAG(){ currentAG=(state.ags||[]).find(a=>a.status!=='finalisee')||null; }
+
+function setAgStatus(status){
+  const st=document.getElementById('agStatus'); if(!st) return;
+  const map={prep:['var(--coral-soft)','#E8BDB4','#8C342A','var(--coral)'],
+             convoquee:['var(--clay-soft)','#E0C49B','#8A551F','var(--clay)'],
+             tenue:['var(--clay-soft)','#E0C49B','#8A551F','var(--clay)'],
+             finalisee:['var(--green-soft)','#BcD6c2','var(--green-deep)','var(--green)']};
+  const c=map[status]||map.prep;
+  st.style.background=c[0]; st.style.borderColor=c[1]; st.style.color=c[2];
+  const dot=st.querySelector('.dot'); if(dot) dot.style.background=c[3];
+  if(st.childNodes[1]) st.childNodes[1].textContent=' '+(AG_STATUS[status]||status);
+  else st.appendChild(document.createTextNode(' '+(AG_STATUS[status]||status)));
+}
+
+async function agCreateNew(){
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const ag={title:'Assemblée générale', ag_date:'', lieu:'', type:'Ordinaire', status:'prep', presence:{}, points:[]};
+  if(writeToDb()){
+    try{ const saved=await window.LS.db.agCreate({title:ag.title,type:ag.type,status:'prep',presence:{}});
+      ag.id=saved.id; ag.created_at=saved.created_at; }
+    catch(e){ alert('Création impossible : '+(e.message||e)); return; }
+  } else { ag.id='local-ag-'+Date.now(); }
+  state.ags=state.ags||[]; state.ags.unshift(ag);
+  curStep=1; renderAG();
+}
+
+function renderAG(){
+  pickCurrentAG();
+  const stepper=document.getElementById('stepper'); if(!stepper) return;
+  let createBox=document.getElementById('agCreateBox');
+  if(!createBox){ createBox=document.createElement('div'); createBox.id='agCreateBox'; stepper.after(createBox); }
+  const has=!!currentAG;
+  stepper.style.display=has?'flex':'none';
+  if(!has){
+    document.querySelectorAll('#ag .agpanel').forEach(p=>p.style.display='none');
+    createBox.style.display='block';
+    createBox.innerHTML=`<div class="card" style="text-align:center;padding:36px">
+      <div style="font-size:40px">🗳️</div>
+      <h2 style="font-family:'Fraunces',serif;font-size:20px;margin-top:8px">Aucune assemblée en cours</h2>
+      <div class="sub" style="max-width:480px;margin:8px auto 20px">Créez une assemblée pour préparer l'ordre du jour, convoquer, tenir la séance et générer le PV. Les AG finalisées restent dans l'historique ci-dessous.</div>
+      ${canWrite()?'<button class="btn btn-primary" id="agCreate">+ Nouvelle assemblée</button>':'<div class="sub">Seul le syndic peut créer une assemblée.</div>'}</div>`;
+    createBox.querySelector('#agCreate')?.addEventListener('click',agCreateNew);
+    const tt=document.getElementById('agTitle'); if(tt) tt.textContent='Assemblées générales';
+    setAgStatus('prep');
+  } else {
+    createBox.style.display='none';
+    const tt=document.getElementById('agTitle'); if(tt) tt.textContent=currentAG.title||'Assemblée générale';
+    const d=document.getElementById('agDate'); if(d) d.value=currentAG.ag_date||'';
+    const l=document.getElementById('agLieu'); if(l) l.value=currentAG.lieu||'';
+    const ty=document.getElementById('agType'); if(ty) ty.value=currentAG.type||'Ordinaire';
+    setAgStatus(currentAG.status);
+    renderAgenda(); renderPresences(); renderSeance();
+    goStep(curStep);
+  }
+  renderAGArchive();
+}
+
+// édition de l'en-tête (date / lieu / type)
+['agDate','agLieu','agType'].forEach(id=>{
+  document.getElementById(id)?.addEventListener('change',e=>{
+    if(!currentAG||!canWrite()) return;
+    const field = id==='agDate'?'ag_date':(id==='agLieu'?'lieu':'type');
+    currentAG[field]=e.target.value;
+    currentAG.title=(currentAG.type||'AG')+(currentAG.ag_date?(' — '+currentAG.ag_date):'');
+    const tt=document.getElementById('agTitle'); if(tt) tt.textContent=currentAG.title;
+    dbWrite(db=>db.agUpdate(currentAG.id,{[field]:e.target.value, title:currentAG.title}));
+  });
+});
+
+function persistPoint(p, patch){ Object.assign(p,patch); dbWrite(db=>db.agPointUpdate(p.id,patch)); }
+
 function renderAgenda(){
-  const wrap=document.getElementById('agenda'); if(!wrap) return; wrap.innerHTML='';
-  POINTS.forEach((p,i)=>{
-    const isDec=p.type==='Décision';
+  const wrap=document.getElementById('agenda'); if(!wrap||!currentAG) return; wrap.innerHTML='';
+  const pts=currentAG.points; const ro=!canWrite();
+  pts.forEach((p,i)=>{
+    const isDec=p.kind==='decision';
     const card=document.createElement('div'); card.className='card'; card.style.marginBottom='12px';
     card.innerHTML=`
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <span style="font-family:'Fraunces',serif;font-weight:600;color:var(--ink-faint)">${i+1}</span>
-        <input class="fld" style="flex:1;font-weight:600" value="${p.t}">
-        <span class="cat ${isDec?'':'ent'}">${p.type}</span>
-        <button class="flagbtn" style="opacity:.5" title="Monter">↑</button>
-        <button class="flagbtn" style="opacity:.5" title="Descendre">↓</button>
-        <button class="flagbtn" style="opacity:.5" title="Supprimer">✕</button>
+        <input class="fld pt-title" ${ro?'disabled':''} style="flex:1;font-weight:600" value="${(p.title||'').replace(/"/g,'&quot;')}">
+        <select class="fld pt-kind" ${ro?'disabled':''} style="width:130px"><option value="decision" ${isDec?'selected':''}>Décision</option><option value="info" ${!isDec?'selected':''}>Information</option></select>
+        <button class="flagbtn pt-up" style="opacity:.5" title="Monter">↑</button>
+        <button class="flagbtn pt-down" style="opacity:.5" title="Descendre">↓</button>
+        <button class="flagbtn pt-del" style="opacity:.5" title="Supprimer">✕</button>
       </div>
-      <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px">
-        <div style="display:flex;gap:2px;padding:6px 8px;background:var(--card-2);border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft)">
-          <b style="padding:2px 6px;font-weight:700">B</b><i style="padding:2px 6px">I</i><u style="padding:2px 6px">U</u><span style="padding:2px 6px">⛓</span><span style="padding:2px 6px">• ⁝</span><span style="padding:2px 6px">1.</span>
-        </div>
-        <div contenteditable style="padding:10px 12px;min-height:44px;font-size:13.5px;color:var(--ink-soft)">${i===1?'Présentation des annexes 2, 3 et 4. Solde de clôture '+eur(balance('pay'))+' au compte de paiement.':'Décrivez le point ici…'}</div>
-      </div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <div style="display:${isDec?'flex':'none'};gap:10px;align-items:center">
-          <label style="font-size:12px;color:var(--ink-faint)">Majorité requise</label>
-          <select class="fld majsel" data-i="${i}">${majOptions(p.maj)}</select>
-          <span class="cat acp pctlbl" data-i="${i}">${isDec?MAJPCT[p.maj]+' %':''}</span>
-        </div>
-        <div style="display:${isDec?'flex':'none'};gap:10px;align-items:center">
-          <label style="font-size:12px;color:var(--ink-faint)">Clé</label>
-          <select class="fld"><option>Acte de base (quotités)</option><option>Individuelle (÷ propriétaires)</option></select>
-        </div>
-        ${isDec?'':'<span class="sub">Point informatif — non soumis au vote</span>'}
+      <div ${ro?'':'contenteditable'} class="fld pt-body" style="padding:10px 12px;min-height:44px;font-size:13.5px;color:var(--ink-soft)">${p.body||''}</div>
+      <div class="pt-majwrap" style="display:${isDec?'flex':'none'};gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--ink-faint)">Majorité requise</label>
+        <select class="fld pt-maj" ${ro?'disabled':''}>${majOptions(p.majorite)}</select>
+        <span class="cat acp pt-pct">${MAJPCT[p.majorite]} %</span>
+        <label style="font-size:12px;color:var(--ink-faint);margin-left:10px">Clé</label>
+        <select class="fld pt-cle" ${ro?'disabled':''}><option ${p.cle==='Acte de base'?'selected':''}>Acte de base</option><option ${p.cle!=='Acte de base'?'selected':''}>Individuelle</option></select>
       </div>`;
+    if(!ro){
+      card.querySelector('.pt-title').onchange=e=>persistPoint(p,{title:e.target.value});
+      card.querySelector('.pt-body').onblur=e=>persistPoint(p,{body:e.target.innerText});
+      card.querySelector('.pt-kind').onchange=e=>{persistPoint(p,{kind:e.target.value}); renderAgenda(); renderSeance();};
+      card.querySelector('.pt-maj').onchange=e=>{persistPoint(p,{majorite:e.target.value}); card.querySelector('.pt-pct').textContent=MAJPCT[e.target.value]+' %'; renderSeance();};
+      card.querySelector('.pt-cle').onchange=e=>persistPoint(p,{cle:e.target.value});
+      card.querySelector('.pt-up').onclick=()=>movePoint(i,-1);
+      card.querySelector('.pt-down').onclick=()=>movePoint(i,1);
+      card.querySelector('.pt-del').onclick=()=>delPoint(p,i);
+    }
     wrap.appendChild(card);
   });
-  wrap.querySelectorAll('.majsel').forEach(s=>s.onchange=()=>{
-    const i=s.dataset.i; document.querySelector(`.pctlbl[data-i="${i}"]`).textContent=MAJPCT[s.value]+' %';
-  });
+  const c=document.getElementById('ptCount'); if(c) c.textContent=pts.length+' point'+(pts.length>1?'s':'');
 }
-document.getElementById('addPoint')?.addEventListener('click',()=>{POINTS.push({t:'Nouveau point',type:'Décision',maj:'simple',key:'Acte de base'});renderAgenda();});
+function movePoint(i,dir){
+  const pts=currentAG.points, j=i+dir; if(j<0||j>=pts.length) return;
+  [pts[i],pts[j]]=[pts[j],pts[i]];
+  pts.forEach((p,k)=>{ if(p.pos!==k){ p.pos=k; dbWrite(db=>db.agPointUpdate(p.id,{pos:k})); }});
+  renderAgenda(); renderSeance();
+}
+function delPoint(p,i){
+  if(!canWrite()) return;
+  currentAG.points.splice(i,1);
+  dbWrite(db=>db.agPointDelete(p.id));
+  renderAgenda(); renderSeance();
+}
+document.getElementById('addPoint')?.addEventListener('click',()=>{
+  if(!currentAG){ alert('Créez d’abord une assemblée.'); return; }
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const pos=currentAG.points.length;
+  const p={pos, title:'Nouveau point', body:'', kind:'decision', majorite:'simple', cle:'Acte de base', votes:{}, seance_notes:'', decision:''};
+  currentAG.points.push(p);
+  renderAgenda(); renderSeance();
+  dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,kind:'decision',majorite:'simple',cle:'Acte de base'}); p.id=s.id; });
+});
+
 document.getElementById('genConv')?.addEventListener('click',()=>{
-  const points=POINTS.map((p,i)=>`${i+1}. ${p.t}${p.type==='Décision'?' ('+MAJ[p.maj]+')':' (information)'}`).join('\n');
-  const val=(id,d)=>{ const e=document.getElementById(id); return (e&&e.value.trim())||d; };
-  const cn = (state.coproName||'').trim() || 'la copropriété';
-  const m = (window.LS && window.LS.member) || {};
-  const syndic = (m.full_name||'').trim() || 'Le syndic';
-  const syndicEmail = m.userEmail || m.email || 'syndic@exemple.be';
-  const dateHeure = val('agDate','(date à préciser)');
-  const lieu = val('agLieu','(lieu à préciser)');
-  const dest = val('agDest', ownersOf().map(o=>o.n).filter(n=>n!==m.full_name).join(', '));
+  if(!currentAG){ alert('Aucune assemblée.'); return; }
+  const points=currentAG.points.map((p,i)=>`${i+1}. ${p.title}${p.kind==='decision'?' ('+MAJ[p.majorite]+')':' (information)'}`).join('\n');
+  const cn=(state.coproName||'').trim()||'la copropriété';
+  const m=(window.LS&&window.LS.member)||{};
+  const syndic=(m.full_name||'').trim()||'Le syndic';
+  const syndicEmail=m.userEmail||m.email||'syndic@exemple.be';
+  const dateHeure=currentAG.ag_date||'(date à préciser)';
+  const lieu=currentAG.lieu||'(lieu à préciser)';
+  const dest=ownersOf().map(o=>o.n).filter(n=>n!==m.full_name).join(', ');
   const eml=`From: ${syndic} (Syndic) <${syndicEmail}>
 To: ${dest}
-Subject: Convocation - Assemblee generale ordinaire - ${cn} - ${dateHeure}
+Subject: Convocation - Assemblee generale ${currentAG.type||'ordinaire'} - ${cn} - ${dateHeure}
 MIME-Version: 1.0
 Content-Type: text/plain; charset="utf-8"
 
 Madame, Monsieur, cher coproprietaire,
 
-En ma qualite de syndic benevole de ${cn}, j'ai l'honneur de vous
-convoquer a l'assemblee generale ORDINAIRE qui se tiendra :
+En ma qualite de syndic de ${cn}, j'ai l'honneur de vous convoquer a
+l'assemblee generale qui se tiendra :
 
     Date : ${dateHeure}
     Lieu : ${lieu}
@@ -1129,123 +1223,189 @@ ${points}
 Tout coproprietaire empeche peut se faire representer par procuration ecrite.
 
 Salutations distinguees,
-${syndic} - Syndic benevole, ${cn}
+${syndic} - Syndic, ${cn}
 `;
   const blob=new Blob([eml],{type:'message/rfc822'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG.eml';
   document.body.appendChild(a); a.click(); a.remove();
+  if(canWrite() && currentAG.status==='prep'){
+    currentAG.status='convoquee'; currentAG.convocation_date=new Date().toLocaleDateString('fr-BE');
+    setAgStatus('convoquee');
+    dbWrite(db=>db.agUpdate(currentAG.id,{status:'convoquee',convocation_date:currentAG.convocation_date}));
+  }
 });
 
-function renderSeance(){
-  const wrap=document.getElementById('seance'); if(!wrap) return; wrap.innerHTML='';
-  POINTS.forEach((p,i)=>{
-    const isDec=p.type==='Décision';
-    const card=document.createElement('div'); card.className='card'; card.style.marginBottom='12px';
-    let votes='';
-    if(isDec){
-      votes=`<div style="margin-top:12px">
-        ${AG_OWNERS.map(o=>`
-          <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">
-            <span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${o.n[0]}</span>
-            <span style="font-size:13.5px;flex:1">${o.n} <span style="color:var(--ink-faint)">· ${o.q}</span></span>
-            <div class="seg vote" data-p="${i}" data-q="${o.q}">
-              <button class="vp on">Pour</button><button class="vc">Contre</button><button class="va">Abst.</button>
-            </div>
-          </div>`).join('')}
-        <div class="verdict" data-p="${i}" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:10px 14px;background:var(--green-soft);border-radius:11px">
-          <span style="font-size:13px;color:var(--ink-soft)">Pour : <b class="pourq">1000</b>/1000 · requis ${MAJTHRESH[p.maj]} (${MAJ[p.maj]})</span>
-          <span class="vbadge badge b-ok">Adopté</span>
-        </div></div>`;
-    } else { votes='<div class="sub" style="margin-top:8px">Point informatif — pas de vote</div>'; }
-    card.innerHTML=`
-      <div style="display:flex;align-items:center;gap:10px"><span style="font-family:'Fraunces',serif;font-weight:600;color:var(--ink-faint)">${i+1}</span>
-        <b style="flex:1;font-size:14.5px">${p.t}</b>${isDec?`<span class="cat acp">${MAJ[p.maj]}</span>`:'<span class="cat ent">Information</span>'}</div>
-      <div contenteditable class="fld" style="width:100%;margin-top:10px;min-height:38px;font-size:13px;color:var(--ink-soft)">Notes de séance…</div>
-      ${votes}`;
+function setPresence(short,patch){
+  if(!currentAG) return;
+  currentAG.presence=currentAG.presence||{};
+  currentAG.presence[short]={...(currentAG.presence[short]||{status:'pre'}),...patch};
+  dbWrite(db=>db.agUpdate(currentAG.id,{presence:currentAG.presence}));
+}
+function renderPresences(){
+  const wrap=document.getElementById('presences'); if(!wrap||!currentAG) return; wrap.innerHTML='';
+  const pres=currentAG.presence||{}; const ro=!canWrite();
+  agOwnerList().forEach(o=>{
+    const st=(pres[o.short]&&pres[o.short].status)||'pre';
+    const card=document.createElement('div'); card.className='card'; card.style.marginBottom='10px';
+    card.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="a" style="width:28px;height:28px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700">${(o.n||'?')[0]}</span>
+      <b style="font-size:14px">${o.n}</b><span style="color:var(--ink-faint);font-size:13px">${o.q} millièmes</span>
+      <div class="seg pres" data-short="${o.short}" data-q="${o.q}" style="margin-left:auto">
+        <button data-st="pre" class="${st==='pre'?'on':''} p-pre">Présent</button>
+        <button data-st="rep" class="${st==='rep'?'on':''} p-rep">Représenté</button>
+        <button data-st="exc" class="${st==='exc'?'on':''} p-exc">Excusé</button>
+        <button data-st="abs" class="${st==='abs'?'on':''} p-abs">Absent</button>
+      </div></div>
+      <div class="repname" data-short="${o.short}" style="display:${st==='rep'?'block':'none'};margin-top:10px">
+        <input class="fld pres-mand" ${ro?'disabled':''} style="width:100%" placeholder="Nom du mandataire pour ${o.n}…" value="${((pres[o.short]&&pres[o.short].mandataire)||'').replace(/"/g,'&quot;')}">
+      </div>`;
     wrap.appendChild(card);
   });
-  wrap.querySelectorAll('.vote').forEach(seg=>{
-    seg.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
-      seg.querySelectorAll('button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
-      tally(seg.dataset.p);
+  if(!ro){
+    wrap.querySelectorAll('.pres').forEach(seg=>{
+      seg.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
+        seg.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on');
+        const short=seg.dataset.short, stt=btn.dataset.st;
+        const rep=document.querySelector(`.repname[data-short="${short}"]`); if(rep) rep.style.display=stt==='rep'?'block':'none';
+        setPresence(short,{status:stt}); computeQuorum();
+      });
     });
-  });
-  POINTS.forEach((p,i)=>{if(p.type==='Décision')tally(i);});
+    wrap.querySelectorAll('.pres-mand').forEach(inp=>inp.onchange=()=>{
+      const short=inp.closest('.repname').dataset.short; setPresence(short,{mandataire:inp.value});
+    });
+  }
+  computeQuorum();
 }
-function tally(pi){
-  let pour=0;
-  document.querySelectorAll(`.vote[data-p="${pi}"]`).forEach(seg=>{
-    if(seg.querySelector('.vp').classList.contains('on'))pour+=parseInt(seg.dataset.q);
+function computeQuorum(){
+  if(!currentAG) return;
+  const pres=currentAG.presence||{}; let q=0;
+  agOwnerList().forEach(o=>{ const s=(pres[o.short]&&pres[o.short].status)||'pre'; if(s==='pre'||s==='rep') q+=o.q; });
+  const tot=agTotalQuot();
+  const qn=document.getElementById('quorumNum'); if(qn) qn.textContent=q;
+  const card=document.getElementById('quorumCard'),ok=q>=Math.floor(tot/2)+1;
+  const qt=document.getElementById('quorumTxt'); if(qt) qt.textContent=ok?'Quorum atteint — la séance peut délibérer':'Quorum non atteint';
+  if(card){card.style.background=ok?'var(--green-soft)':'var(--coral-soft)';card.style.borderColor=ok?'#BcD6c2':'#E8BDB4';}
+}
+
+function renderSeance(){
+  const wrap=document.getElementById('seance'); if(!wrap||!currentAG) return; wrap.innerHTML='';
+  const ro=!canWrite();
+  currentAG.points.forEach((p,idx)=>{
+    const isDec=p.kind==='decision';
+    const card=document.createElement('div'); card.className='card'; card.style.marginBottom='12px';
+    let votesHtml='';
+    if(isDec){
+      votesHtml=`<div style="margin-top:12px">${agOwnerList().map(o=>{
+        const v=(p.votes&&p.votes[o.short])||'pour';
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">
+          <span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${(o.n||'?')[0]}</span>
+          <span style="font-size:13.5px;flex:1">${o.n} <span style="color:var(--ink-faint)">· ${o.q}</span></span>
+          <div class="seg vote" data-pt="${idx}" data-short="${o.short}" data-q="${o.q}">
+            <button data-v="pour" class="${v==='pour'?'on':''} vp">Pour</button>
+            <button data-v="contre" class="${v==='contre'?'on':''} vc">Contre</button>
+            <button data-v="abst" class="${v==='abst'?'on':''} va">Abst.</button>
+          </div></div>`;}).join('')}
+        <div class="verdict" data-pt="${idx}" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:10px 14px;background:var(--green-soft);border-radius:11px">
+          <span style="font-size:13px;color:var(--ink-soft)">Pour : <b class="pourq">0</b>/${agTotalQuot()} · requis ${majNeed(p.majorite)} (${MAJ[p.majorite]})</span>
+          <span class="vbadge badge b-ok">Adopté</span></div></div>`;
+    } else votesHtml='<div class="sub" style="margin-top:8px">Point informatif — pas de vote</div>';
+    card.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-family:'Fraunces',serif;font-weight:600;color:var(--ink-faint)">${idx+1}</span>
+      <b style="flex:1;font-size:14.5px">${p.title}</b>${isDec?`<span class="cat acp">${MAJ[p.majorite]}</span>`:'<span class="cat ent">Information</span>'}</div>
+      <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:10px;min-height:38px;font-size:13px;color:var(--ink-soft)">${p.seance_notes||''}</div>${votesHtml}`;
+    if(!ro){ const sn=card.querySelector('.pt-snotes'); if(sn) sn.onblur=e=>persistPoint(p,{seance_notes:e.target.innerText}); }
+    wrap.appendChild(card);
   });
-  const maj=POINTS[pi].maj, need=MAJTHRESH[maj];
-  const v=document.querySelector(`.verdict[data-p="${pi}"]`); if(!v)return;
+  if(!ro){
+    wrap.querySelectorAll('.vote').forEach(seg=>{
+      seg.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
+        seg.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on');
+        const idx=+seg.dataset.pt, short=seg.dataset.short, p=currentAG.points[idx];
+        p.votes=p.votes||{}; p.votes[short]=btn.dataset.v;
+        dbWrite(db=>db.agPointUpdate(p.id,{votes:p.votes}));
+        tally(idx);
+      });
+    });
+  }
+  currentAG.points.forEach((p,i)=>{ if(p.kind==='decision') tally(i); });
+}
+function tally(idx){
+  const p=currentAG.points[idx]; if(!p||p.kind!=='decision') return;
+  let pour=0; agOwnerList().forEach(o=>{ const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour') pour+=o.q; });
+  const need=majNeed(p.majorite);
+  const v=document.querySelector(`.verdict[data-pt="${idx}"]`); if(!v) return;
   v.querySelector('.pourq').textContent=pour;
   const ok=pour>=need; const badge=v.querySelector('.vbadge');
   badge.textContent=ok?'Adopté':'Rejeté'; badge.className='vbadge badge '+(ok?'b-ok':'b-late');
   v.style.background=ok?'var(--green-soft)':'var(--coral-soft)';
 }
-document.getElementById('genPV')?.addEventListener('click',()=>alert('⬇ PV généré au format Word (.docx)\n\nReprend l’ordre du jour, les présences, les votes en quotités, les décisions et le bloc signatures. Modifiable avant diffusion.'));
 
-let curStep=1;
+document.getElementById('genPV')?.addEventListener('click',()=>{
+  if(!currentAG){ alert('Aucune assemblée.'); return; }
+  const cn=(state.coproName||'').trim()||'la copropriété';
+  const pres=currentAG.presence||{};
+  const presLbl={pre:'Présent',rep:'Représenté',exc:'Excusé',abs:'Absent'};
+  const owners=agOwnerList();
+  const presRows=owners.map(o=>{ const s=(pres[o.short]&&pres[o.short].status)||'pre';
+    return `<tr><td>${o.n}</td><td>${o.q}</td><td>${presLbl[s]}${pres[o.short]&&pres[o.short].mandataire?(' ('+pres[o.short].mandataire+')'):''}</td></tr>`; }).join('');
+  const ptRows=currentAG.points.map((p,i)=>{
+    let dec='';
+    if(p.kind==='decision'){ let pour=0; owners.forEach(o=>{const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour')pour+=o.q;});
+      const ok=pour>=majNeed(p.majorite); dec=`<div><b>Décision :</b> ${ok?'ADOPTÉ':'REJETÉ'} (${pour}/${agTotalQuot()} pour · ${MAJ[p.majorite]})</div>`; }
+    return `<div style="margin:14px 0"><b>${i+1}. ${p.title}</b>${p.body?`<div style="color:#555">${p.body}</div>`:''}${p.seance_notes?`<div style="font-style:italic">Notes : ${p.seance_notes}</div>`:''}${dec}</div>`;
+  }).join('');
+  const html=`<html><head><meta charset="utf-8"></head><body style="font-family:Georgia,serif;max-width:720px;margin:auto">
+    <h1>Procès-verbal — ${currentAG.type||''} ${cn}</h1>
+    <p><b>Date :</b> ${currentAG.ag_date||''}<br><b>Lieu :</b> ${currentAG.lieu||''}</p>
+    <h2>Présences</h2><table border="1" cellpadding="6" cellspacing="0"><tr><th>Copropriétaire</th><th>Quotité</th><th>Statut</th></tr>${presRows}</table>
+    <h2>Ordre du jour & décisions</h2>${ptRows}
+    <br><br><table width="100%"><tr><td>Le président</td><td>Le secrétaire</td><td>Le commissaire</td></tr></table>
+  </body></html>`;
+  const blob=new Blob([html],{type:'application/msword'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='PV-AG.doc';
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
 function goStep(n){
   curStep=Math.max(1,Math.min(5,n));
   document.querySelectorAll('#stepper .step').forEach(s=>{
     const sn=+s.dataset.step;
     s.classList.toggle('on',sn===curStep);
     s.classList.toggle('done',sn<curStep);
-    s.querySelector('.circ').textContent=sn<curStep?'✓':sn;
+    const circ=s.querySelector('.circ'); if(circ) circ.textContent=sn<curStep?'✓':sn;
   });
   document.querySelectorAll('.agpanel').forEach(p=>{p.style.display=(+p.dataset.panel===curStep)?'block':'none';});
-  const st=document.getElementById('agStatus');
-  if(curStep===5){st.style.background='var(--clay-soft)';st.style.borderColor='#E0C49B';st.style.color='#8A551F';st.querySelector('.dot').style.background='var(--clay)';st.childNodes[1].textContent=' Finalisation';}
   window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('#ag .nextStep').forEach(b=>b.onclick=()=>goStep(curStep+1));
 document.querySelectorAll('#ag .prevStep').forEach(b=>b.onclick=()=>goStep(curStep-1));
 document.querySelectorAll('#stepper .step').forEach(s=>s.onclick=()=>goStep(+s.dataset.step));
+
 document.getElementById('completeAG')?.addEventListener('click',function(){
-  this.textContent='✓ AG complétée — archivée';this.disabled=true;this.style.opacity=.7;
-  const st=document.getElementById('agStatus');
-  st.style.background='var(--green-soft)';st.style.borderColor='#BcD6c2';st.style.color='var(--green-deep)';
-  st.querySelector('.dot').style.background='var(--green)';st.childNodes[1].textContent=' AG finalisée';
+  if(!currentAG){ return; }
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  // fige les décisions à partir des votes
+  currentAG.points.forEach(p=>{ if(p.kind==='decision'){
+    let pour=0; agOwnerList().forEach(o=>{const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour')pour+=o.q;});
+    p.decision = pour>=majNeed(p.majorite)?'Adopté':'Rejeté';
+    dbWrite(db=>db.agPointUpdate(p.id,{decision:p.decision, votes:p.votes||{}}));
+  }});
+  currentAG.status='finalisee';
+  dbWrite(db=>db.agUpdate(currentAG.id,{status:'finalisee'}));
+  alert('✓ AG finalisée et archivée. Vous pouvez en créer une nouvelle.');
+  curStep=1; renderAG();
 });
-function renderPresences(){
-  const wrap=document.getElementById('presences'); if(!wrap) return; wrap.innerHTML='';
-  AG_OWNERS.forEach((o,i)=>{
-    const card=document.createElement('div'); card.className='card'; card.style.marginBottom='10px';
-    card.innerHTML=`<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <span class="a" style="width:28px;height:28px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700">${o.n[0]}</span>
-      <b style="font-size:14px">${o.n}</b><span style="color:var(--ink-faint);font-size:13px">${o.q} millièmes</span>
-      <div class="seg pres" data-i="${i}" data-q="${o.q}" style="margin-left:auto">
-        <button class="p-pre on">Présent</button><button class="p-rep">Représenté</button><button class="p-exc">Excusé</button><button class="p-abs">Absent</button>
-      </div>
-    </div>
-    <div class="repname" data-i="${i}" style="display:none;margin-top:10px">
-      <input class="fld" style="width:100%" placeholder="Nom du mandataire présent pour ${o.n}…">
-    </div>`;
-    wrap.appendChild(card);
-  });
-  wrap.querySelectorAll('.pres').forEach(seg=>{
-    seg.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
-      seg.querySelectorAll('button').forEach(b=>b.classList.remove('on'));btn.classList.add('on');
-      const rep=document.querySelector(`.repname[data-i="${seg.dataset.i}"]`);
-      rep.style.display=btn.classList.contains('p-rep')?'block':'none';
-      computeQuorum();
-    });
-  });
-  computeQuorum();
+
+function renderAGArchive(){
+  const box=document.getElementById('agArchive'); if(!box) return;
+  const done=(state.ags||[]).filter(a=>a.status==='finalisee');
+  if(!done.length){ box.innerHTML='<div class="sub" style="padding:14px">Aucune assemblée archivée pour le moment.</div>'; return; }
+  box.innerHTML=done.map(a=>{
+    const pres=a.presence||{}; const n=Object.values(pres).filter(x=>x&&(x.status==='pre'||x.status==='rep')).length;
+    const adopted=a.points.filter(p=>p.decision==='Adopté').length, dec=a.points.filter(p=>p.kind==='decision').length;
+    return `<div class="hist"><span class="v" style="width:auto">${a.ag_date||a.type||'AG'}</span><div><b>${a.title||'Assemblée générale'}</b><div class="meta">${a.points.length} point(s) · ${n} présent(s)/représenté(s) · ${adopted}/${dec} décision(s) adoptée(s)</div></div></div>`;
+  }).join('');
 }
-function computeQuorum(){
-  let q=0;
-  document.querySelectorAll('.pres').forEach(seg=>{
-    const b=seg.querySelector('button.on');
-    if(b&&(b.classList.contains('p-pre')||b.classList.contains('p-rep')))q+=parseInt(seg.dataset.q);
-  });
-  const qn=document.getElementById('quorumNum'); if(qn) qn.textContent=q;
-  const card=document.getElementById('quorumCard'),ok=q>=500;
-  const qt=document.getElementById('quorumTxt'); if(qt) qt.textContent=ok?'Quorum atteint — la séance peut délibérer':'Quorum non atteint';
-  if(card){card.style.background=ok?'var(--green-soft)':'var(--coral-soft)';card.style.borderColor=ok?'#BcD6c2':'#E8BDB4';}
-}
+
 
 /* ============================================================
    CONTRATS (persistés)
@@ -1547,10 +1707,6 @@ document.getElementById('annualNote')?.addEventListener('change', function(){
   state.annualNote = this.value;
   dbWrite(db=>db.updateSettings({annual_note: this.value}));
 });
-function renderAGArchive(){
-  const box=document.getElementById('agArchive'); if(!box) return;
-  box.innerHTML='<div class="sub" style="padding:14px">Aucune assemblée archivée pour le moment. Les AG finalisées apparaîtront ici.</div>';
-}
 function renderAll(){
   renderChrome();
   renderDashboard();
@@ -1565,13 +1721,10 @@ function renderAll(){
   renderKeys();
   renderBudget();
   renderProvisions();
-  renderAGArchive();
+  renderAG();
   renderImports();
   animateBars();
 }
-renderAgenda();
-renderSeance();
-renderPresences();
 
 /* ============================================================
    AUTH + BOOT (en ligne : login Supabase puis chargement partagé)

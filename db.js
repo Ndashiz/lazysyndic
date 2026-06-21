@@ -55,11 +55,15 @@
 
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
-    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports'];
+    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points'];
     const res = {};
     await Promise.all(tables.map(async t=>{
       const {data, error} = await sb.from(t).select('*');
-      if (error) throw new Error(`${t}: ${error.message}`);
+      if (error){
+        // tables AG optionnelles : tolérer leur absence (schéma pas encore migré)
+        if (t==='ls_ag' || t==='ls_ag_points'){ res[t]=[]; return; }
+        throw new Error(`${t}: ${error.message}`);
+      }
       res[t] = data || [];
     }));
     const settings = res.ls_settings[0] || {};
@@ -92,6 +96,15 @@
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0)})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
+      ags: (res.ls_ag||[]).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).map(a=>({
+        id:a.id, title:a.title, ag_date:a.ag_date, lieu:a.lieu, type:a.type||'Ordinaire',
+        convocation_date:a.convocation_date, status:a.status||'prep', presence:a.presence||{},
+        points: (res.ls_ag_points||[]).filter(p=>p.ag_id===a.id).sort((x,y)=>(x.pos||0)-(y.pos||0)).map(p=>({
+          id:p.id, ag_id:p.ag_id, pos:p.pos||0, title:p.title||'', body:p.body||'',
+          kind:p.kind||'decision', majorite:p.majorite||'simple', cle:p.cle||'Acte de base',
+          votes:p.votes||{}, seance_notes:p.seance_notes||'', decision:p.decision||''
+        }))
+      })),
     };
   }
 
@@ -144,6 +157,14 @@
 
     async updateSettings(patch){ const {error}=await T('ls_settings').update(patch).eq('id',1); if(error)throw error; },
     async updateOwner(id, patch){ const {error}=await T('ls_owners').update(patch).eq('id',id); if(error)throw error; },
+
+    // --- Assemblées générales ---
+    async agCreate(row){ const {data,error}=await T('ls_ag').insert(row).select().single(); if(error)throw error; return data; },
+    async agUpdate(id, patch){ const {error}=await T('ls_ag').update(patch).eq('id',id); if(error)throw error; },
+    async agDelete(id){ const {error}=await T('ls_ag').delete().eq('id',id); if(error)throw error; },
+    async agPointAdd(row){ const {data,error}=await T('ls_ag_points').insert(row).select().single(); if(error)throw error; return data; },
+    async agPointUpdate(id, patch){ const {error}=await T('ls_ag_points').update(patch).eq('id',id); if(error)throw error; },
+    async agPointDelete(id){ const {error}=await T('ls_ag_points').delete().eq('id',id); if(error)throw error; },
   };
 
   window.LS = { configured, hasClient, sb, auth, db, member:null, canWrite:false };
