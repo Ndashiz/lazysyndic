@@ -532,14 +532,54 @@ function updateTxToolsCount(){
   const btn=document.getElementById('txDelSel'); if(btn){ btn.disabled=!n; btn.style.opacity=n?'1':'.5'; }
 }
 function removeTxLocal(ids){ const set=new Set(ids); state.tx=state.tx.filter(t=>!set.has(t.id)); }
+// ----- Corbeille (rétention 7 jours) -----
+function trashTx(ids){
+  const set=new Set(ids), now=new Date().toISOString();
+  const moved=state.tx.filter(t=>set.has(t.id)).map(t=>({...t, deleted_at:now}));
+  state.tx=state.tx.filter(t=>!set.has(t.id));
+  state.trash=[...moved, ...(state.trash||[])];
+  saveState(); dbWrite(db=>db.softDeleteTransactions(ids));
+}
+function restoreTrash(ids){
+  if(!canWrite()) return;
+  const set=new Set(ids);
+  const moved=(state.trash||[]).filter(t=>set.has(t.id)).map(t=>{ const {deleted_at, ...rest}=t; return rest; });
+  state.trash=(state.trash||[]).filter(t=>!set.has(t.id));
+  state.tx=[...state.tx, ...moved];
+  saveState(); dbWrite(db=>db.restoreTransactions(ids)); renderAll();
+}
+function purgeTrash(ids){
+  if(!canWrite()) return;
+  if(!confirm(`Supprimer DÉFINITIVEMENT ${ids.length} transaction(s) ? Irréversible.`)) return;
+  const set=new Set(ids);
+  state.trash=(state.trash||[]).filter(t=>!set.has(t.id));
+  saveState(); dbWrite(db=>db.deleteTransactions(ids)); renderTrash();
+}
+function renderTrash(){
+  const box=document.getElementById('trashBox'); if(!box) return;
+  const trash=(state.trash||[]);
+  if(!trash.length || !canWrite()){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='block';
+  const rows=trash.map(t=>{
+    const days=Math.max(0, 7-Math.floor((Date.now()-Date.parse(t.deleted_at))/86400000));
+    return `<tr><td>${t.date}</td><td>${t.tiers}</td><td class="num ${t.amount<0?'neg':'pos'}">${signed(t.amount)}</td>
+      <td class="sub">${t.account==='res'?'réserve':'paiement'} · reste ${days} j</td>
+      <td style="text-align:right;white-space:nowrap"><button class="lk restore-one" data-id="${t.id}">restaurer</button> · <button class="lk del purge-one" data-id="${t.id}">suppr. définitive</button></td></tr>`;
+  }).join('');
+  box.innerHTML=`<div class="mini-h" style="margin-top:22px">🗑 Corbeille (${trash.length}) — récupérable 7 jours</div>
+    <div class="card" style="padding:8px 14px"><table><tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Compte</th><th></th></tr>${rows}</table></div>
+    <div style="margin-top:8px;display:flex;gap:10px"><button class="btn btn-ghost" id="restoreAll">↺ Tout restaurer</button><button class="btn btn-ghost" id="emptyTrash" style="color:var(--coral)">Vider la corbeille</button></div>`;
+  box.querySelectorAll('.restore-one').forEach(b=>b.onclick=()=>restoreTrash([b.dataset.id]));
+  box.querySelectorAll('.purge-one').forEach(b=>b.onclick=()=>purgeTrash([b.dataset.id]));
+  box.querySelector('#restoreAll').onclick=()=>restoreTrash(trash.map(t=>t.id));
+  box.querySelector('#emptyTrash').onclick=()=>purgeTrash(trash.map(t=>t.id));
+}
 function deleteSelectedTx(acct){
   if(!canWrite()) return;
   const ids=[...document.querySelectorAll('#txbody .tx-sel:checked')].map(c=>c.dataset.id);
   if(!ids.length) return;
-  if(!confirm(`Supprimer définitivement ${ids.length} transaction(s) ?`)) return;
-  removeTxLocal(ids); saveState();
-  dbWrite(db=>db.deleteTransactions(ids));
-  renderAll();
+  if(!confirm(`Mettre ${ids.length} transaction(s) à la corbeille ?\nRécupérable pendant 7 jours.`)) return;
+  trashTx(ids); renderAll();
 }
 function deleteAllTx(acct){ resetAccount(acct); }
 // Remise à zéro d'un compte : transactions + solde d'ouverture + réconciliation
@@ -548,15 +588,12 @@ function resetAccount(acct){
   if(!canWrite()){ alert('Lecture seule.'); return; }
   const lbl = acct==='res'?'compte de réserve':'compte de paiement';
   const ids = txOf(acct).map(t=>t.id);
-  if(!confirm(`Réinitialiser le ${lbl} ?\n\nSupprime ${ids.length} transaction(s), remet le solde d'ouverture à 0 et efface la réconciliation. Action irréversible.`)) return;
-  removeTxLocal(ids);
+  if(!confirm(`Réinitialiser le ${lbl} ?\n\n${ids.length} transaction(s) → corbeille (récupérables 7 jours), solde d'ouverture remis à 0, réconciliation effacée.`)) return;
+  if(ids.length) trashTx(ids);
   state.opening = state.opening||{}; state.opening[acct]=0;
   state.recon = state.recon||{}; delete state.recon[acct];
   saveState();
-  dbWrite(async db=>{
-    if(ids.length) await db.deleteTransactions(ids);
-    await db.updateSettings(acct==='res'?{opening_res:0, recon:state.recon}:{opening_pay:0, recon:state.recon});
-  });
+  dbWrite(db=>db.updateSettings(acct==='res'?{opening_res:0, recon:state.recon}:{opening_pay:0, recon:state.recon}));
   renderAll();
 }
 
@@ -1938,6 +1975,7 @@ function renderAll(){
   renderAliases();
   renderBudgetOwn();
   renderKeys();
+  renderTrash();
   renderBudget();
   renderProvisions();
   renderAG();
@@ -1964,6 +2002,7 @@ async function bootData(){
   } else {
     try {
       state = await window.LS.db.loadAll();
+    if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
       if (state.owners && state.owners.length) OWNERS = state.owners;
     } catch(e){
       console.error(e);
