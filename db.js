@@ -81,7 +81,7 @@
       aliases: res.ls_aliases.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.entity, !!r.is_owner, r.short||'', r.id]),
       contracts: res.ls_contracts.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({
         id:r.id, name:r.name, ref:r.ref, type:r.type, start:r.start, note:r.note,
-        status:r.status, end:r.end_date, endNote:r.end_note
+        status:r.status, end:r.end_date, endNote:r.end_note, fournisseur:r.fournisseur||''
       })),
       reminders: res.ls_reminders.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({id:r.id, tx:r.tx, due:r.due, done:!!r.done})),
       imports: res.ls_imports.sort((a,b)=>(b.v||0)-(a.v||0)).map(r=>({id:r.id, v:r.v, label:r.label, meta:r.meta, cur:!!r.cur})),
@@ -152,11 +152,12 @@
 
     async addContract(row){
       const {data,error}=await T('ls_contracts').insert({
-        name:row.name, ref:row.ref, type:row.type, start:row.start, note:row.note, status:row.status||'actif'
+        name:row.name, ref:row.ref, type:row.type, start:row.start, note:row.note, status:row.status||'actif', fournisseur:row.fournisseur||''
       }).select().single(); if(error)throw error; return data;
     },
     async updateContract(id, patch){
       const p={}; if('status'in patch)p.status=patch.status; if('end'in patch)p.end_date=patch.end; if('endNote'in patch)p.end_note=patch.endNote;
+      if('fournisseur'in patch)p.fournisseur=patch.fournisseur; if('note'in patch)p.note=patch.note;
       const {error}=await T('ls_contracts').update(p).eq('id',id); if(error)throw error;
     },
 

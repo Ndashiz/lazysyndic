@@ -98,8 +98,10 @@ create table if not exists public.ls_contracts (
   id uuid primary key default gen_random_uuid(),
   name text not null, ref text, type text, start text, note text,
   status text default 'actif' check (status in ('actif','cloture')),
-  end_date text, end_note text, sort int default 0
+  end_date text, end_note text, fournisseur text, sort int default 0
 );
+-- déploiements existants : ajoute la colonne si absente
+alter table public.ls_contracts add column if not exists fournisseur text;
 create table if not exists public.ls_reminders (
   id uuid primary key default gen_random_uuid(),
   tx text not null, due text, done boolean default false, sort int default 0
