@@ -541,13 +541,22 @@ function deleteSelectedTx(acct){
   dbWrite(db=>db.deleteTransactions(ids));
   renderAll();
 }
-function deleteAllTx(acct){
-  if(!canWrite()) return;
-  const ids=txOf(acct).map(t=>t.id);
-  if(!ids.length) return;
-  if(!confirm(`Supprimer TOUTES les ${ids.length} transactions du ${acct==='res'?'compte de réserve':'compte de paiement'} ?\nAction irréversible.`)) return;
-  removeTxLocal(ids); saveState();
-  dbWrite(db=>db.deleteTransactions(ids));
+function deleteAllTx(acct){ resetAccount(acct); }
+// Remise à zéro d'un compte : transactions + solde d'ouverture + réconciliation
+// (l'IBAN est conservé). Solde calculé revient à 0,00 €.
+function resetAccount(acct){
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const lbl = acct==='res'?'compte de réserve':'compte de paiement';
+  const ids = txOf(acct).map(t=>t.id);
+  if(!confirm(`Réinitialiser le ${lbl} ?\n\nSupprime ${ids.length} transaction(s), remet le solde d'ouverture à 0 et efface la réconciliation. Action irréversible.`)) return;
+  removeTxLocal(ids);
+  state.opening = state.opening||{}; state.opening[acct]=0;
+  state.recon = state.recon||{}; delete state.recon[acct];
+  saveState();
+  dbWrite(async db=>{
+    if(ids.length) await db.deleteTransactions(ids);
+    await db.updateSettings(acct==='res'?{opening_res:0, recon:state.recon}:{opening_pay:0, recon:state.recon});
+  });
   renderAll();
 }
 
@@ -622,7 +631,7 @@ function renderAcctInfo(acct){
       <div class="l" style="font-size:12px;color:var(--ink-faint)">Objectif du fonds de réserve</div>
       <input class="fld" id="acctTarget" ${ed?'':'disabled'} style="width:150px" value="${eur(state.reserveTarget||0)}">
       <span class="sub">cible fixée en AG — pilote la jauge de l'accueil</span></div>` : ''}
-    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}</div>`;
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}${ed?`<button class="lk" id="acctReset" style="margin-left:auto;color:var(--coral)">↺ Réinitialiser ce compte</button>`:''}</div>`;
   if (ed){
     const ib=box.querySelector('#acctIban');
     ib.onchange=()=>{ const v=ib.value.trim(); state.ibans=state.ibans||{}; state.ibans[acct]=v;
@@ -632,6 +641,7 @@ function renderAcctInfo(acct){
       state.opening=state.opening||{}; state.opening[acct]=v;
       dbWrite(db=>db.updateSettings(acct==='res'?{opening_res:v}:{opening_pay:v}));
       refreshAccountChrome(); renderTx(acct); renderChart(acct); renderDashboard(); };
+    box.querySelector('#acctReset')?.addEventListener('click', ()=>resetAccount(acct));
     const tg=box.querySelector('#acctTarget');
     if (tg) tg.onchange=()=>{ const v=parseAmount(tg.value); if(isNaN(v)||v<0){tg.value=eur(state.reserveTarget||0);return;}
       state.reserveTarget=v;
