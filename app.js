@@ -1927,6 +1927,7 @@ document.getElementById('annualNote')?.addEventListener('change', function(){
 function renderAll(){
   renderChrome();
   renderDashboard();
+  renderMySituation();
   renderReminders();
   refreshAccountChrome();
   renderTx(curAcct);
@@ -2435,3 +2436,40 @@ document.getElementById('restoreBtn')?.addEventListener('click', ()=>{
     location.reload();
   };
 })();
+
+/* ============================================================
+   VUE COPROPRIÉTAIRE — « Ma situation »
+   Affichée pour l'utilisateur connecté lié à un copropriétaire.
+   ============================================================ */
+function renderMySituation(){
+  const dash=document.getElementById('dash'); if(!dash) return;
+  let box=document.getElementById('mySituation');
+  if(!box){ box=document.createElement('div'); box.id='mySituation'; box.style.marginBottom='18px';
+    const top=dash.querySelector('.top'); if(top) top.after(box); else dash.prepend(box); }
+  const m=(window.LS&&window.LS.member)||null;
+  const short=m&&m.owner_short;
+  const led = short ? ownerLedger().find(o=>(o.short||o.n)===short) : null;
+  if(!led){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='block';
+  const late=led.solde<-0.005;
+  const myTx=state.tx.filter(t=>t.amount>0 && ownerOfTx(t)===short)
+    .sort((a,b)=>{const da=parseDate(a.date),db=parseDate(b.date);return (db?db.iso:'').localeCompare(da?da.iso:'');});
+  const histo = myTx.length
+    ? `<div class="mini-h" style="margin:16px 0 6px">Mes paiements (${myTx.length})</div>
+       <div style="max-height:230px;overflow:auto"><table>
+         <tr><th>Date</th><th>Compte</th><th>Libellé</th><th class="num">Montant</th></tr>
+         ${myTx.slice(0,30).map(t=>`<tr><td>${t.date}</td><td>${t.account==='res'?'Réserve':'Paiement'}</td><td>${t.tiers}</td><td class="num pos">+${eur(t.amount)}</td></tr>`).join('')}
+       </table></div>`
+    : `<div class="sub" style="margin-top:12px">Aucun paiement enregistré pour le moment.</div>`;
+  box.innerHTML=`<div class="card" style="border-left:5px solid ${led.c}">
+    <div class="h-row"><div style="display:flex;align-items:center;gap:11px">
+      <span class="a" style="width:34px;height:34px;background:${led.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:14px">${(led.short||led.n||'?')[0]}</span>
+      <div><h2 style="margin:0">Ma situation — ${led.n}</h2><div class="sub">${led.q} millièmes${m.role!=='admin'?' · vue copropriétaire':''}</div></div></div>
+      <span class="badge ${late?'b-late':'b-ok'}">${late?'En retard':'À jour'}</span></div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi"><div class="l">Dû (charges + réserve)</div><div class="v">${eur(led.due)}</div></div>
+      <div class="kpi"><div class="l">Versé</div><div class="v" style="color:var(--green)">${eur(led.verse)}</div></div>
+      <div class="kpi"><div class="l">Solde</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${led.solde<0?'−':''}${eur(Math.abs(led.solde))}</div></div>
+    </div>
+    ${histo}</div>`;
+}
