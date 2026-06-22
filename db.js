@@ -162,6 +162,22 @@
     async updateSettings(patch){ const {error}=await T('ls_settings').update(patch).eq('id',1); if(error)throw error; },
     async updateOwner(id, patch){ const {error}=await T('ls_owners').update(patch).eq('id',id); if(error)throw error; },
 
+    // Sauvegarde : dump brut de toutes les tables (forme DB, round-trip fidèle).
+    async dumpAll(){
+      const tables=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_settings','ls_imports','ls_ag','ls_ag_points'];
+      const out={};
+      for(const t of tables){ const {data,error}=await sb.from(t).select('*'); if(error) throw new Error(t+': '+error.message); out[t]=data||[]; }
+      return out;
+    },
+    // Restauration : remplace TOUTES les données par celles de la sauvegarde.
+    async restore(backup){
+      const delOrder=['ls_ag_points','ls_ag','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_owners'];
+      for(const t of delOrder){ const {error}=await sb.from(t).delete().not('id','is',null); if(error) throw new Error('delete '+t+': '+error.message); }
+      const insOrder=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points'];
+      for(const t of insOrder){ const rows=(backup[t]||[]); if(rows.length){ const {error}=await sb.from(t).insert(rows); if(error) throw new Error('insert '+t+': '+error.message); } }
+      if(backup.ls_settings && backup.ls_settings[0]){ const {id, ...rest}=backup.ls_settings[0]; const {error}=await sb.from('ls_settings').update(rest).eq('id',1); if(error) throw new Error('settings: '+error.message); }
+    },
+
     // --- Assemblées générales ---
     async agCreate(row){ const {data,error}=await T('ls_ag').insert(row).select().single(); if(error)throw error; return data; },
     async agUpdate(id, patch){ const {error}=await T('ls_ag').update(patch).eq('id',id); if(error)throw error; },
