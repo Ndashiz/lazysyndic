@@ -500,6 +500,8 @@ function renderTx(acct){
       learnCategory(t.tiers, val);
       renderAll();
     };
+    tr.style.cursor='pointer';
+    tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.cmt-add,.flagbtn')) return; showTxDetail(t); });
     tb.appendChild(tr);
   });
   if (!tb.children.length){
@@ -2650,3 +2652,34 @@ document.getElementById('pasteToCsv')?.addEventListener('click', ()=>{
   downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `releve-swan-${new Date().toISOString().slice(0,10)}.csv`);
   if(cnt) cnt.textContent=`✓ ${txs.length} transaction(s) → CSV téléchargé. Importe-le ci-dessous.`;
 });
+
+/* ============================================================
+   DÉTAIL D'UNE TRANSACTION (clic) — communication complète
+   ============================================================ */
+function showTxDetail(t){
+  let m=document.getElementById('txDetailModal');
+  if(!m){
+    m=document.createElement('div'); m.id='txDetailModal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(33,40,30,.45);z-index:120;display:none;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML='<div class="card" id="txDetailCard" style="width:460px;max-width:94vw"></div>';
+    m.addEventListener('click',e=>{ if(e.target===m) m.style.display='none'; });
+    document.body.appendChild(m);
+  }
+  const owner=ownerOfTx(t);
+  const ow=ownersOf().find(o=>(o.short||o.n)===owner);
+  const line=(l,v)=>v?`<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--line-2)"><span class="sub" style="flex:0 0 auto">${l}</span><span style="font-weight:600;text-align:right">${v}</span></div>`:'';
+  const card=m.querySelector('#txDetailCard');
+  card.innerHTML=`
+    <div class="h-row"><h2>Détail de la transaction</h2><button class="lk" id="txDetailClose" style="font-size:16px">✕</button></div>
+    ${line('Date', t.date)}
+    ${line('Compte', t.account==='res'?'Compte de réserve':'Compte de paiement')}
+    ${line('Tiers', t.tiers)}
+    ${line('Montant', `<span class="${t.amount<0?'neg':'pos'}">${signed(t.amount)}</span>`)}
+    ${line('Catégorie', `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}${t.sub?(' · '+t.sub):''}</span>`)}
+    ${t.amount>0 ? line('Versé par', ow?ow.n:(owner||'—')) : ''}
+    <div style="padding:10px 0 4px"><div class="sub" style="margin-bottom:4px">Communication</div>
+      <div style="font-family:monospace;font-size:12.5px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;word-break:break-word">${t.note||'—'}</div></div>
+    ${t.comment ? `<div style="padding:6px 0"><div class="sub" style="margin-bottom:4px">Commentaire (revue AG)</div><div class="cmt" style="font-style:normal">✎ ${t.comment}</div></div>` : ''}`;
+  card.querySelector('#txDetailClose').onclick=()=>m.style.display='none';
+  m.style.display='flex';
+}
