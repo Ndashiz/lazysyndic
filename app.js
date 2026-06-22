@@ -135,11 +135,11 @@ const SEED_ALIASES = [
   ['ELECTRABEL CUSTOMER SOL','Electrabel',false,''],
 ];
 const SEED_CONTRACTS = [
-  {name:'Electrabel',ref:'8767id',type:'Énergie',start:'21/01/25',note:'électricité communs',status:'actif'},
-  {name:'AXA',ref:'RC-22841',type:'Assurance',start:'01/01/24',note:'RC civile copropriété',status:'actif'},
-  {name:'Vivaqua',ref:'EAU-3391',type:'Énergie',start:'15/03/23',note:'eau — compteur commun',status:'actif'},
-  {name:'Minimax',ref:'ADO-118',type:'Entretien',start:'10/06/24',note:'entretien adoucisseur',status:'actif'},
-  {name:'Engie',ref:'GAZ-5520',type:'Énergie',start:'01/02/22',note:'ancien fournisseur gaz',status:'cloture',end:'31/01/25',endNote:'résilié — passage chez Electrabel'},
+  {name:'Electrabel',ref:'8767id',type:'Énergie',start:'21/01/25',note:'électricité communs',status:'actif',fournisseur:'Electrabel SA — 078 35 33 33'},
+  {name:'AXA',ref:'RC-22841',type:'Assurance',start:'01/01/24',note:'RC civile copropriété',status:'actif',fournisseur:'AXA Belgium — courtier Dupont'},
+  {name:'Vivaqua',ref:'EAU-3391',type:'Énergie',start:'15/03/23',note:'eau — compteur commun',status:'actif',fournisseur:'Vivaqua — 02 739 52 11'},
+  {name:'Minimax',ref:'ADO-118',type:'Entretien',start:'10/06/24',note:'entretien adoucisseur',status:'actif',fournisseur:'Minimax SA'},
+  {name:'Engie',ref:'GAZ-5520',type:'Énergie',start:'01/02/22',note:'ancien fournisseur gaz',status:'cloture',end:'31/01/25',endNote:'résilié — passage chez Electrabel',fournisseur:'Engie'},
 ];
 const SEED_REMINDERS = [
   {tx:'Envoyer la convocation AG 2026', due:'fait', done:true},
@@ -494,6 +494,8 @@ document.getElementById('remAddInput')?.addEventListener('keydown',e=>{ if(e.key
 let curAcct = 'pay';
 let flagOnly = false;
 let catFilter='', dirFilter='', ownerFilter='';
+let txEditing = new Set();   // ids des transactions en mode édition (sinon figées)
+const ownerDisp = sh => { const o=ownersOf().find(x=>(x.short||x.n)===sh); return o?o.n:(sh||''); };
 function populateTxFilters(){
   const cf=document.getElementById('catFilter');
   if(cf){ const cur=cf.value; cf.innerHTML='<option value="">Toutes catégories</option>'
@@ -504,8 +506,21 @@ function populateTxFilters(){
     + ownersOf().map(o=>`<option value="${o.short}" ${o.short===cur?'selected':''}>${o.n}</option>`).join(''); }
 }
 
+let txCssDone=false;
+function ensureTxCss(){
+  if(txCssDone) return; txCssDone=true;
+  const s=document.createElement('style');
+  s.textContent=`
+    .cmt-mark{display:inline-flex;align-items:center;gap:5px;margin-top:3px;font-size:11.5px;color:#8A551F;
+      background:var(--clay-soft);border-radius:8px;padding:2px 8px;max-width:100%;cursor:help;line-height:1.4}
+    .tx-row.editing>td{background:var(--card-2)}
+    .tx-row.editing>td:first-child{box-shadow:inset 3px 0 0 var(--green)}
+    .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}`;
+  document.head.appendChild(s);
+}
 function renderTx(acct){
   curAcct = acct;
+  ensureTxCss();
   populateTxFilters();
   const tb = document.getElementById('txbody'); if(!tb) return;
   tb.innerHTML = '';
@@ -519,41 +534,53 @@ function renderTx(acct){
     if (dirFilter==='in'  && t.amount<0) return;
     if (dirFilter==='out' && t.amount>0) return;
     if (ownerFilter && ownerOfTx(t)!==ownerFilter) return;
-    const idx = state.tx.indexOf(t);
-    const tr=document.createElement('tr'); tr.className='tx-row'+(t.flag?' flag':'');
-    const catLabel = t.high + (t.sub?(' · '+t.sub):'');
+    const editing = txEditing.has(t.id);
+    const tr=document.createElement('tr'); tr.className='tx-row'+(t.flag?' flag':'')+(editing?' editing':'');
+    const catLabel = (t.high==='?'?'À catégoriser':t.high) + (t.sub?(' · '+t.sub):'');
     const amtClass = t.amount>=0 ? 'pos' : 'neg';
     const note = t.note||'';
-    const cmt = t.flag && t.comment
-      ? `<div class="cmt">✎ ${t.comment}</div>`
-      : (t.flag ? '' : '<div class="cmt-add">+ commentaire</div>');
-    const ownerSel = t.amount>0
-      ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner" ${canWrite()?'':'disabled'}>${ownerOptions(ownerOfTx(t))}</select></div>`
-      : '';
+    const hasC = !!(t.comment && t.comment.trim());
+    const esc = s => String(s||'').replace(/"/g,'&quot;');
+    // colonne catégorie : figée (badge) ou éditable (selects)
+    const catCell = editing
+      ? `<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>${(t.high&&t.high!=='?')?`<br><select class="fld tx-sub" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`
+      : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
+    // colonne notes + marqueur commentaire + actions
+    let lastCell;
+    if (editing){
+      const ownerEdit = t.amount>0
+        ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner">${ownerOptions(ownerOfTx(t))}</select></div>`
+        : '';
+      lastCell = `${note?`<div class="sub" style="margin-bottom:4px">${note}</div>`:''}${ownerEdit}
+        <input class="fld tx-comment" placeholder="Commentaire (revue AG)…" value="${esc(t.comment)}" style="width:100%;font-size:12px;margin-top:6px">
+        <button class="lk tx-done" style="margin-top:6px">✓ Terminer</button>`;
+    } else {
+      const ownerFrozen = t.amount>0 ? `<div class="sub" style="margin-top:2px">Versé par : <b>${ownerDisp(ownerOfTx(t))||'—'}</b></div>` : '';
+      const mark = hasC ? `<div class="cmt-mark" title="${esc(t.comment)}">💬 ${t.comment.length>44?t.comment.slice(0,44)+'…':t.comment}</div>` : '';
+      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:''}`;
+    }
     tr.innerHTML = `<td class="tx-selcell">${canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
-      <td><button class="flagbtn">⚑</button></td>
+      <td><button class="flagbtn" title="Marquer « à revoir »">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
-      <td>${canWrite()?`<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>${(t.high&&t.high!=='?')?`<br><select class="fld tx-sub" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`:`<span class="cat ${catClass(t.high)}">${catLabel}</span>`}</td>
+      <td>${catCell}</td>
       <td class="num ${amtClass}">${signed(t.amount)}</td>
-      <td>${ownerSel}${note}${cmt}</td>`;
+      <td>${lastCell}</td>`;
     tr.querySelector('.flagbtn').onclick=()=>{
       if(!canWrite()) return;
       t.flag = !t.flag; saveState(); renderTx(acct);
       dbWrite(db=>db.updateTransaction(t.id, {flag:t.flag}));
     };
-    const addBtn = tr.querySelector('.cmt-add');
-    if (addBtn) addBtn.onclick = ()=>{
-      if(!canWrite()) return;
-      const c = prompt('Commentaire (la ligne sera flaggée) :', '');
-      if (c!==null){ t.flag=true; t.comment=c; saveState(); renderTx(acct);
-        dbWrite(db=>db.updateTransaction(t.id, {flag:true, comment:c})); }
-    };
+    // entrer / sortir du mode édition
+    const editBtn = tr.querySelector('.tx-edit');
+    if (editBtn) editBtn.onclick = ()=>{ if(!canWrite())return; txEditing.add(t.id); renderTx(acct); };
+    const doneBtn = tr.querySelector('.tx-done');
+    if (doneBtn) doneBtn.onclick = ()=>{ txEditing.delete(t.id); renderTx(acct); };
+    // handlers d'édition (seulement en mode édition)
     const osel = tr.querySelector('.tx-owner');
     if (osel) osel.onchange = ()=>{
       if(!canWrite()) return;
-      t.owner = osel.value;
-      saveState();
+      t.owner = osel.value; saveState();
       dbWrite(db=>db.updateTransaction(t.id, {owner: osel.value}));
       learnOwner(t.tiers, osel.value);
       renderDashboard(); renderProvisions();
@@ -566,7 +593,7 @@ function renderTx(acct){
       t.high=val; t.sub='';
       saveState(); dbWrite(db=>db.updateTransaction(t.id,{high:val, sub:''}));
       learnCategory(t.tiers, val);
-      renderAll();
+      renderTx(acct);   // garde la ligne en édition
     };
     const ssel = tr.querySelector('.tx-sub');
     if (ssel) ssel.onchange = ()=>{
@@ -577,8 +604,14 @@ function renderTx(acct){
       learnSubcat(t.tiers, t.high, v);
       renderTx(acct);
     };
+    const cin = tr.querySelector('.tx-comment');
+    if (cin) cin.onchange = ()=>{
+      if(!canWrite()) return;
+      t.comment = cin.value; saveState();
+      dbWrite(db=>db.updateTransaction(t.id, {comment: cin.value}));
+    };
     tr.style.cursor='pointer';
-    tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.cmt-add,.flagbtn')) return; showTxDetail(t); });
+    tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.tx-edit,.flagbtn,.cmt-mark')) return; showTxDetail(t); });
     tb.appendChild(tr);
   });
   if (!tb.children.length){
@@ -1779,27 +1812,39 @@ function renderAGArchive(){
    CONTRATS (persistés)
    ============================================================ */
 const TYPECLASS={'Énergie':'','Assurance':'ass','Entretien':'ent','Autre':'acp'};
+const escAttr = s => String(s||'').replace(/"/g,'&quot;');
 function ctRow(c,idx){
   const tc=TYPECLASS[c.type]||'';
+  const supCell = canWrite()
+    ? `<input class="fld" style="width:150px;font-size:12.5px;padding:5px 8px" value="${escAttr(c.fournisseur)}" placeholder="Fournisseur…" onchange="setContractSupplier(${idx}, this.value)">`
+    : (c.fournisseur || '—');
   if(c.status==='actif'){
     return `<tr><td><b>${c.name}</b><div class="sub" style="margin-top:2px">réf. ${c.ref}</div></td>
+      <td>${supCell}</td>
       <td><span class="cat ${tc}">${c.type}</span></td><td>${c.start}</td>
       <td style="color:var(--ink-soft);font-style:italic">${c.note||''}</td>
       <td><span class="badge b-ok">Actif</span></td>
       <td style="text-align:right"><button class="rb" style="background:var(--coral-soft);color:var(--coral)" onclick="openClose(${idx})">Clôturer</button></td></tr>`;
   }
   return `<tr style="opacity:.85"><td><b>${c.name}</b><div class="sub" style="margin-top:2px">réf. ${c.ref}</div></td>
+    <td>${c.fournisseur||'—'}</td>
     <td><span class="cat ${tc}">${c.type}</span></td><td>${c.start} → ${c.end}</td>
     <td style="color:var(--ink-soft);font-style:italic">${c.endNote||c.note||''}</td>
     <td><span class="badge" style="background:var(--line-2);color:var(--ink-faint)">Clôturé</span></td><td></td></tr>`;
 }
+window.setContractSupplier=(idx,val)=>{
+  if(!canWrite()){ renderContracts(); return; }
+  const c=state.contracts[idx]; if(!c) return;
+  c.fournisseur=val.trim();
+  saveState(); dbWrite(db=>db.updateContract(c.id,{fournisseur:c.fournisseur}));
+};
 function renderContracts(){
-  const head=`<tr><th>Contrat</th><th>Type</th><th>Période</th><th>Commentaire</th><th>Statut</th><th></th></tr>`;
+  const head=`<tr><th>Contrat</th><th>Fournisseur</th><th>Type</th><th>Période</th><th>Commentaire</th><th>Statut</th><th></th></tr>`;
   const C=state.contracts;
   const act=C.filter(c=>c.status==='actif'),clo=C.filter(c=>c.status==='cloture');
   const ab=document.getElementById('ctActiveBody'); if(!ab) return;
   ab.innerHTML=head+act.map(c=>ctRow(c,C.indexOf(c))).join('');
-  document.getElementById('ctClosedBody').innerHTML=head+(clo.length?clo.map(c=>ctRow(c,C.indexOf(c))).join(''):'<tr><td colspan="6" class="sub" style="padding:14px">Aucun contrat clôturé.</td></tr>');
+  document.getElementById('ctClosedBody').innerHTML=head+(clo.length?clo.map(c=>ctRow(c,C.indexOf(c))).join(''):'<tr><td colspan="7" class="sub" style="padding:14px">Aucun contrat clôturé.</td></tr>');
   document.getElementById('ctActiveN').textContent=act.length;
   document.getElementById('ctClosedN').textContent=clo.length;
 }
@@ -1808,9 +1853,10 @@ document.getElementById('ctAdd')?.addEventListener('click',()=>{
   const name=document.getElementById('ctName').value.trim();
   if(!name){document.getElementById('ctName').focus();return;}
   const c={name,ref:document.getElementById('ctRef').value||'—',type:document.getElementById('ctType').value,
-    start:document.getElementById('ctStart').value||'—',note:document.getElementById('ctNote').value,status:'actif'};
+    start:document.getElementById('ctStart').value||'—',note:document.getElementById('ctNote').value,
+    fournisseur:document.getElementById('ctSupplier').value.trim(),status:'actif'};
   state.contracts.unshift(c);
-  ['ctName','ctRef','ctStart','ctNote'].forEach(id=>document.getElementById(id).value='');
+  ['ctName','ctRef','ctStart','ctNote','ctSupplier'].forEach(id=>document.getElementById(id).value='');
   saveState(); renderContracts();
   dbWrite(async db=>{ const saved=await db.addContract(c); c.id=saved.id; });
 });
