@@ -115,9 +115,12 @@ create table if not exists public.ls_settings (
   reserve_target numeric(12,2) default 2000,
   contrib        jsonb default '{}'::jsonb,
   iban_map       jsonb default '{}'::jsonb,   -- IBAN normalisé → 'pay' | 'res'
+  subcats        jsonb default '{}'::jsonb,   -- catégorie → [sous-catégories perso]
   ledger_live    boolean default false
 );
 insert into public.ls_settings (id) values (1) on conflict (id) do nothing;
+-- déploiements existants : ajoute la colonne si absente
+alter table public.ls_settings add column if not exists subcats jsonb default '{}'::jsonb;
 
 create table if not exists public.ls_imports (
   id uuid primary key default gen_random_uuid(),

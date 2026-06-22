@@ -70,6 +70,35 @@ function addCategory(name){
   return name;
 }
 
+// Sous-catégories : défauts par catégorie + personnalisées (state.subcats).
+const SUBCAT_DEFAULTS = {
+  'Énergie':          ['Électricité','Gaz','Eau','Chauffage'],
+  'Assurance':        ['RC','Incendie','Dégâts des eaux'],
+  'Frais ACP':        ['Banque','Frais de gestion','Divers'],
+  'Entretien':        ['Nettoyage','Ascenseur','Jardin','Réparations','Communs'],
+  'Charges':          [],
+  'Fonds de réserve': [],
+};
+function subcatsOf(high){
+  const base = SUBCAT_DEFAULTS[high] || [];
+  const custom = ((typeof state!=='undefined' && state && state.subcats && state.subcats[high]) || []);
+  return [...base, ...custom.filter(s=>s && !base.includes(s))];
+}
+function addSubcat(high, name){
+  high=(high||'').trim(); name=(name||'').trim();
+  if(!high || !name || high==='?') return '';
+  if(subcatsOf(high).includes(name)) return name;
+  state.subcats = state.subcats || {};
+  (state.subcats[high] = state.subcats[high] || []).push(name);
+  saveState(); dbWrite(db=>db.updateSettings({subcats: state.subcats}));
+  return name;
+}
+// Options de sous-catégorie pour une catégorie donnée (+ « nouvelle… »).
+function subcatOptions(high, sel){
+  const opts=[{v:'',l:'— sans sous-catégorie'}, ...subcatsOf(high).map(s=>({v:s,l:s})), {v:'__new__',l:'➕ Nouvelle sous-catégorie…'}];
+  return opts.map(o=>`<option value="${o.v}" ${sel===o.v?'selected':''}>${o.l}</option>`).join('');
+}
+
 /* ---------- État par défaut (graine = données de démo) ---------- */
 // Transactions de démo (issues des annexes réelles, montants anonymisés).
 // amount: float signé ; account: 'pay'|'res' ; high: catégorie haut niveau.
@@ -152,6 +181,7 @@ function freshState(){
     // remplacé par le calcul dérivé quand ledgerLive passe à true.
     contrib: { Alex:{due:1002, verse:1002}, Sam:{due:503, verse:503}, Lou:{due:499, verse:344.90} },
     ledgerLive: false,
+    subcats: {},   // catégorie → [sous-catégories personnalisées]
     coproName: 'ACP Démo',
     reserveTarget: 2000,
     ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
@@ -263,6 +293,13 @@ function learnCategory(label, high){
   const ln=norm(label); const r=state.rules.find(r=>norm(r[0])===ln);
   if(r){ if(r[1]!==high){ r[1]=high; r[2]=''; dbWrite(db=>db.updateRule(r[3],{high,sub:''})); } }
   else { const nr=[label,high,'',null]; state.rules.push(nr); dbWrite(async db=>{ const s=await db.addRule({label,high,sub:''}); nr[3]=s.id; }); }
+}
+// Apprentissage de la sous-catégorie : mémorise tiers→sous-catégorie sur la règle.
+function learnSubcat(label, high, sub){
+  if(!canWrite()||!label||!high||high==='?') return;
+  const ln=norm(label); const r=state.rules.find(r=>norm(r[0])===ln);
+  if(r){ if(r[2]!==sub){ r[2]=sub; dbWrite(db=>db.updateRule(r[3],{sub})); } }
+  else { const nr=[label,high,sub,null]; state.rules.push(nr); dbWrite(async db=>{ const s=await db.addRule({label,high,sub}); nr[3]=s.id; }); }
 }
 function learnOwner(label, short){
   if(!canWrite()||!label) return;
@@ -466,7 +503,7 @@ function renderTx(acct){
       <td><button class="flagbtn">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
-      <td>${canWrite()?`<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>`:`<span class="cat ${catClass(t.high)}">${catLabel}</span>`}</td>
+      <td>${canWrite()?`<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>${(t.high&&t.high!=='?')?`<br><select class="fld tx-sub" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`:`<span class="cat ${catClass(t.high)}">${catLabel}</span>`}</td>
       <td class="num ${amtClass}">${signed(t.amount)}</td>
       <td>${ownerSel}${note}${cmt}</td>`;
     tr.querySelector('.flagbtn').onclick=()=>{
@@ -499,6 +536,15 @@ function renderTx(acct){
       saveState(); dbWrite(db=>db.updateTransaction(t.id,{high:val, sub:''}));
       learnCategory(t.tiers, val);
       renderAll();
+    };
+    const ssel = tr.querySelector('.tx-sub');
+    if (ssel) ssel.onchange = ()=>{
+      if(!canWrite()) return;
+      let v=ssel.value;
+      if(v==='__new__'){ const n=addSubcat(t.high, prompt('Nouvelle sous-catégorie pour « '+t.high+' » :','')||''); if(!n){ renderTx(acct); return; } v=n; }
+      t.sub=v; saveState(); dbWrite(db=>db.updateTransaction(t.id,{sub:v}));
+      learnSubcat(t.tiers, t.high, v);
+      renderTx(acct);
     };
     tr.style.cursor='pointer';
     tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.cmt-add,.flagbtn')) return; showTxDetail(t); });
@@ -1039,7 +1085,7 @@ function renderPreviewRow(t,i){
     : `<select class="fld previewcat" data-i="${i}" ${t._skip?'disabled':''}>${
         [...allCats().map(c=>({v:c,l:c})), {v:'?',l:'À catégoriser'}, {v:'__new__',l:'➕ Nouvelle catégorie…'}].map(o=>
           `<option value="${o.v}" ${(t.high===o.v||(o.v==='?'&&t.high==='?'))?'selected':''}>${o.l}</option>`
-        ).join('')}</select>`;
+        ).join('')}</select>${(!t._skip && t.high && t.high!=='?')?`<br><select class="fld previewsub" data-i="${i}" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`;
   let status, actions;
   if (t._skip){
     status='<span class="badge" style="background:var(--line-2);color:var(--ink-faint)">Ignorée</span>';
@@ -1122,7 +1168,12 @@ function paintPreview(){
   box.querySelectorAll('.previewcat').forEach(s=>s.onchange=()=>{
     const t=interpreted[+s.dataset.i];
     if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name){ t.high=name; learnCategory(t.tiers,name); } paintPreview(); return; }
-    t.high=s.value; learnCategory(t.tiers, s.value); paintPreview();
+    t.high=s.value; t.sub=''; learnCategory(t.tiers, s.value); paintPreview();
+  });
+  box.querySelectorAll('.previewsub').forEach(s=>s.onchange=()=>{
+    const t=interpreted[+s.dataset.i];
+    if(s.value==='__new__'){ const name=addSubcat(t.high, prompt('Nouvelle sous-catégorie pour « '+t.high+' » :','')||''); if(name){ t.sub=name; learnSubcat(t.tiers, t.high, name); } paintPreview(); return; }
+    t.sub=s.value; learnSubcat(t.tiers, t.high, s.value); paintPreview();
   });
   box.querySelectorAll('.lk').forEach(b=>b.onclick=()=>{
     const i=+b.dataset.i, t=interpreted[i];
@@ -1865,15 +1916,28 @@ function renderRules(){
   const t=document.getElementById('ruleTable'); if(!t) return;
   t.innerHTML='<tr><th>Tiers (libellé)</th><th>Catégorie</th><th>Sous-catégorie</th><th></th></tr>';
   state.rules.forEach((r,i)=>t.insertAdjacentHTML('beforeend',`<tr data-i="${i}"><td><input class="fld rl-label" value="${r[0]}" style="width:160px;font-weight:600"></td>
-    <td><select class="fld rl-cat">${allCats().map(c=>`<option ${c===r[1]?'selected':''}>${c}</option>`).join('')}</select></td>
-    <td><input class="fld rl-sub" value="${r[2]||''}" style="width:140px"></td>
+    <td><select class="fld rl-cat">${allCats().map(c=>`<option ${c===r[1]?'selected':''}>${c}</option>`).join('')}<option value="__new__">➕ Nouvelle catégorie…</option></select></td>
+    <td><select class="fld rl-sub" style="width:170px">${subcatOptions(r[1], r[2]||'')}</select></td>
     <td style="text-align:right"><button class="flagbtn rl-del" style="opacity:.5">✕</button></td></tr>`));
   t.querySelectorAll('tr[data-i]').forEach(tr=>{
     const i=+tr.dataset.i;
     const rid=()=>state.rules[i][3];
     tr.querySelector('.rl-label').onchange=e=>{if(!canWrite())return;state.rules[i][0]=e.target.value;saveState();dbWrite(db=>db.updateRule(rid(),{label:e.target.value}));};
-    tr.querySelector('.rl-cat').onchange=e=>{if(!canWrite())return;state.rules[i][1]=e.target.value;saveState();dbWrite(db=>db.updateRule(rid(),{high:e.target.value}));};
-    tr.querySelector('.rl-sub').onchange=e=>{if(!canWrite())return;state.rules[i][2]=e.target.value;saveState();dbWrite(db=>db.updateRule(rid(),{sub:e.target.value}));};
+    tr.querySelector('.rl-cat').onchange=e=>{
+      if(!canWrite())return;
+      let v=e.target.value;
+      if(v==='__new__'){ const n=addCategory(prompt('Nouvelle catégorie :','')||''); if(!n){renderRules();return;} v=n; }
+      state.rules[i][1]=v; state.rules[i][2]='';   // changer de catégorie réinitialise la sous-catégorie
+      saveState(); dbWrite(db=>db.updateRule(rid(),{high:v, sub:''}));
+      renderRules();
+    };
+    tr.querySelector('.rl-sub').onchange=e=>{
+      if(!canWrite())return;
+      let v=e.target.value;
+      if(v==='__new__'){ const n=addSubcat(state.rules[i][1], prompt('Nouvelle sous-catégorie pour « '+state.rules[i][1]+' » :','')||''); if(!n){renderRules();return;} v=n; }
+      state.rules[i][2]=v; saveState(); dbWrite(db=>db.updateRule(rid(),{sub:v}));
+      renderRules();
+    };
     tr.querySelector('.rl-del').onclick=()=>{if(!canWrite())return;const id=rid();state.rules.splice(i,1);saveState();renderRules();dbWrite(db=>db.deleteRule(id));};
   });
 }
