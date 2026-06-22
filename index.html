@@ -218,6 +218,7 @@
       <button data-s="cpta"><span class="ic">∑</span> Comptabilité</button>
       <button data-s="imp"><span class="ic">↧</span> Import</button>
       <button data-s="ag"><span class="ic">◷</span> Assemblées</button>
+      <button data-s="timeline"><span class="ic">⏱</span> Chronologie</button>
       <button data-s="ct"><span class="ic">▦</span> Contrats</button>
       <button data-s="budget"><span class="ic">⚖</span> Budget &amp; copro</button>
       <button data-s="rules"><span class="ic">⚲</span> Règles &amp; alias</button>
@@ -586,6 +587,15 @@
       <!-- ARCHIVE -->
       <div class="mini-h" style="margin-top:36px">AG précédentes — finalisées</div>
       <div class="card" id="agArchive"></div>
+    </section>
+
+    <!-- ============ CHRONOLOGIE ============ -->
+    <section class="screen" id="timeline">
+      <div class="top">
+        <div><div class="crumb">Journal de bord</div><h1>Chronologie de l'exercice</h1></div>
+      </div>
+      <p class="sub" style="margin:-12px 0 18px;max-width:640px">Tout ce qui s'est passé sur l'année : vos notes, plus le journal automatique des imports de relevés et des tâches du pense-bête. Repris dans le rapport d'AG.</p>
+      <div id="tlContent"></div>
     </section>
 
     <!-- ============ CONTRATS ============ -->

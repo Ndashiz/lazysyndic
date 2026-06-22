@@ -461,6 +461,7 @@ function toggleReminder(i){
   const rem=state.reminders[i]; if(!rem) return;
   rem.done=!rem.done; saveState(); renderReminders();
   dbWrite(db=>db.updateReminder(rem.id, {done:rem.done}));
+  if(rem.done) logTimeline({title:'Tâche terminée', description:rem.tx, kind:'task'});  // audit
 }
 function addReminderFromInput(){
   if(!canWrite()){ alert('Lecture seule.'); return; }
@@ -473,6 +474,7 @@ function addReminderFromInput(){
   document.getElementById('remAddBtn').style.display='block';
   saveState(); renderReminders();
   dbWrite(async db=>{ const saved=await db.addReminder({tx:rem.tx, due:rem.due, done:false}); rem.id=saved.id; });
+  logTimeline({title:'Tâche ajoutée', description:rem.tx, kind:'task'});  // audit
 }
 document.getElementById('rems')?.addEventListener('click',e=>{ const r=e.target.closest('.rem'); if(r) toggleReminder(+r.dataset.i); });
 document.getElementById('remsHistory')?.addEventListener('click',e=>{ const r=e.target.closest('.rem'); if(r) toggleReminder(+r.dataset.i); });
@@ -2568,6 +2570,15 @@ boot();
       <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Charge annuelle par copropriétaire</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>${owRows}</table>`;
   }
+  function chronoSection(p){
+    const evs=(state.timeline||[]).filter(e=>{ const d=e.date||''; return d>=p.fromIso && d<=p.toIso; })
+      .sort((a,b)=>(a.date||'').localeCompare(b.date||''));   // ordre chronologique (récit de l'année)
+    if(!evs.length) return '';
+    const rows=evs.map(e=>`<tr><td style="white-space:nowrap;vertical-align:top">${fmtDateLong(e.date)}</td>
+      <td><b>${e.title}</b>${e.description?`<div class="r-sub">${e.description}</div>`:''}</td></tr>`).join('');
+    return `<h2>Chronologie de l'exercice</h2>
+      <table><tr><th style="width:160px">Date</th><th>Événement</th></tr>${rows}</table>`;
+  }
   function signatures(){
     return `<div class="sig">
       <div>Le président de séance</div><div>Le secrétaire</div><div>Le commissaire aux comptes</div>
@@ -2587,6 +2598,7 @@ boot();
         + soldesSection([PAY,RES],p)
         + resultatSection(allTx,p,'')
         + ownersSection()
+        + chronoSection(p)
         + annexeTxSection('pay',p,'Annexe 2 — Transactions du compte de paiement')
         + annexeTxSection('res',p,'Annexe 3 — Transactions du compte de réserve')
         + budgetSection()
