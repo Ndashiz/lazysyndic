@@ -179,7 +179,32 @@
 
   .note{font-size:12px;color:var(--ink-faint);margin-top:18px;text-align:center;font-style:italic}
   .mini-h{font-family:'Fraunces',serif;font-size:13px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;margin:26px 0 10px}
-  @media(max-width:860px){.app{grid-template-columns:1fr}.side{display:none}.g2{grid-template-columns:1fr}.main{padding:22px}}
+  /* ---- Mobile : barre + tiroir de navigation ---- */
+  #mobileBar{display:none;position:fixed;top:0;left:0;right:0;height:52px;z-index:80;align-items:center;gap:10px;padding:0 12px;background:var(--green-deep);color:#EAF1E8;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+  #mobileBar .burger{font-size:22px;background:none;border:none;color:#EAF1E8;cursor:pointer;padding:4px 8px;line-height:1}
+  #mobileBar .mbrand{font-family:'Fraunces',serif;font-size:18px;font-weight:600}
+  #mobileBar .mbrand .z{font-style:italic;color:var(--clay)}
+  #mobileBar .mout{margin-left:auto;background:rgba(255,255,255,.12);border:none;color:#EAF1E8;font-size:13px;font-weight:600;border-radius:20px;padding:6px 13px;cursor:pointer}
+  #navBackdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90}
+  @media(max-width:860px){
+    #mobileBar{display:flex}
+    #navBackdrop.on{display:block}
+    .app{grid-template-columns:1fr}
+    .side{position:fixed;top:0;left:0;bottom:0;width:240px;height:100dvh;z-index:95;transform:translateX(-105%);transition:transform .25s ease}
+    body.nav-open .side{transform:none;box-shadow:0 0 50px rgba(0,0,0,.4)}
+    .main{padding:66px 16px 56px}
+    .g2{grid-template-columns:1fr}
+    .kpis{grid-template-columns:1fr 1fr}
+    .top h1{font-size:24px}
+    .save-bar{flex-direction:column;align-items:stretch;gap:10px}
+    .save-bar > div:last-child{display:flex;gap:8px;justify-content:flex-end}
+    .donut-wrap{flex-direction:column;align-items:flex-start;gap:14px}
+    .card{overflow-x:auto}
+    #sessionBar{display:none!important}
+    #acctInfo .grid{grid-template-columns:1fr!important}
+    #statRow{grid-template-columns:1fr!important}
+  }
+  @media(max-width:560px){ .kpis{grid-template-columns:1fr} }
 </style>
 
 <div class="app">

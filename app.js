@@ -2398,3 +2398,27 @@ document.getElementById('restoreBtn')?.addEventListener('click', ()=>{
     document.body.appendChild(restoreInput); }
   restoreInput.click();
 });
+
+/* ============================================================
+   NAVIGATION MOBILE (barre + tiroir)
+   ============================================================ */
+(function setupMobileNav(){
+  if (document.getElementById('mobileBar')) return;
+  const bar=document.createElement('div'); bar.id='mobileBar';
+  bar.innerHTML=`<button class="burger" aria-label="Menu">☰</button>
+    <span class="mbrand">Lazy<span class="z">Syndic</span></span>
+    <button class="mout" id="mobileLogout" title="Déconnexion">⎋</button>`;
+  document.body.appendChild(bar);
+  const back=document.createElement('div'); back.id='navBackdrop'; document.body.appendChild(back);
+  const open=()=>{ document.body.classList.add('nav-open'); back.classList.add('on'); };
+  const close=()=>{ document.body.classList.remove('nav-open'); back.classList.remove('on'); };
+  bar.querySelector('.burger').onclick=()=>{ document.body.classList.contains('nav-open')?close():open(); };
+  back.onclick=close;
+  // refermer le tiroir quand on choisit un écran
+  document.querySelectorAll('.nav button[data-s]').forEach(b=>b.addEventListener('click', close));
+  // déconnexion mobile
+  bar.querySelector('#mobileLogout').onclick=async()=>{
+    if(window.LS && window.LS.auth){ try{ await window.LS.auth.signOut(); }catch(e){} }
+    location.reload();
+  };
+})();
