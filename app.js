@@ -185,6 +185,10 @@ function freshState(){
     coproName: 'ACP Démo',
     reserveTarget: 2000,
     ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
+    timeline: [
+      {date:'2026-03-09', title:'Régularisation Electrabel', description:'Remboursement en notre faveur sur le décompte annuel.', kind:'manual'},
+      {date:'2026-03-02', title:'Entretien adoucisseur', description:'Passage Minimax — contrat annuel.', kind:'manual'},
+    ],
     imports: [
       {v:4, label:'Relevé mai 2026', meta:'2 juin · 5 transactions ajoutées · 2 doublons', cur:true},
       {v:3, label:'Relevé mars 2026', meta:'4 avr. · 7 transactions'},
@@ -2903,7 +2907,8 @@ function renderComptabilite(){
   ensureCfCss();
   const months=cfMonths();
   if(!months.length){ box.innerHTML='<div class="sub" style="padding:20px">Aucune transaction à afficher.</div>';
-    const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML=''; return; }
+    const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML='';
+    const pb=document.getElementById('cfPies'); if(pb) pb.innerHTML=''; return; }
   const D=cfBuild(); const {mkeys}=D;
   const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
   const cell=v=>`<td class="${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;
@@ -2932,6 +2937,7 @@ function renderComptabilite(){
     card('Sorties sur la période','−'+eur(Math.abs(sOut)),'var(--coral)')+
     card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--green)':'var(--coral)')+
     card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]));
+  renderExpensePies();
 }
 function exportComptabilite(){
   const months=cfMonths(); if(!months.length){ alert('Rien à exporter.'); return; }
@@ -2958,3 +2964,112 @@ document.getElementById('cfAcct')?.addEventListener('click',e=>{ const b=e.targe
   document.querySelectorAll('#cfAcct button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
   cfScope=b.dataset.a; renderComptabilite(); });
 document.getElementById('cfExport')?.addEventListener('click', exportComptabilite);
+
+/* ============================================================
+   CAMEMBERT DES DÉPENSES + DRILL-DOWN (sous-catégories)
+   ============================================================ */
+let cfSelCat = null;   // catégorie sélectionnée pour le détail
+// secteur annulaire (donut) entre rayons r..R, angles a0..a1 (radians)
+function arcPath(cx,cy,R,r,a0,a1){
+  const p=(rad,ang)=>[cx+rad*Math.cos(ang), cy+rad*Math.sin(ang)];
+  const large=(a1-a0)>Math.PI?1:0;
+  const [x0,y0]=p(R,a0),[x1,y1]=p(R,a1),[x2,y2]=p(r,a1),[x3,y3]=p(r,a0);
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L${x2.toFixed(2)} ${y2.toFixed(2)} A${r} ${r} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`;
+}
+// éclaircit une couleur hex vers le blanc (amt 0..1)
+function tint(hex, amt){
+  const n=parseInt(String(hex).replace('#',''),16); if(isNaN(n)) return hex;
+  let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+function ensureCfPieCss(){
+  if(document.getElementById('cfPieCss')) return;
+  const s=document.createElement('style'); s.id='cfPieCss';
+  s.textContent=`
+   .cf-pie-block{flex:1;min-width:250px}
+   .cf-pie-h{font-size:12px;color:var(--ink-faint);font-weight:600;margin-bottom:6px}
+   .cf-leg{margin-top:10px;display:flex;flex-direction:column;gap:1px}
+   .cf-leg-row{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:8px;font-size:12.5px;border:1px solid transparent}
+   .cf-leg-row.click{cursor:pointer}
+   .cf-leg-row.click:hover{background:var(--card-2)}
+   .cf-leg-row.on{background:var(--card-2);border-color:var(--line)}
+   .cf-leg .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
+   .cf-leg-l{flex:1;color:var(--ink)} .cf-leg-p{font-weight:700;width:40px;text-align:right}
+   .cf-leg-v{width:84px;text-align:right;color:var(--ink-soft)}
+   .cfpie path{transition:opacity .12s,transform .12s;transform-origin:center}
+   .cfpie.click path{cursor:pointer}
+   .cfpie.click:hover path{opacity:.5}
+   .cfpie.click path:hover{opacity:1}
+   .cfpie path.sel{opacity:1;stroke:var(--ink);stroke-width:2}`;
+  document.head.appendChild(s);
+}
+// agrège les dépenses (sorties) de la période/compte courants
+function cfExpenseData(){
+  const mkeys=cfMonths().map(m=>m.key);
+  const tx=cfTx().filter(t=>mkeys.includes(t._k) && t.amount<0);
+  const byCat={}, bySub={};
+  tx.forEach(t=>{ const h=t.high||'?', s=t.sub||'(sans sous-catégorie)', v=-t.amount;
+    byCat[h]=(byCat[h]||0)+v; (bySub[h]=bySub[h]||{}); bySub[h][s]=(bySub[h][s]||0)+v; });
+  const total=sum(Object.values(byCat))||1;
+  const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1])
+    .map(([high,v])=>({high,v,color:(CAT_META[high]||{}).color||'#8a8a8a'}));
+  return {cats,bySub,total};
+}
+// SVG donut cliquable ; pourcentages affichés sur les secteurs ≥ 6 %
+function cfPie(slices, opts){
+  const R=92,r=52,cx=100,cy=100; let a=-Math.PI/2;
+  const totV=sum(slices.map(s=>s.v))||1;
+  const parts=[],labels=[];
+  if(slices.length===1){
+    parts.push(`<circle cx="${cx}" cy="${cy}" r="${(R+r)/2}" fill="none" stroke="${slices[0].color}" stroke-width="${R-r}" data-key="${encodeURIComponent(slices[0].label)}"><title>${slices[0].label} · ${eur(slices[0].v)} · 100%</title></circle>`);
+    labels.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#fff">100%</text>`);
+  } else slices.forEach(s=>{
+    const frac=s.v/totV, a1=a+frac*2*Math.PI;
+    const selCls=(opts.sel===s.label)?' class="sel"':'';
+    parts.push(`<path d="${arcPath(cx,cy,R,r,a,a1)}" fill="${s.color}" stroke="#fff" stroke-width="1.5"${selCls} data-key="${encodeURIComponent(s.label)}"><title>${s.label} · ${eur(s.v)} · ${Math.round(frac*100)}%</title></path>`);
+    if(frac>=0.06){ const mid=(a+a1)/2, lr=(R+r)/2;
+      labels.push(`<text x="${(cx+lr*Math.cos(mid)).toFixed(1)}" y="${(cy+lr*Math.sin(mid)).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#fff" style="pointer-events:none">${Math.round(frac*100)}%</text>`); }
+    a=a1;
+  });
+  const center = opts.center?`<text x="100" y="95" text-anchor="middle" font-size="11" fill="var(--ink-faint)">${opts.center.l}</text><text x="100" y="113" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)" style="font-family:'Fraunces',serif">${opts.center.v}</text>`:'';
+  return `<svg viewBox="0 0 200 200" width="186" height="186" class="cfpie${opts.clickable?' click':''}" data-pie="${opts.id}">${parts.join('')}${center}${labels.join('')}</svg>`;
+}
+function cfLegend(slices, totV, clickable, sel){
+  return `<div class="cf-leg" data-leg="${clickable?'main':'sub'}">${slices.map(s=>{
+    const pct=Math.round(s.v/totV*100);
+    return `<div class="cf-leg-row${clickable?' click':''}${sel===s.label?' on':''}" data-key="${encodeURIComponent(s.label)}">
+      <span class="sw" style="background:${s.color}"></span><span class="cf-leg-l">${s.label}</span>
+      <span class="cf-leg-p">${pct}%</span><span class="cf-leg-v">${eur(s.v)}</span></div>`;}).join('')}</div>`;
+}
+function renderExpensePies(){
+  const box=document.getElementById('cfPies'); if(!box) return;
+  ensureCfPieCss();
+  const {cats,bySub,total}=cfExpenseData();
+  if(!cats.length){ box.innerHTML='<div class="sub" style="padding:14px">Aucune dépense sur la période sélectionnée.</div>'; return; }
+  if(!cfSelCat || !cats.some(c=>c.high===cfSelCat)) cfSelCat=cats[0].high;
+  // camembert principal
+  const mainSlices=cats.map(c=>({label:c.high,v:c.v,color:c.color}));
+  // camembert de détail (sous-catégories de la catégorie sélectionnée)
+  const subObj=bySub[cfSelCat]||{};
+  const subEntries=Object.entries(subObj).sort((a,b)=>b[1]-a[1]);
+  const subTot=sum(subEntries.map(e=>e[1]))||1;
+  const parentColor=(CAT_META[cfSelCat]||{}).color||'#8a8a8a';
+  const subSlices=subEntries.map(([s,v],i)=>({label:s,v,
+    color:tint(parentColor, subEntries.length>1?(i/(subEntries.length-1))*0.6:0.25)}));
+  box.innerHTML=`
+    <div class="cf-pie-block">
+      <div class="cf-pie-h">Par catégorie — total ${eur(total)}</div>
+      ${cfPie(mainSlices,{id:'main',clickable:true,sel:cfSelCat,center:{l:'Dépenses',v:eur(total)}})}
+      ${cfLegend(mainSlices,total,true,cfSelCat)}
+    </div>
+    <div class="cf-pie-block">
+      <div class="cf-pie-h">Détail de « ${cfSelCat==='?'?'À catégoriser':cfSelCat} » — ${eur(subTot)} <span style="color:var(--ink-faint)">(% relatif à la catégorie)</span></div>
+      ${cfPie(subSlices,{id:'sub',clickable:false,center:{l:cfSelCat==='?'?'À cat.':cfSelCat,v:eur(subTot)}})}
+      ${cfLegend(subSlices,subTot,false,null)}
+    </div>`;
+  // sélection : secteurs du camembert principal + lignes de sa légende
+  const pick=el=>{ const k=el.getAttribute('data-key'); if(!k) return; cfSelCat=decodeURIComponent(k); renderExpensePies(); };
+  box.querySelectorAll('[data-pie="main"] path, [data-pie="main"] circle').forEach(el=>el.addEventListener('click',()=>pick(el)));
+  box.querySelectorAll('[data-leg="main"] .cf-leg-row').forEach(el=>el.addEventListener('click',()=>pick(el)));
+}
