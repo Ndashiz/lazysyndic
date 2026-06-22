@@ -215,9 +215,9 @@ const canWrite = () => demoMode || !ONLINE || (window.LS && window.LS.canWrite);
 // Persistance Supabase tolérante : exécute l'écriture, signale et recharge en cas d'échec.
 // En mode démo, on n'écrit jamais dans Supabase (les changements restent locaux).
 async function dbWrite(fn){
-  if (!writeToDb()) return;
-  try { await fn(window.LS.db); }
-  catch(e){ console.error(e); alert('Action non enregistrée : '+(e.message||e)); }
+  if (!writeToDb()){ toastSaved(); return; }   // démo / hors-ligne : sauvegarde locale
+  try { await fn(window.LS.db); toastSaved(); }
+  catch(e){ console.error(e); toastError(e.message||e); }
 }
 // exposé pour debug / reset manuel
 window.LazySyndic = { state:()=>state, reset(){ if(ONLINE){location.reload();return;} state = freshState(); saveState(); location.reload(); } };
@@ -1295,7 +1295,11 @@ async function commitImport(){
     if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:acct};
     saveState();
   }
+  // journal de bord (audit) — avant resetImport qui efface importMeta
+  const tlTitle = `Import — ${acct==='res'?'compte de réserve':'compte de paiement'}`;
+  const tlDesc = `${toAdd.length} transaction(s) importée(s)`+(importMeta&&(importMeta.from||importMeta.to)?` · période ${importMeta.from||'?'} → ${importMeta.to||'?'}`:'');
   resetImport();
+  logTimeline({title:tlTitle, description:tlDesc, kind:'import'});
   renderAll();
   // Alerte de réconciliation : solde calculé vs clôture du relevé
   const rs = reconStatus(acct);
@@ -2082,6 +2086,97 @@ document.getElementById('annualNote')?.addEventListener('change', function(){
   state.annualNote = this.value;
   dbWrite(db=>db.updateSettings({annual_note: this.value}));
 });
+/* ============================================================
+   CHRONOLOGIE (timeline) — événements manuels + audit log
+   ============================================================ */
+function todayISO(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+function fmtDateLong(iso){
+  const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m) return iso||'';
+  return new Date(+m[1],+m[2]-1,+m[3]).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'});
+}
+const TL_KIND={
+  manual:{ic:'✎',c:'var(--clay)',l:'Note'},
+  import:{ic:'↧',c:'var(--green)',l:'Import'},
+  task:  {ic:'✓',c:'#5B4B86',l:'Tâche'},
+};
+// Ajoute un événement (manuel ou audit) à la chronologie + persiste.
+function logTimeline(ev){
+  const e={date:ev.date||todayISO(), title:ev.title||'', description:ev.description||'', kind:ev.kind||'manual'};
+  state.timeline = state.timeline||[];
+  state.timeline.unshift(e);
+  if(writeToDb()) dbWrite(async db=>{ const s=await db.addTimeline({event_date:e.date,title:e.title,description:e.description,kind:e.kind}); e.id=s.id; });
+  else saveState();
+  if(document.getElementById('tlContent')) renderTimeline();
+}
+let tlYear=null;
+let tlCssDone=false;
+function ensureTimelineCss(){
+  if(tlCssDone) return; tlCssDone=true;
+  const s=document.createElement('style');
+  s.textContent=`
+    .tl{position:relative;margin:8px 0 0 8px;padding-left:26px}
+    .tl::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--line)}
+    .tl-item{position:relative;margin-bottom:16px}
+    .tl-dot{position:absolute;left:-26px;top:2px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+      color:#fff;font-size:11px;font-weight:700;box-shadow:0 0 0 3px var(--paper)}
+    .tl-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px}
+    .tl-date{font-size:11.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;display:flex;gap:8px;align-items:center}
+    .tl-title{font-weight:600;font-size:14.5px;margin-top:2px}
+    .tl-desc{font-size:13px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap}`;
+  document.head.appendChild(s);
+}
+function tlYears(){ return [...new Set((state.timeline||[]).map(e=>(e.date||'').slice(0,4)).filter(Boolean))].sort().reverse(); }
+function renderTimeline(){
+  const root=document.getElementById('tlContent'); if(!root) return;
+  ensureTimelineCss();
+  const years=tlYears();
+  if(tlYear===null || (years.length && !years.includes(tlYear))) tlYear = years[0] || String(new Date().getFullYear());
+  const events=(state.timeline||[]).filter(e=>(e.date||'').slice(0,4)===tlYear)
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));   // récent en haut
+  const yearOpts=(years.length?years:[tlYear]).map(y=>`<option ${y===tlYear?'selected':''}>${y}</option>`).join('');
+  const addForm = canWrite() ? `
+    <div class="card" style="margin-bottom:16px">
+      <h2 style="margin-bottom:12px">Ajouter un événement</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date</div><input class="fld" id="tlDate" type="date" value="${todayISO()}" style="margin-top:4px"></div>
+        <div style="flex:1;min-width:200px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Titre</div><input class="fld" id="tlTitle" placeholder="Ex. Fuite cave réparée" style="width:100%;margin-top:4px"></div>
+        <button class="btn btn-primary" id="tlAdd">+ Ajouter</button>
+      </div>
+      <div style="margin-top:10px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Description (optionnelle)</div>
+        <textarea class="fld" id="tlDesc" style="width:100%;margin-top:4px;min-height:54px;resize:vertical" placeholder="Détails de l'événement…"></textarea></div>
+    </div>` : '';
+  const items = events.length ? events.map(e=>{
+    const k=TL_KIND[e.kind]||TL_KIND.manual;
+    const del = (e.kind==='manual'&&canWrite()) ? ` <button class="lk del tl-del" data-id="${e.id||''}">supprimer</button>` : '';
+    return `<div class="tl-item">
+      <div class="tl-dot" style="background:${k.c}">${k.ic}</div>
+      <div class="tl-card">
+        <div class="tl-date">${fmtDateLong(e.date)} · <span style="color:${k.c};font-weight:600">${k.l}</span>${del}</div>
+        <div class="tl-title">${e.title}</div>
+        ${e.description?`<div class="tl-desc">${e.description}</div>`:''}
+      </div></div>`;
+  }).join('') : '<div class="sub" style="padding:14px">Aucun événement pour cet exercice.</div>';
+  root.innerHTML = `
+    <div class="controls"><div class="l" style="font-size:12px;color:var(--ink-faint)">Exercice</div>
+      <select class="fld" id="tlYearSel">${yearOpts}</select>
+      <span class="sub">${events.length} événement(s)</span></div>
+    ${addForm}
+    <div class="tl">${items}</div>`;
+  root.querySelector('#tlYearSel').onchange=e=>{ tlYear=e.target.value; renderTimeline(); };
+  const addBtn=root.querySelector('#tlAdd');
+  if(addBtn) addBtn.onclick=()=>{
+    if(!canWrite()){ alert('Lecture seule.'); return; }
+    const t=root.querySelector('#tlTitle').value.trim(); if(!t){ root.querySelector('#tlTitle').focus(); return; }
+    logTimeline({date:root.querySelector('#tlDate').value||todayISO(), title:t, description:root.querySelector('#tlDesc').value.trim(), kind:'manual'});
+  };
+  root.querySelectorAll('.tl-del').forEach(b=>b.onclick=()=>{
+    if(!canWrite()) return;
+    const id=b.dataset.id; const idx=state.timeline.findIndex(x=>x.id===id || (!id&&x===events.find(ev=>ev.id===id)));
+    const ev=state.timeline.find(x=>x.id===id);
+    if(ev){ state.timeline.splice(state.timeline.indexOf(ev),1); if(writeToDb()&&id) dbWrite(db=>db.deleteTimeline(id)); else saveState(); renderTimeline(); }
+  });
+}
+
 function renderAll(){
   renderChrome();
   renderDashboard();
@@ -2102,6 +2197,7 @@ function renderAll(){
   renderBudget();
   renderProvisions();
   renderAG();
+  renderTimeline();
   renderImports();
   animateBars();
 }
@@ -3073,3 +3169,38 @@ function renderExpensePies(){
   box.querySelectorAll('[data-pie="main"] path, [data-pie="main"] circle').forEach(el=>el.addEventListener('click',()=>pick(el)));
   box.querySelectorAll('[data-leg="main"] .cf-leg-row').forEach(el=>el.addEventListener('click',()=>pick(el)));
 }
+
+/* ============================================================
+   BANNIÈRE DE CONFIRMATION (sauvegarde)
+   ============================================================ */
+let _toastDebounce=null, _toastHide=null;
+function ensureToastCss(){
+  if(document.getElementById('lsToastCss')) return;
+  const s=document.createElement('style'); s.id='lsToastCss';
+  s.textContent=`
+   .ls-toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:400;
+     display:flex;align-items:center;gap:10px;background:var(--green-deep);color:#EAF1E8;
+     padding:11px 18px 11px 13px;border-radius:30px;font-size:13.5px;font-weight:600;
+     box-shadow:0 8px 26px rgba(33,40,30,.24);opacity:0;pointer-events:none;
+     transition:opacity .25s ease,transform .25s cubic-bezier(.2,.7,.2,1)}
+   .ls-toast.show{opacity:1;transform:translate(-50%,0)}
+   .ls-toast.err{background:var(--coral)}
+   .ls-toast .ic{display:inline-grid;place-items:center;width:19px;height:19px;border-radius:50%;
+     background:rgba(255,255,255,.22);font-size:11px;flex:0 0 auto}`;
+  document.head.appendChild(s);
+}
+function showToast(msg, kind){
+  ensureToastCss();
+  let el=document.getElementById('lsToast');
+  if(!el){ el=document.createElement('div'); el.id='lsToast'; document.body.appendChild(el); }
+  el.innerHTML=`<span class="ic">${kind==='err'?'!':'✓'}</span><span>${msg}</span>`;
+  el.className='ls-toast'+(kind==='err'?' err':'')+' show';   // affichage synchrone (animation CSS pour l'entrée)
+  clearTimeout(_toastHide);
+  _toastHide=setTimeout(()=>el.classList.remove('show'), kind==='err'?4500:2000);
+}
+// Sauvegardes groupées (ex. catégorie + apprentissage de la règle) → une seule bannière.
+function toastSaved(){
+  clearTimeout(_toastDebounce);
+  _toastDebounce=setTimeout(()=>showToast('Modifications enregistrées'), 150);
+}
+function toastError(m){ showToast('Échec de l’enregistrement : '+m, 'err'); }
