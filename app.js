@@ -618,6 +618,10 @@ function renderAcctInfo(acct){
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde calculé (ouverture + transactions)</div>
         <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:2px">${eur(bal)}</div></div>
     </div>
+    ${acct==='res' ? `<div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="l" style="font-size:12px;color:var(--ink-faint)">Objectif du fonds de réserve</div>
+      <input class="fld" id="acctTarget" ${ed?'':'disabled'} style="width:150px" value="${eur(state.reserveTarget||0)}">
+      <span class="sub">cible fixée en AG — pilote la jauge de l'accueil</span></div>` : ''}
     <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}</div>`;
   if (ed){
     const ib=box.querySelector('#acctIban');
@@ -628,6 +632,11 @@ function renderAcctInfo(acct){
       state.opening=state.opening||{}; state.opening[acct]=v;
       dbWrite(db=>db.updateSettings(acct==='res'?{opening_res:v}:{opening_pay:v}));
       refreshAccountChrome(); renderTx(acct); renderChart(acct); renderDashboard(); };
+    const tg=box.querySelector('#acctTarget');
+    if (tg) tg.onchange=()=>{ const v=parseAmount(tg.value); if(isNaN(v)||v<0){tg.value=eur(state.reserveTarget||0);return;}
+      state.reserveTarget=v;
+      dbWrite(db=>db.updateSettings({reserve_target:v}));
+      renderChrome(); renderAcctInfo(acct); };
   }
 }
 
