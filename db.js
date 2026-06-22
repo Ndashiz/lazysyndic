@@ -69,10 +69,14 @@
     const settings = res.ls_settings[0] || {};
     const ownersRows = res.ls_owners.sort((a,b)=>(a.sort||0)-(b.sort||0));
     return {
-      tx: res.ls_transactions.map(r=>({
+      tx: res.ls_transactions.filter(r=>!r.deleted_at).map(r=>({
         id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
         amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||''
       })),
+      trash: res.ls_transactions.filter(r=>r.deleted_at && r.deleted_at>=new Date(Date.now()-7*86400000).toISOString())
+        .sort((a,b)=>(b.deleted_at||'').localeCompare(a.deleted_at||''))
+        .map(r=>({ id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
+          amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||'', deleted_at:r.deleted_at })),
       rules:   res.ls_rules.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.high, r.sub||'', r.id]),
       aliases: res.ls_aliases.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.entity, !!r.is_owner, r.short||'', r.id]),
       contracts: res.ls_contracts.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({
@@ -130,6 +134,9 @@
     },
     async deleteTransaction(id){ const {error}=await T('ls_transactions').delete().eq('id',id); if(error)throw error; },
     async deleteTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').delete().in('id',ids); if(error)throw error; },
+    async softDeleteTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').update({deleted_at:new Date().toISOString()}).in('id',ids); if(error)throw error; },
+    async restoreTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').update({deleted_at:null}).in('id',ids); if(error)throw error; },
+    async purgeOldTrash(){ const cut=new Date(Date.now()-7*86400000).toISOString(); const {error}=await T('ls_transactions').delete().not('deleted_at','is',null).lt('deleted_at',cut); if(error)throw error; },
 
     async addImport(row){
       const {data, error} = await T('ls_imports').insert(row).select().single(); if (error) throw error; return data;
