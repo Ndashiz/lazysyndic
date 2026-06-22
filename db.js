@@ -55,13 +55,13 @@
 
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
-    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points'];
+    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline'];
     const res = {};
     await Promise.all(tables.map(async t=>{
       const {data, error} = await sb.from(t).select('*');
       if (error){
         // tables AG optionnelles : tolérer leur absence (schéma pas encore migré)
-        if (t==='ls_ag' || t==='ls_ag_points'){ res[t]=[]; return; }
+        if (t==='ls_ag' || t==='ls_ag_points' || t==='ls_timeline'){ res[t]=[]; return; }
         throw new Error(`${t}: ${error.message}`);
       }
       res[t] = data || [];
@@ -85,6 +85,7 @@
       })),
       reminders: res.ls_reminders.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({id:r.id, tx:r.tx, due:r.due, done:!!r.done})),
       imports: res.ls_imports.sort((a,b)=>(b.v||0)-(a.v||0)).map(r=>({id:r.id, v:r.v, label:r.label, meta:r.meta, cur:!!r.cur})),
+      timeline: (res.ls_timeline||[]).map(r=>({id:r.id, date:r.event_date, title:r.title, description:r.description||'', kind:r.kind||'manual'})),
       opening: { pay:Number(settings.opening_pay||0), res:Number(settings.opening_res||0) },
       contrib: settings.contrib || {},
       ledgerLive: !!settings.ledger_live,
@@ -169,6 +170,9 @@
 
     async updateSettings(patch){ const {error}=await T('ls_settings').update(patch).eq('id',1); if(error)throw error; },
     async updateOwner(id, patch){ const {error}=await T('ls_owners').update(patch).eq('id',id); if(error)throw error; },
+
+    async addTimeline(row){ const {data,error}=await T('ls_timeline').insert(row).select().single(); if(error)throw error; return data; },
+    async deleteTimeline(id){ const {error}=await T('ls_timeline').delete().eq('id',id); if(error)throw error; },
 
     // Sauvegarde : dump brut de toutes les tables (forme DB, round-trip fidèle).
     async dumpAll(){

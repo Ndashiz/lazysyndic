@@ -128,6 +128,17 @@ create table if not exists public.ls_imports (
   created_at timestamptz not null default now()
 );
 
+-- Chronologie / journal de bord (événements manuels + audit log)
+create table if not exists public.ls_timeline (
+  id uuid primary key default gen_random_uuid(),
+  event_date date not null,
+  title       text not null,
+  description text,
+  kind        text default 'manual' check (kind in ('manual','import','task')),
+  created_by  uuid references auth.users(id) default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+
 -- ============================================================
 --  6. RLS — lecture = membres invités, écriture = admin
 -- ============================================================
@@ -136,7 +147,7 @@ declare t text;
 begin
   foreach t in array array[
     'ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases',
-    'ls_contracts','ls_reminders','ls_settings','ls_imports'
+    'ls_contracts','ls_reminders','ls_settings','ls_imports','ls_timeline'
   ] loop
     execute format('alter table public.%I enable row level security;', t);
     execute format('drop policy if exists %I_read on public.%I;', t, t);
