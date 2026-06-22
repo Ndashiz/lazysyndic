@@ -953,8 +953,12 @@ function categorize(tiers, note, type){
   return {tiers:displayTiers, high:'?', sub:''};
 }
 
+// Signature de doublon. Inclut le COMPTE : deux transactions identiques sur
+// des comptes différents (paiement vs réserve) ne sont PAS des doublons ; un
+// doublon = deux transactions identiques sur le MÊME compte.
 function signature(t){
-  const d = parseDate(t.date); return `${d?d.iso:t.date}|${(+t.amount).toFixed(2)}|${norm(t.tiers)}|${norm(t.note)}`;
+  const d = parseDate(t.date);
+  return `${t.account||'pay'}|${d?d.iso:t.date}|${(+t.amount).toFixed(2)}|${norm(t.tiers)}|${norm(t.note)}`;
 }
 
 // Construit les transactions interprétées + statut doublon.
