@@ -76,7 +76,7 @@ const SUBCAT_DEFAULTS = {
   'Assurance':        ['RC','Incendie','Dégâts des eaux'],
   'Frais ACP':        ['Banque','Frais de gestion','Divers'],
   'Entretien':        ['Nettoyage','Ascenseur','Jardin','Réparations','Communs'],
-  'Charges':          [],
+  'Charges':          ['Compte de paiement','Fonds de réserve'],
   'Fonds de réserve': [],
 };
 function subcatsOf(high){
@@ -114,18 +114,18 @@ const SEED_TX = [
   {date:'02/03/25', tiers:'Minimax',       high:'Entretien', sub:'Adoucisseur',amount:-61.00,  account:'pay', note:'Entretien adoucisseur'},
   {date:'02/03/25', tiers:'SWAN',          high:'Frais ACP', sub:'Banque',     amount:-0.60,   account:'pay', note:'SEPA transfer fee'},
   // compte de réserve
-  {date:'02/06/25', tiers:'Lou Petit',high:'Fonds de réserve', sub:'',    amount:+40.00,  account:'res', note:'Apport réserve'},
-  {date:'02/06/25', tiers:'Alex Martin',  high:'Fonds de réserve', sub:'',    amount:+80.00,  account:'res', note:'Apport réserve'},
+  {date:'02/06/25', tiers:'Lou Petit',high:'Charges', sub:'Fonds de réserve',    amount:+40.00,  account:'res', note:'Apport réserve'},
+  {date:'02/06/25', tiers:'Alex Martin',  high:'Charges', sub:'Fonds de réserve',    amount:+80.00,  account:'res', note:'Apport réserve'},
   {date:'22/04/25', tiers:'Engie',         high:'Énergie',   sub:'Électricité',amount:-22.19,  account:'res', note:'Régul. sur réserve', flag:true, comment:'Dépense passée sur le mauvais compte ?'},
-  {date:'02/03/25', tiers:'Sam Bernard',  high:'Fonds de réserve', sub:'',    amount:+40.00,  account:'res', note:'Apport réserve'},
+  {date:'02/03/25', tiers:'Sam Bernard',  high:'Charges', sub:'Fonds de réserve',    amount:+40.00,  account:'res', note:'Apport réserve'},
 ];
 
 const SEED_RULES = [
   ['Electrabel','Énergie','Électricité'],['Vivaqua','Énergie','Eau'],['Engie','Énergie','Électricité'],
   ['SWAN','Frais ACP','Banque'],['AXA','Assurance','RC civile'],['Minimax','Entretien','Adoucisseur'],
   // vocabulaire courant des relevés Swan / Syndic4you
-  ['Fond de reserve','Fonds de réserve',''],['Fonds de réserve','Fonds de réserve',''],
-  ['Account subscription','Frais ACP','Logiciel'],['Abonnement','Frais ACP','Logiciel'],
+  ['Fond de reserve','Charges','Fonds de réserve'],['Fonds de réserve','Charges','Fonds de réserve'],
+  ['Account subscription','Frais ACP','Banque'],['Abonnement','Frais ACP','Banque'],
 ];
 // alias : libellé banque → [entité affichée, est-ce un copropriétaire ?, nom court]
 const SEED_ALIASES = [
@@ -272,13 +272,37 @@ let OWNERS = [
   {n:'Lou Petit',short:'Lou', q:249, c:'#C9854A'},
 ];
 const ownersOf = () => (state.owners && state.owners.length) ? state.owners : OWNERS;
+
+// Mappings intégrés (toujours actifs, en plus des règles utilisateur).
+// Garantissent la catégorisation même sans règle en base ; les règles
+// utilisateur restent prioritaires (testées avant). Libellés déjà normalisés.
+const BUILTIN_RULES = [
+  ['vivaqua','Énergie','Eau'],
+  ['engie','Énergie','Électricité'],
+  ['electrabel','Énergie','Électricité'],
+  // frais & abonnement bancaires → toujours Frais ACP › Banque
+  ['account subscription','Frais ACP','Banque'],
+  ['abonnement','Frais ACP','Banque'],
+];
+// Libellé (normalisé) → copropriétaire (nom court). Appliqué seulement si ce
+// copropriétaire existe réellement. « Charge rdc et garage » = Simon, etc.
+const BUILTIN_OWNERS = [
+  ['charge rdc et garage','Simon'],
+  ['charge garage','Simon'],   // « Charge garage + rdc »
+  ['charge retard','Simon'],
+  ['ndizeye','Peng'], ['fei','Peng'],
+  ['aude','Aude'],
+];
+
 // Un virement entrant est rattaché à un copro si son tiers (résolu via alias)
 // contient le nom court OU le nom complet du copro.
 // Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
 function detectOwner(t){
   const hay = norm(t.tiers + ' ' + (t.note||''));
   const om = (typeof state!=='undefined'&&state&&state.ownerRules)||{};
-  for (const lbl in om){ if(lbl && hay.includes(lbl)) return om[lbl]; }   // libellés déjà normalisés
+  for (const lbl in om){ if(lbl && hay.includes(lbl)) return om[lbl]; }   // libellés déjà normalisés (appris)
+  const exists = short => ownersOf().some(o=>o.short===short);
+  for (const [lbl, short] of BUILTIN_OWNERS){ if(hay.includes(lbl) && exists(short)) return short; }
   const o = ownersOf().find(o => hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n))));
   return o ? o.short : '';
 }
@@ -948,7 +972,10 @@ function categorize(tiers, note, type){
   for (const [label, high, sub] of state.rules){
     if (label && tnorm.includes(norm(label))) return {tiers:displayTiers, high, sub:sub||''};
   }
-  // frais bancaires reconnus via la colonne Type
+  for (const [label, high, sub] of BUILTIN_RULES){      // fallback intégré
+    if (tnorm.includes(label)) return {tiers:displayTiers, high, sub:sub||''};
+  }
+  // toute sortie de type frais → Frais ACP › Banque (seule catégorie des frais)
   if (type && /fee|frais|cost/.test(norm(type))) return {tiers:displayTiers, high:'Frais ACP', sub:'Banque'};
   return {tiers:displayTiers, high:'?', sub:''};
 }
@@ -987,8 +1014,20 @@ function interpret(){
     const type = (mapping.type>=0 ? cells[mapping.type] : '').trim();
     const cat = categorize(extractTiers(rawTiers), note, type);
     const t = {date:d.disp, tiers:cat.tiers||rawTiers||'—', high:cat.high, sub:cat.sub, amount, account:importTargetAcct, note};
-    // Entrée venant d'un copropriétaire → proposer « Charges » (paiement de charge) + l'attribuer.
-    if (amount>0){ const det=detectOwner(t); if(det){ t.owner=det; if(t.high==='?'){ t.high='Charges'; t.sub=''; } } }
+    // Modèle : les contributions des copropriétaires sont des « Charges » ; la
+    // sous-catégorie indique le pot. Ancienne catégorie top-level « Fonds de
+    // réserve » → normalisée vers Charges › Fonds de réserve.
+    if (t.high==='Fonds de réserve'){ t.high='Charges'; t.sub='Fonds de réserve'; }
+    // Entrée (montant positif) → par défaut une Charge ; on attribue le copropriétaire.
+    if (amount>0){
+      const det=detectOwner(t); if(det) t.owner=det;
+      if (t.high==='?'){ t.high='Charges'; t.sub=''; }
+    }
+    // Sous-catégorie par défaut d'une Charge selon le compte :
+    //   paiement → « Compte de paiement » · réserve → « Fonds de réserve »
+    if (t.high==='Charges' && !t.sub){
+      t.sub = (importTargetAcct==='res') ? 'Fonds de réserve' : 'Compte de paiement';
+    }
     const sig = signature(t);
     const matches = existingBySig[sig] || [];
     const used = usedCount[sig] || 0;
