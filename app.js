@@ -1016,11 +1016,22 @@ function renderPreviewRow(t,i){
     <td>${catCell}</td><td>${status}</td>
     <td style="text-align:right;white-space:nowrap">${actions}</td></tr>`;
 }
+// Détection de trou : ce relevé commence-t-il bien après le dernier importé sur ce compte ?
+function importGap(){
+  const acct=importTargetAcct, m=importMeta||{};
+  const r=(state.recon||{})[acct];
+  if(!r || !r.asOf || !m.from) return null;
+  const lastTo=parseDate(r.asOf), newFrom=parseImportDate(m.from, dateOrder);
+  if(!lastTo || !newFrom) return null;
+  const days=Math.round((Date.parse(newFrom.iso)-Date.parse(lastTo.iso))/86400000);
+  return days>5 ? {asOf:r.asOf, newFrom:newFrom.disp, days} : null;
+}
 function paintPreview(){
   ensurePreviewCss();
   const box=document.getElementById('previewBox');
   const {nNew,nDupe,nSkip,nUncat}=importStats();
   const m = importMeta||{};
+  const gap = importGap();
   const ibanTail = m.iban ? normIban(m.iban).slice(-4) : '';
   const period = (m.from||m.to) ? `${m.from||'?'} → ${m.to||'?'}` : '';
   const balLine = !isNaN(m.opening) ? `ouverture ${eur(m.opening)} → clôture ${eur(m.closing)}` : '';
@@ -1044,6 +1055,7 @@ function paintPreview(){
     </div>`;
   box.innerHTML = `
     ${header}
+    ${gap?`<div class="alert"><span class="ic">⚠</span><div><b>Trou possible — ${gap.days} jours.</b> Ce relevé démarre le ${gap.newFrom}, mais le dernier relevé importé sur ce compte s'arrêtait au ${gap.asOf}. Un relevé (ou des transactions) manque peut-être entre les deux.</div></div>`:''}
     ${nUncat?`<div class="alert"><span class="ic">⚠</span><div><b>${nUncat} transaction(s) non reconnue(s).</b> Choisissez une catégorie, ou ajoutez une règle dans « Règles & alias ».</div></div>`:''}
     <div class="h-row" style="margin:4px 0 6px"><div class="mini-h" style="margin:0">Vérifiez et validez — doublons en rouge</div>
       <a class="lk" id="toMapping" style="font-size:11.5px;color:var(--ink-faint)">⚙ ajuster les colonnes</a></div>
@@ -1113,8 +1125,9 @@ async function commitImport(){
     settingsPatch[acct==='res'?'iban_res':'iban_pay'] = importMeta.iban;
   }
   if (importMeta && !isNaN(importMeta.closing)){
-    const asOf = importMeta.to || (toAdd.length ? toAdd[toAdd.length-1].date : '');
-    state.recon = {...(state.recon||{}), [acct]: {closing: importMeta.closing, asOf}};
+    const toNorm = parseImportDate(importMeta.to, dateOrder), fromNorm = parseImportDate(importMeta.from, dateOrder);
+    const asOf = (toNorm && toNorm.disp) || (toAdd.length ? toAdd[toAdd.length-1].date : '');
+    state.recon = {...(state.recon||{}), [acct]: {closing: importMeta.closing, asOf, from: fromNorm?fromNorm.disp:''}};
     settingsPatch.recon = state.recon;
   }
 
