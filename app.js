@@ -1928,6 +1928,7 @@ function renderAll(){
   renderChrome();
   renderDashboard();
   renderMySituation();
+  renderPaymentTracking();
   renderReminders();
   refreshAccountChrome();
   renderTx(curAcct);
@@ -2472,4 +2473,84 @@ function renderMySituation(){
       <div class="kpi"><div class="l">Solde</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${led.solde<0?'−':''}${eur(Math.abs(led.solde))}</div></div>
     </div>
     ${histo}</div>`;
+}
+
+/* ============================================================
+   SUIVI DES CHARGES — « qui n'a pas payé »
+   Matrice copropriétaire × mois + relance.
+   ============================================================ */
+function payMonths(){
+  const ds=state.tx.filter(t=>t.account==='pay').map(t=>parseDate(t.date)).filter(Boolean);
+  if(!ds.length) return [];
+  const min=ds.reduce((a,b)=>a.iso<b.iso?a:b), max=ds.reduce((a,b)=>a.iso>b.iso?a:b);
+  const out=[]; let y=min.y,m=min.m;
+  while((y<max.y||(y===max.y&&m<=max.m)) && out.length<24){ out.push({y,m}); m++; if(m>12){m=1;y++;} }
+  return out.slice(-6);
+}
+function paidInMonth(short, ym){
+  return sum(state.tx.filter(t=>{ if(!(t.amount>0 && t.account==='pay' && ownerOfTx(t)===short)) return false;
+    const d=parseDate(t.date); return d && d.y===ym.y && d.m===ym.m; }).map(t=>t.amount));
+}
+function renderPaymentTracking(){
+  const dash=document.getElementById('dash'); if(!dash) return;
+  let box=document.getElementById('payTracking');
+  if(!box){ box=document.createElement('div'); box.id='payTracking'; box.style.marginTop='18px'; dash.appendChild(box); }
+  const ow=ownersOf(), months=payMonths();
+  if(!ow.length || !months.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='block';
+  const MON=['Jan','Fév','Mar','Avr','Mai','Jun','Jui','Aoû','Sep','Oct','Nov','Déc'];
+  const header='<tr><th>Copropriétaire</th><th class="num">Charge/mois</th>'
+    + months.map(m=>`<th class="num">${MON[m.m-1]} ${String(m.y).slice(2)}</th>`).join('')+'</tr>';
+  const rows=ow.map(o=>{
+    const short=o.short||o.n, exp=(o.due_pay||0)/12;
+    const cells=months.map(m=>{
+      const paid=paidInMonth(short,m); let inner;
+      if(exp>0){ inner = paid>=exp*0.95 ? '<span class="badge b-ok">✓</span>'
+        : paid>0 ? '<span class="badge" style="background:var(--clay-soft);color:#8A551F">partiel</span>'
+        : '<span class="badge b-late">✗</span>'; }
+      else inner = paid>0 ? eur(paid) : '—';
+      return `<td class="num" title="${eur(paid)} versé en ${MON[m.m-1]}">${inner}</td>`;
+    }).join('');
+    return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${short[0]}</span> ${o.n}</div></td><td class="num">${exp>0?eur(exp):'—'}</td>${cells}</tr>`;
+  }).join('');
+  const last=months[months.length-1];
+  const late=ow.filter(o=>{ const exp=(o.due_pay||0)/12; return exp>0 && paidInMonth(o.short||o.n,last) < exp*0.95; });
+  const relance = late.length
+    ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="sub">⚠ En retard sur ${MON[last.m-1]} ${String(last.y).slice(2)} :</span>`
+      + late.map(o=>canWrite()
+          ? `<button class="btn btn-ghost relance-btn" data-short="${o.short||o.n}" style="padding:6px 12px;font-size:13px">✉ Relancer ${o.short||o.n}</button>`
+          : `<span class="badge b-late">${o.short||o.n}</span>`).join('')+'</div>'
+    : '';
+  const hint = ow.some(o=>o.due_pay>0) ? '' : ' · renseignez le dû dans Budget → Provisions pour détecter les retards';
+  box.innerHTML=`<div class="card">
+    <div class="h-row"><div><h2>Suivi des charges payées</h2><div class="sub">par copropriétaire · 6 derniers mois${hint}</div></div></div>
+    <div style="overflow-x:auto"><table>${header}${rows}</table></div>
+    ${relance}</div>`;
+  box.querySelectorAll('.relance-btn').forEach(b=>b.onclick=()=>relanceOwner(b.dataset.short));
+}
+function relanceOwner(short){
+  const o=ownerLedger().find(x=>(x.short||x.n)===short); if(!o) return;
+  const cn=(state.coproName||'').trim()||'la copropriété';
+  const m=(window.LS&&window.LS.member)||{};
+  const syndic=(m.full_name||'').trim()||'Le syndic';
+  const syndicEmail=m.userEmail||m.email||'syndic@exemple.be';
+  const eml=`From: ${syndic} (Syndic) <${syndicEmail}>
+To: 
+Subject: Rappel de paiement de charges - ${cn}
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Bonjour ${o.n},
+
+Sauf erreur de notre part, votre compte presente un solde en attente de ${eur(Math.abs(o.solde))} au titre des charges de ${cn} (du ${eur(o.due)}, verse ${eur(o.verse)}).
+
+Merci de bien vouloir regulariser des que possible. Si un versement a deja ete effectue, n'en tenez pas compte et n'hesitez pas a me le signaler.
+
+Cordialement,
+${syndic} - Syndic, ${cn}
+`;
+  const blob=new Blob([eml],{type:'message/rfc822'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`relance-${short}.eml`;
+  document.body.appendChild(a); a.click(); a.remove();
 }
