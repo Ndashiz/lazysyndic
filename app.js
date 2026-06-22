@@ -425,9 +425,20 @@ document.getElementById('remAddInput')?.addEventListener('keydown',e=>{ if(e.key
    ============================================================ */
 let curAcct = 'pay';
 let flagOnly = false;
+let catFilter='', dirFilter='', ownerFilter='';
+function populateTxFilters(){
+  const cf=document.getElementById('catFilter');
+  if(cf){ const cur=cf.value; cf.innerHTML='<option value="">Toutes catégories</option>'
+    + allCats().map(c=>`<option value="${c}" ${c===cur?'selected':''}>${c}</option>`).join('')
+    + `<option value="?" ${cur==='?'?'selected':''}>À catégoriser</option>`; }
+  const of=document.getElementById('ownerFilter');
+  if(of){ const cur=of.value; of.innerHTML='<option value="">Tous les copropriétaires</option>'
+    + ownersOf().map(o=>`<option value="${o.short}" ${o.short===cur?'selected':''}>${o.n}</option>`).join(''); }
+}
 
 function renderTx(acct){
   curAcct = acct;
+  populateTxFilters();
   const tb = document.getElementById('txbody'); if(!tb) return;
   tb.innerHTML = '';
   const rows = txOf(acct).slice().sort((a,b)=>{
@@ -436,6 +447,10 @@ function renderTx(acct){
   });
   rows.forEach(t=>{
     if (flagOnly && !t.flag) return;
+    if (catFilter && (catFilter==='?'? t.high!=='?' : t.high!==catFilter)) return;
+    if (dirFilter==='in'  && t.amount<0) return;
+    if (dirFilter==='out' && t.amount>0) return;
+    if (ownerFilter && ownerOfTx(t)!==ownerFilter) return;
     const idx = state.tx.indexOf(t);
     const tr=document.createElement('tr'); tr.className='tx-row'+(t.flag?' flag':'');
     const catLabel = t.high + (t.sub?(' · '+t.sub):'');
@@ -488,7 +503,8 @@ function renderTx(acct){
     tb.appendChild(tr);
   });
   if (!tb.children.length){
-    tb.innerHTML = `<tr><td colspan="7" class="sub" style="padding:16px">Aucune transaction${flagOnly?' flaggée':''} sur ce compte.</td></tr>`;
+    const filtered = flagOnly||catFilter||dirFilter||ownerFilter;
+    tb.innerHTML = `<tr><td colspan="7" class="sub" style="padding:16px">Aucune transaction ${filtered?'ne correspond aux filtres':'sur ce compte'}.</td></tr>`;
   }
   renderTxTools(acct);
 }
@@ -634,6 +650,9 @@ document.getElementById('flagFilter')?.addEventListener('click', function(){
   flagOnly = this.classList.contains('on');
   renderTx(curAcct);
 });
+document.getElementById('catFilter')?.addEventListener('change', function(){ catFilter=this.value; renderTx(curAcct); });
+document.getElementById('dirFilter')?.addEventListener('change', function(){ dirFilter=this.value; renderTx(curAcct); });
+document.getElementById('ownerFilter')?.addEventListener('change', function(){ ownerFilter=this.value; renderTx(curAcct); });
 
 // (boutons de rapport câblés plus bas, section GÉNÉRATEUR DE RAPPORTS)
 

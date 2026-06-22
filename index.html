@@ -343,8 +343,9 @@
       </div>
 
       <div class="controls">
-        <select class="fld"><option>Toutes catégories</option><option>Énergie</option><option>Assurance</option><option>Frais ACP</option><option>Entretien</option><option>Charges</option></select>
-        <select class="fld"><option>Entrées + sorties</option><option>Sorties uniquement</option><option>Entrées uniquement</option></select>
+        <select class="fld" id="catFilter"><option value="">Toutes catégories</option></select>
+        <select class="fld" id="dirFilter"><option value="">Entrées + sorties</option><option value="out">Sorties uniquement</option><option value="in">Entrées uniquement</option></select>
+        <select class="fld" id="ownerFilter"><option value="">Tous les copropriétaires</option></select>
         <div class="toggle" id="flagFilter"><span class="tg"></span> Afficher seulement les transactions flaggées</div>
       </div>
 
