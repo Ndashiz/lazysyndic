@@ -215,6 +215,7 @@
     <nav class="nav">
       <button class="on" data-s="dash"><span class="ic">◆</span> Accueil</button>
       <button data-s="acc"><span class="ic">▤</span> Comptes</button>
+      <button data-s="cpta"><span class="ic">∑</span> Comptabilité</button>
       <button data-s="imp"><span class="ic">↧</span> Import</button>
       <button data-s="ag"><span class="ic">◷</span> Assemblées</button>
       <button data-s="ct"><span class="ic">▦</span> Contrats</button>
@@ -321,6 +322,9 @@
       <!-- account info : IBAN + solde d'ouverture + réconciliation -->
       <div class="card" id="acctInfo" style="margin-bottom:16px"></div>
 
+      <!-- besoin en fonds de roulement (BFR) -->
+      <div class="card" id="bfrCard" style="margin-bottom:16px"></div>
+
       <!-- report generation -->
       <div class="card" style="margin-bottom:16px;display:flex;align-items:end;gap:14px;flex-wrap:wrap">
         <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Rapports — période</div>
@@ -390,6 +394,36 @@
         <div class="h-row"><div><h2>Note annuelle</h2><div class="sub">Commentaire global sur l'évolution de l'exercice — repris dans le rapport d'AG</div></div></div>
         <textarea class="fld" id="annualNote" style="width:100%;min-height:84px;resize:vertical;cursor:text;line-height:1.55" placeholder="Ex. : 2026 marquée par la régularisation Engie en mars. Énergie en hausse à surveiller. Réserve en bonne progression."></textarea>
       </div>
+    </section>
+
+    <!-- ============ COMPTABILITÉ ============ -->
+    <section class="screen" id="cpta">
+      <div class="top">
+        <div><div class="crumb">Comptabilité</div><h1>Bilan des flux de trésorerie</h1></div>
+        <div class="updated"><span class="dot"></span> Vue dérivée des transactions</div>
+      </div>
+
+      <div class="controls" style="gap:14px;flex-wrap:wrap;align-items:center">
+        <div class="seg" id="cfPeriod">
+          <button class="on" data-p="12">12 derniers mois</button>
+          <button data-p="ytd">Année en cours</button>
+          <button data-p="24">24 mois</button>
+          <button data-p="all">Tout</button>
+        </div>
+        <div class="seg" id="cfAcct">
+          <button class="on" data-a="all">Tous comptes</button>
+          <button data-a="pay">Paiement</button>
+          <button data-a="res">Réserve</button>
+        </div>
+        <button class="btn btn-ghost" id="cfExport" style="margin-left:auto">⬇ Exporter (CSV)</button>
+      </div>
+
+      <div id="cfSummary" class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px"></div>
+
+      <div class="card" style="padding:10px">
+        <div id="cfMatrix"></div>
+      </div>
+      <div class="note">Lignes = catégories &amp; sous-catégories · colonnes = mois. Faites défiler horizontalement : la 1ʳᵉ colonne et l'en-tête restent gelés. Montants nets — <span style="color:var(--green)">entrées</span> / <span style="color:var(--coral)">sorties</span>.</div>
     </section>
 
     <!-- ============ IMPORT ============ -->

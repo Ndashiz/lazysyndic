@@ -359,6 +359,7 @@ document.querySelectorAll('.nav button[data-s]').forEach(b=>{
     const s=b.dataset.s; if(s==='dash2') return;
     document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));
     document.getElementById(s).classList.add('on');
+    if(s==='cpta') renderComptabilite();
     animateBars();
   };
 });
@@ -2084,6 +2085,8 @@ function renderAll(){
   renderPaymentTracking();
   renderReminders();
   refreshAccountChrome();
+  renderBFR();
+  renderComptabilite();
   renderTx(curAcct);
   renderChart(curAcct);
   renderContracts();
@@ -2790,3 +2793,168 @@ function showTxDetail(t){
   card.querySelector('#txDetailClose').onclick=()=>m.style.display='none';
   m.style.display='flex';
 }
+
+/* ============================================================
+   BESOIN EN FONDS DE ROULEMENT (BFR) + COMPTABILITÉ (flux)
+   ============================================================ */
+let bfrMonths = 3;     // coussin de couverture (mois) — réglable
+let cfPeriod  = '12';  // 12 | 24 | ytd | all
+let cfScope   = 'all'; // all | pay | res
+const CF_MON  = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+
+/* ---- Besoin en fonds de roulement ---- */
+function renderBFR(){
+  const box = document.getElementById('bfrCard'); if(!box) return;
+  // dépense courante moyenne mensuelle du compte de paiement
+  const pay = txOf('pay').map(t=>({a:t.amount, d:parseDate(t.date)})).filter(x=>x.d);
+  const nM = new Set(pay.map(x=>x.d.iso.slice(0,7))).size || 1;
+  const depMoy   = sum(pay.filter(x=>x.a<0).map(x=>-x.a)) / nM;
+  const creances = receivables();
+  const bfr   = depMoy*bfrMonths + creances;
+  const dispo = balance('pay');
+  const ok    = dispo >= bfr;
+  const tip = `Besoin en fonds de roulement (BFR) — le coussin de trésorerie nécessaire pour régler les charges courantes en attendant les appels de charges.
+\nCalcul : (dépense courante moyenne mensuelle du compte de paiement × nombre de mois de couverture) + créances des copropriétaires non encore versées.
+\nIci : ${eur(depMoy)}/mois × ${bfrMonths} mois + ${eur(creances)} de créances = ${eur(bfr)}.
+\nÀ comparer à la trésorerie d'exploitation disponible (solde du compte de paiement) : ${eur(dispo)}.`;
+  box.innerHTML = `
+    <div class="h-row"><h2>Besoin en fonds de roulement <span title="${tip.replace(/"/g,'&quot;')}" style="cursor:help;color:var(--clay)">ⓘ</span></h2>
+      <div class="seg" id="bfrSeg">${[3,6,12].map(n=>`<button data-n="${n}" class="${n===bfrMonths?'on':''}">${n} mois</button>`).join('')}</div></div>
+    <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:14px;margin-top:8px">
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">BFR estimé</div>
+        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:600;color:var(--clay);margin-top:2px">${eur(bfr)}</div>
+        <div class="sub">${bfrMonths} mois × ${eur(depMoy)} + créances ${eur(creances)}</div></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Trésorerie d'exploitation</div>
+        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:600;margin-top:2px">${eur(dispo)}</div>
+        <div class="sub">solde du compte de paiement</div></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Couverture</div>
+        <div style="margin-top:6px">${ok?'<span class="badge b-ok">✓ Couvert</span>':'<span class="badge b-late">⚠ À renflouer</span>'}</div>
+        <div class="sub" style="margin-top:4px">${ok?`marge +${eur(dispo-bfr)}`:`manque ${eur(bfr-dispo)}`}</div></div>
+    </div>`;
+  box.querySelector('#bfrSeg').addEventListener('click', e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    bfrMonths = +b.dataset.n; renderBFR();
+  });
+}
+
+/* ---- Comptabilité : matrice catégories × mois ---- */
+function ensureCfCss(){
+  if(document.getElementById('cfCss')) return;
+  const s=document.createElement('style'); s.id='cfCss';
+  s.textContent=`
+   .cf-wrap{overflow:auto;max-height:66vh;border:1px solid var(--line);border-radius:12px}
+   table.cf{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:max-content;width:100%}
+   table.cf th,table.cf td{padding:7px 12px;white-space:nowrap;text-align:right;border-bottom:1px solid var(--line-2)}
+   table.cf thead th{position:sticky;top:0;background:var(--card-2);z-index:2;font-weight:600;color:var(--ink-soft);text-align:right;line-height:1.15}
+   table.cf th:first-child,table.cf td:first-child{position:sticky;left:0;text-align:left;background:var(--card);z-index:1;min-width:210px;box-shadow:1px 0 0 var(--line)}
+   table.cf thead th:first-child{z-index:3;background:var(--card-2)}
+   table.cf tr.cf-grp td{font-weight:700;background:var(--card-2)}
+   table.cf tr.cf-grp td:first-child{background:var(--card-2)}
+   table.cf tr.cf-sub td:first-child{padding-left:26px;color:var(--ink-soft);font-weight:400}
+   table.cf tr.cf-tot td{font-weight:700;border-top:2px solid var(--line)}
+   table.cf tr.cf-tot td:first-child{background:var(--card)}
+   table.cf td.cf-pos{color:var(--green)} table.cf td.cf-neg{color:var(--coral)}
+   table.cf td.cf-z{color:var(--ink-faint)}
+   table.cf td.cf-tot-col{box-shadow:-1px 0 0 var(--line);font-weight:700}`;
+  document.head.appendChild(s);
+}
+function cfTx(){
+  return state.tx.map(t=>({...t,_k:(parseDate(t.date)||{}).iso}))
+    .filter(t=>t._k).map(t=>({...t,_k:t._k.slice(0,7)}))
+    .filter(t=> cfScope==='all' ? true : t.account===cfScope);
+}
+function cfMonths(){
+  const tx=cfTx(); if(!tx.length) return [];
+  const keys=tx.map(t=>t._k).sort();
+  const minK=keys[0], maxK=keys[keys.length-1];
+  let [my,mm]=maxK.split('-').map(Number);
+  let start;
+  if(cfPeriod==='ytd') start=`${my}-01`;
+  else if(cfPeriod==='all') start=minK;
+  else { const n=cfPeriod==='24'?24:12; let y=my,m=mm-(n-1); while(m<=0){m+=12;y--;} start=`${y}-${String(m).padStart(2,'0')}`; }
+  if(start<minK && cfPeriod!=='all' && cfPeriod!=='ytd'){ /* garder start même si avant données pour montrer les mois vides */ }
+  const out=[]; let [y,m]=start.split('-').map(Number);
+  let guard=0;
+  while(`${y}-${String(m).padStart(2,'0')}`<=maxK && guard++<400){ out.push({key:`${y}-${String(m).padStart(2,'0')}`,y,m}); m++; if(m>12){m=1;y++;} }
+  return out;
+}
+function cfFmt(v){ return (v>=0?'+':'−')+eur(Math.abs(v)).replace(' €',''); }
+function cfBuild(){
+  const months=cfMonths();
+  const mkeys=months.map(m=>m.key);
+  const tx=cfTx().filter(t=>mkeys.includes(t._k));
+  const agg={}, catTot={};
+  tx.forEach(t=>{ const h=t.high||'?', s=t.sub||'(sans sous-catégorie)', k=t._k;
+    const ck=h+'¦'+s; (agg[ck]=agg[ck]||{}); agg[ck][k]=(agg[ck][k]||0)+t.amount;
+    (catTot[h]=catTot[h]||{}); catTot[h][k]=(catTot[h][k]||0)+t.amount; });
+  const present=[...new Set(tx.map(t=>t.high||'?'))];
+  const income=['Charges','Fonds de réserve'];
+  const order=[...income, ...allCats().filter(c=>!income.includes(c)), '?'].filter((c,i,a)=>present.includes(c)&&a.indexOf(c)===i);
+  const subsOf=h=>[...new Set(tx.filter(t=>(t.high||'?')===h).map(t=>t.sub||'(sans sous-catégorie)'))];
+  const totIn={},totOut={},totNet={};
+  mkeys.forEach(k=>{ let i=0,o=0; tx.forEach(t=>{ if(t._k===k){ if(t.amount>0)i+=t.amount; else o+=t.amount; } }); totIn[k]=i;totOut[k]=o;totNet[k]=i+o; });
+  const opening = cfScope==='all' ? ((state.opening&&state.opening.pay||0)+(state.opening&&state.opening.res||0)) : (state.opening&&state.opening[cfScope]||0);
+  let run = opening + sum(cfTx().filter(t=>t._k<mkeys[0]).map(t=>t.amount));
+  const treso={}; mkeys.forEach(k=>{ run+=totNet[k]; treso[k]=run; });
+  return {months,mkeys,agg,catTot,order,subsOf,totIn,totOut,totNet,treso};
+}
+function renderComptabilite(){
+  const box=document.getElementById('cfMatrix'); if(!box) return;
+  ensureCfCss();
+  const months=cfMonths();
+  if(!months.length){ box.innerHTML='<div class="sub" style="padding:20px">Aucune transaction à afficher.</div>';
+    const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML=''; return; }
+  const D=cfBuild(); const {mkeys}=D;
+  const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
+  const cell=v=>`<td class="${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;
+  const tcell=v=>`<td class="cf-tot-col ${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;
+  let h='<div class="cf-wrap"><table class="cf"><thead><tr><th>Catégorie</th>'+
+    D.months.map(m=>`<th>${CF_MON[m.m-1]}<br><span style="font-weight:400;color:var(--ink-faint)">${String(m.y).slice(2)}</span></th>`).join('')+
+    '<th class="cf-tot-col">Total</th></tr></thead><tbody>';
+  D.order.forEach(cat=>{
+    const ct=D.catTot[cat]||{};
+    h+=`<tr class="cf-grp"><td>${cat==='?'?'À catégoriser':cat}</td>${mkeys.map(k=>cell(ct[k]||0)).join('')}${tcell(rowSum(ct))}</tr>`;
+    D.subsOf(cat).forEach(s=>{ const a=D.agg[cat+'¦'+s]||{};
+      h+=`<tr class="cf-sub"><td>${s}</td>${mkeys.map(k=>cell(a[k]||0)).join('')}${tcell(rowSum(a))}</tr>`; });
+  });
+  h+=`<tr class="cf-tot"><td>Total entrées</td>${mkeys.map(k=>`<td class="cf-pos">${D.totIn[k]?cfFmt(D.totIn[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-pos">${cfFmt(rowSum(D.totIn))}</td></tr>`;
+  h+=`<tr class="cf-tot"><td>Total sorties</td>${mkeys.map(k=>`<td class="cf-neg">${D.totOut[k]?cfFmt(D.totOut[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-neg">${cfFmt(rowSum(D.totOut))}</td></tr>`;
+  h+=`<tr class="cf-tot"><td>Flux net</td>${mkeys.map(k=>cell(D.totNet[k])).join('')}${tcell(rowSum(D.totNet))}</tr>`;
+  h+=`<tr class="cf-tot" style="border-top:none"><td>Trésorerie fin de mois</td>${mkeys.map(k=>`<td>${eur(D.treso[k]).replace(' €','')}</td>`).join('')}<td class="cf-tot-col">—</td></tr>`;
+  h+='</tbody></table></div>';
+  box.innerHTML=h;
+  // cartes de synthèse
+  const sIn=rowSum(D.totIn), sOut=rowSum(D.totOut), net=sIn+sOut;
+  const card=(l,v,c)=>`<div class="card" style="padding:14px 16px"><div class="l" style="font-size:12px;color:var(--ink-faint)">${l}</div><div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:3px${c?';color:'+c:''}">${v}</div></div>`;
+  const sm=document.getElementById('cfSummary');
+  if(sm) sm.innerHTML =
+    card('Entrées sur la période','+'+eur(sIn),'var(--green)')+
+    card('Sorties sur la période','−'+eur(Math.abs(sOut)),'var(--coral)')+
+    card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--green)':'var(--coral)')+
+    card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]));
+}
+function exportComptabilite(){
+  const months=cfMonths(); if(!months.length){ alert('Rien à exporter.'); return; }
+  const D=cfBuild(); const {mkeys}=D;
+  const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
+  const f=v=>(v||0).toFixed(2).replace('.',',');
+  const head=['Catégorie',...months.map(m=>`${CF_MON[m.m-1]} ${m.y}`),'Total'];
+  const lines=[head.join(';')];
+  D.order.forEach(cat=>{ const ct=D.catTot[cat]||{};
+    lines.push([cat==='?'?'À catégoriser':cat,...mkeys.map(k=>f(ct[k])),f(rowSum(ct))].join(';'));
+    D.subsOf(cat).forEach(s=>{ const a=D.agg[cat+'¦'+s]||{};
+      lines.push(['  '+s,...mkeys.map(k=>f(a[k])),f(rowSum(a))].join(';')); }); });
+  lines.push(['Total entrées',...mkeys.map(k=>f(D.totIn[k])),f(rowSum(D.totIn))].join(';'));
+  lines.push(['Total sorties',...mkeys.map(k=>f(D.totOut[k])),f(rowSum(D.totOut))].join(';'));
+  lines.push(['Flux net',...mkeys.map(k=>f(D.totNet[k])),f(rowSum(D.totNet))].join(';'));
+  lines.push(['Trésorerie fin de mois',...mkeys.map(k=>f(D.treso[k])),''].join(';'));
+  downloadBlob(new Blob(['﻿'+lines.join('\n')],{type:'text/csv'}), `comptabilite_${cfScope}_${cfPeriod}.csv`);
+}
+/* contrôles */
+document.getElementById('cfPeriod')?.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
+  document.querySelectorAll('#cfPeriod button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  cfPeriod=b.dataset.p; renderComptabilite(); });
+document.getElementById('cfAcct')?.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
+  document.querySelectorAll('#cfAcct button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  cfScope=b.dataset.a; renderComptabilite(); });
+document.getElementById('cfExport')?.addEventListener('click', exportComptabilite);
