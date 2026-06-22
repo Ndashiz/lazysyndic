@@ -596,6 +596,14 @@
       </table></div>
       <button class="btn btn-ghost" id="addAlias">+ Ajouter un alias</button>
       <div class="note">Ces règles préremplissent automatiquement la catégorie et l'identité lors de chaque import.</div>
+
+      <div class="mini-h" style="margin-top:28px">Sauvegarde &amp; restauration</div>
+      <div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-ghost" id="exportBackup">⬇ Sauvegarde complète (.json)</button>
+        <button class="btn btn-ghost" id="exportCsv">⬇ Transactions (.csv)</button>
+        <button class="btn btn-ghost" id="restoreBtn" style="color:var(--coral)">↥ Restaurer une sauvegarde</button>
+        <span class="sub" style="flex:1;min-width:180px">La sauvegarde .json contient tout (comptes, transactions, règles, AG…). La restauration <b>remplace</b> les données actuelles.</span>
+      </div>
     </section>
 
   </main>

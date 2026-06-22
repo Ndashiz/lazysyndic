@@ -2352,3 +2352,49 @@ boot();
   document.getElementById('genBudget')?.addEventListener('click', ()=>openReport('budget'));
   document.querySelectorAll('.ag-annexes').forEach(b=>b.addEventListener('click', ()=>openReport('ag', periodForYear(b.dataset.year))));
 })();
+
+/* ============================================================
+   SAUVEGARDE & RESTAURATION
+   ============================================================ */
+function downloadBlob(blob, name){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function exportBackup(){
+  try{
+    if(!ONLINE){ alert('Sauvegarde indisponible hors-ligne.'); return; }
+    const data = await window.LS.db.dumpAll();
+    const payload = { app:'LazySyndic', version:1, exported_at:new Date().toISOString(), data };
+    downloadBlob(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),
+      `lazysyndic-sauvegarde-${new Date().toISOString().slice(0,10)}.json`);
+  }catch(e){ alert('Export impossible : '+(e.message||e)); }
+}
+function exportTransactionsCSV(){
+  const head=['Date','Compte','Tiers','Catégorie','Sous-catégorie','Copropriétaire','Montant','Note','Flag','Commentaire'];
+  const rows=[head];
+  state.tx.slice().sort((a,b)=>{const da=parseDate(a.date),db=parseDate(b.date);return (da?da.iso:'').localeCompare(db?db.iso:'');})
+    .forEach(t=>rows.push([t.date, t.account==='res'?'réserve':'paiement', t.tiers, t.high, t.sub||'',
+      ownerOfTx(t), String(t.amount).replace('.',','), t.note||'', t.flag?'oui':'', t.comment||'']));
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+  downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `lazysyndic-transactions-${new Date().toISOString().slice(0,10)}.csv`);
+}
+async function restoreBackup(file){
+  if(!canWrite()){ alert('Lecture seule : seul le syndic peut restaurer.'); return; }
+  let parsed; try{ parsed=JSON.parse(await file.text()); }catch(e){ alert('Fichier de sauvegarde illisible.'); return; }
+  const data = parsed.data || parsed;
+  if(!data.ls_transactions && !data.ls_owners){ alert('Ce fichier ne ressemble pas à une sauvegarde LazySyndic.'); return; }
+  const n=(data.ls_transactions||[]).length, o=(data.ls_owners||[]).length;
+  if(!confirm(`Restaurer cette sauvegarde ?\n\nCela REMPLACE toutes les données actuelles par celles du fichier (${o} propriétaire(s), ${n} transaction(s)).\nAction irréversible.`)) return;
+  try{ await window.LS.db.restore(data); alert('✓ Sauvegarde restaurée.'); location.reload(); }
+  catch(e){ alert('Restauration échouée : '+(e.message||e)); }
+}
+let restoreInput;
+document.getElementById('exportBackup')?.addEventListener('click', exportBackup);
+document.getElementById('exportCsv')?.addEventListener('click', exportTransactionsCSV);
+document.getElementById('restoreBtn')?.addEventListener('click', ()=>{
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  if(!restoreInput){ restoreInput=document.createElement('input'); restoreInput.type='file'; restoreInput.accept='.json,application/json'; restoreInput.style.display='none';
+    restoreInput.onchange=e=>{ if(e.target.files[0]) restoreBackup(e.target.files[0]); restoreInput.value=''; };
+    document.body.appendChild(restoreInput); }
+  restoreInput.click();
+});
