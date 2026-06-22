@@ -579,7 +579,13 @@ function deleteSelectedTx(acct){
   const ids=[...document.querySelectorAll('#txbody .tx-sel:checked')].map(c=>c.dataset.id);
   if(!ids.length) return;
   if(!confirm(`Mettre ${ids.length} transaction(s) à la corbeille ?\nRécupérable pendant 7 jours.`)) return;
-  trashTx(ids); renderAll();
+  const accts=[...new Set(state.tx.filter(t=>ids.includes(t.id)).map(t=>t.account))];
+  trashTx(ids);
+  const patch={};
+  accts.forEach(a=>{ if(txOf(a).length===0){ state.opening=state.opening||{}; state.opening[a]=0;
+    state.recon=state.recon||{}; delete state.recon[a]; patch[a==='res'?'opening_res':'opening_pay']=0; } });
+  if(Object.keys(patch).length){ patch.recon=state.recon; saveState(); dbWrite(db=>db.updateSettings(patch)); }
+  renderAll();
 }
 function deleteAllTx(acct){ resetAccount(acct); }
 // Remise à zéro d'un compte : transactions + solde d'ouverture + réconciliation
@@ -638,6 +644,7 @@ function refreshAccountChrome(){
 function reconStatus(acct){
   const r = (state.recon||{})[acct];
   if (!r || r.closing===undefined || r.closing===null) return null;
+  if (txOf(acct).length===0) return null;   // aucune transaction → réconciliation sans objet
   const diff = +(balance(acct) - Number(r.closing)).toFixed(2);
   return {closing:Number(r.closing), asOf:r.asOf||'', diff, ok:Math.abs(diff)<0.01};
 }
