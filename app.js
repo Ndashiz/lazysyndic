@@ -2600,3 +2600,53 @@ ${syndic} - Syndic, ${cn}
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`relance-${short}.eml`;
   document.body.appendChild(a); a.click(); a.remove();
 }
+
+/* ============================================================
+   CONVERTISSEUR : texte copié depuis Swan → CSV importable
+   Format collé : blocs Description · Méthode · Date · Montant,
+   regroupés par en-têtes de mois.
+   ============================================================ */
+const PASTE_MON={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+function parsePastedTransactions(text){
+  const monthHdr=/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}$/i;
+  const dateRe=/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),\s+(\d{4})$/i;
+  const amtRe=/^([+\-−])\s*€\s*([\d.,]+)\s*$/;
+  const skip=new Set(['transaction','method','date','amount']);
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean)
+    .filter(l=>!monthHdr.test(l) && !skip.has(l.toLowerCase()));
+  const out=[]; let block=[];
+  const pad=n=>String(n).padStart(2,'0');
+  for(const l of lines){
+    block.push(l);
+    const am=l.match(amtRe);
+    if(am){
+      const dateL=block[block.length-2], method=block[block.length-3]||'';
+      const desc=block.slice(0, Math.max(0,block.length-3)).join(' ').trim();
+      const dm=dateL && dateL.match(dateRe);
+      if(dm){
+        const mm=PASTE_MON[dm[1].toLowerCase()], dd=+dm[2], yyyy=+dm[3];
+        const sign=(am[1]==='-'||am[1]==='−')?-1:1;
+        const val=parseFloat(am[2].replace(/\s/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.'));
+        if(mm && !isNaN(val)){
+          out.push({ date:`${pad(mm)}/${pad(dd)}/${yyyy}`, type:method, desc:desc||method,
+            credit: sign>0 ? val.toFixed(2) : '', debit: sign<0 ? val.toFixed(2) : '' });
+        }
+      }
+      block=[];
+    }
+  }
+  return out;
+}
+document.getElementById('pasteToCsv')?.addEventListener('click', ()=>{
+  const ta=document.getElementById('pasteArea'); const txt=(ta?.value||'').trim();
+  const cnt=document.getElementById('pasteCount');
+  if(!txt){ if(cnt) cnt.textContent='Colle d\'abord le texte.'; return; }
+  const txs=parsePastedTransactions(txt);
+  if(!txs.length){ if(cnt) cnt.textContent='Aucune transaction reconnue dans ce texte.'; return; }
+  const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
+  const rows=[['Date','Type','Description','Credit EUR','Debit EUR'].map(esc).join(';')];
+  txs.forEach(t=>rows.push([t.date, t.type, t.desc, t.credit, t.debit].map(esc).join(';')));
+  const csv=rows.join('\r\n');
+  downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `releve-swan-${new Date().toISOString().slice(0,10)}.csv`);
+  if(cnt) cnt.textContent=`✓ ${txs.length} transaction(s) → CSV téléchargé. Importe-le ci-dessous.`;
+});

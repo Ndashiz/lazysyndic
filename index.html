@@ -399,6 +399,19 @@
         <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedImp" style="margin-left:3px">—</b></div>
       </div>
 
+      <!-- Convertisseur : coller le texte copié depuis Swan → CSV importable -->
+      <details id="pasteTool" style="margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:600;color:var(--green-deep);padding:6px 2px">📋 Coller un relevé copié depuis Swan (→ CSV)</summary>
+        <div class="card" style="margin-top:8px">
+          <div class="sub" style="margin-bottom:8px">Copie la liste des transactions depuis l'interface Swan (Description · Méthode · Date · Montant) et colle-la ici. Tu obtiens un CSV à importer ci-dessous.</div>
+          <textarea class="fld" id="pasteArea" style="width:100%;min-height:120px;resize:vertical;font-family:monospace;font-size:12px" placeholder="Colle ici tout le texte des transactions…"></textarea>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="pasteToCsv">⬇ Convertir &amp; télécharger le CSV</button>
+            <span class="sub" id="pasteCount"></span>
+          </div>
+        </div>
+      </details>
+
       <div class="drop" id="drop">
         <div class="big">↧</div>
         <b>Glissez-déposez votre relevé (CSV ou PDF) ici</b>
