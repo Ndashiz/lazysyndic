@@ -60,10 +60,11 @@ const CAT_META = {
 const CATS = Object.keys(CAT_META);
 function catClass(high){ return (CAT_META[high]||{}).cls || ''; }
 function isIncomeCat(high){ return high === 'Charges' || high === 'Fonds de réserve'; }
-// Règle de gouvernance — fonds de roulement (compte de paiement) : toute sortie
-// de plus de 10 € doit être justifiée par un commentaire et est automatiquement
-// signalée (flag). commentMissing = règle applicable mais commentaire absent.
-const FDR_RULE = { account:'pay', minOut:10 };
+// Règle de gouvernance — COMPTE DE RÉSERVE : toute sortie de plus de 10 € du
+// fonds de réserve (dépense exceptionnelle) doit être justifiée par un commentaire
+// et est automatiquement signalée (flag). commentMissing = règle applicable mais
+// commentaire absent.
+const FDR_RULE = { account:'res', minOut:10 };
 function commentRequired(t){ return !!t && t.account===FDR_RULE.account && t.amount < -FDR_RULE.minOut; }
 function commentMissing(t){ return commentRequired(t) && !(t.comment && String(t.comment).trim()); }
 function isFlagged(t){ return !!(t && (t.flag || commentRequired(t))); }
@@ -534,7 +535,7 @@ function ensureTxCss(){
     .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}`;
   document.head.appendChild(s);
 }
-// Bannière « sorties > 10 € à justifier » (fonds de roulement, compte courant).
+// Bannière « sorties > 10 € à justifier » (compte de réserve — dépenses exceptionnelles).
 function renderFdrWarn(acct){
   const tools=document.getElementById('txTools'); if(!tools) return;
   let warn=document.getElementById('fdrWarn');
@@ -583,7 +584,7 @@ function renderTx(acct){
         ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner">${ownerOptions(ownerOfTx(t))}</select></div>`
         : '';
       lastCell = `${note?`<div class="sub" style="margin-bottom:4px">${note}</div>`:''}${ownerEdit}
-        ${reqMiss?`<div class="cmt-req-lbl">⚠ Commentaire obligatoire — sortie &gt; ${FDR_RULE.minOut} € (fonds de roulement)</div>`:''}
+        ${reqMiss?`<div class="cmt-req-lbl">⚠ Commentaire obligatoire — sortie &gt; ${FDR_RULE.minOut} € (compte de réserve)</div>`:''}
         <input class="fld tx-comment${reqMiss?' req':''}" placeholder="${reqMiss?'Justification OBLIGATOIRE…':'Commentaire (revue AG)…'}" value="${esc(t.comment)}" style="width:100%;font-size:12px;margin-top:6px">
         <button class="lk tx-done" style="margin-top:6px">✓ Terminer</button>`;
     } else {
@@ -594,7 +595,8 @@ function renderTx(acct){
             ? `<button class="lk tx-edit" style="margin-top:4px;color:var(--coral);font-weight:700">⚠ Commentaire obligatoire — justifier</button>`
             : `<div class="cmt-req-lbl" style="margin-top:4px">⚠ Commentaire obligatoire (sortie &gt; ${FDR_RULE.minOut} €)</div>`)
         : (canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:'');
-      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${editAction}`;
+      const splitAction = canWrite() ? ` · <button class="lk tx-split" style="margin-top:4px;color:var(--ink-faint)">✂ splitter</button>` : '';
+      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${editAction}${splitAction}`;
     }
     tr.innerHTML = `<td class="tx-selcell">${canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
       <td><button class="flagbtn" title="Marquer « à revoir »">⚑</button></td>
@@ -611,6 +613,8 @@ function renderTx(acct){
     // entrer / sortir du mode édition
     const editBtn = tr.querySelector('.tx-edit');
     if (editBtn) editBtn.onclick = ()=>{ if(!canWrite())return; txEditing.add(t.id); renderTx(acct); };
+    const splitBtn = tr.querySelector('.tx-split');
+    if (splitBtn) splitBtn.onclick = ()=>{ if(!canWrite())return; openSplitModal(t); };
     const doneBtn = tr.querySelector('.tx-done');
     if (doneBtn) doneBtn.onclick = ()=>{ txEditing.delete(t.id); renderTx(acct); };
     // handlers d'édition (seulement en mode édition)
@@ -1388,7 +1392,7 @@ async function commitImport(){
   const needJust = toAdd.filter(commentRequired).length;
   if (needJust){
     msg += `\n\n⚑ ${needJust} sortie(s) de plus de ${FDR_RULE.minOut} € automatiquement signalée(s) : `
-      + `un commentaire de justification est OBLIGATOIRE (écran Comptes › compte de paiement).`;
+      + `un commentaire de justification est OBLIGATOIRE (écran Comptes › compte de réserve).`;
   }
   alert(msg);
 }
@@ -3402,3 +3406,112 @@ function toastSaved(){
   _toastDebounce=setTimeout(()=>showToast('Modifications enregistrées'), 150);
 }
 function toastError(m){ showToast('Échec de l’enregistrement : '+m, 'err'); }
+
+/* ============================================================
+   SPLIT D'UNE TRANSACTION (répartir une dépense en plusieurs)
+   ============================================================ */
+function ensureSplitCss(){
+  if(document.getElementById('splitCss')) return;
+  const s=document.createElement('style'); s.id='splitCss';
+  s.textContent=`
+   #splitModal{position:fixed;inset:0;background:rgba(33,40,30,.45);z-index:130;display:none;align-items:center;justify-content:center;padding:20px}
+   #splitModal.open{display:flex}
+   .sp-card{width:560px;max-width:96vw;max-height:90vh;overflow:auto}
+   .sp-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+   .sp-row .sp-amt{width:96px;text-align:right;flex:0 0 auto}
+   .sp-row .sp-cat{flex:1;min-width:0}
+   .sp-row .sp-sub{flex:1;min-width:0;font-size:12px}
+   .sp-row .sp-del{color:var(--ink-faint)!important;opacity:.6}
+   .sp-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);flex-wrap:wrap}
+   .sp-rem.ok{color:var(--green);font-weight:700}
+   .sp-rem.bad{color:var(--coral);font-weight:700}`;
+  document.head.appendChild(s);
+}
+// Remplace la transaction d'origine par N transactions catégorisées (somme = montant d'origine).
+function splitTransaction(orig, parts){
+  if(!canWrite()) return;
+  const sign = orig.amount<0 ? -1 : 1;
+  const stamp = todayISO();
+  const children = parts.map((p,i)=>({
+    id:'tmp-'+stamp+'-'+i+'-'+Math.round(p.amount*100),
+    date:orig.date, tiers:orig.tiers, account:orig.account,
+    note:(orig.note?orig.note+' ':'')+`(split ${i+1}/${parts.length})`,
+    high:p.high, sub:p.sub||'', amount:sign*Math.abs(p.amount),
+    owner:orig.owner||'', flag:!!orig.flag, comment:orig.comment||''
+  }));
+  // mise à jour optimiste locale
+  state.tx = state.tx.filter(t=>t!==orig);
+  state.tx.push(...children);
+  saveState();
+  if(writeToDb()){
+    dbWrite(async db=>{
+      const saved = await db.addTransactions(children.map(({id,...r})=>r));   // sans id temporaire
+      children.forEach((c,i)=>{ const real=saved[i]; if(real){ const idx=state.tx.indexOf(c); if(idx>=0) state.tx[idx]=real; } });
+      if(orig.id) await db.deleteTransactions([orig.id]);
+    });
+  }
+  renderAll();
+}
+function openSplitModal(orig){
+  if(!canWrite()) return;
+  ensureSplitCss();
+  const total = Math.abs(orig.amount);
+  const baseHigh = (orig.high && orig.high!=='?') ? orig.high : (allCats()[0]||'Énergie');
+  // départ : 2 lignes (la 1re reprend la catégorie d'origine et le montant total)
+  let parts = [{amount:total.toFixed(2), high:baseHigh, sub:orig.sub||''},{amount:'', high:baseHigh, sub:''}];
+  let m=document.getElementById('splitModal');
+  if(!m){ m=document.createElement('div'); m.id='splitModal'; m.innerHTML='<div class="card sp-card" id="splitCard"></div>';
+    m.addEventListener('click',e=>{ if(e.target===m) close(); });
+    document.body.appendChild(m); }
+  const card=m.querySelector('#splitCard');
+  function close(){ m.classList.remove('open'); }
+  function syncAmounts(){ card.querySelectorAll('.sp-amt').forEach(inp=>{ parts[+inp.dataset.i].amount=inp.value; }); }
+  function render(){
+    const sum = parts.reduce((a,p)=>a+(parseAmount(p.amount)||0),0);
+    const rem = total - sum;
+    const valid = Math.abs(rem)<0.01 && parts.filter(p=>(parseAmount(p.amount)||0)>0).length>=2;
+    const rowsH = parts.map((p,i)=>`<div class="sp-row" data-i="${i}">
+        <input class="fld sp-amt" data-i="${i}" inputmode="decimal" placeholder="0,00" value="${p.amount}">
+        <select class="fld sp-cat" data-i="${i}">${categoryOptions(p.high)}</select>
+        <select class="fld sp-sub" data-i="${i}">${subcatOptions(p.high, p.sub||'')}</select>
+        ${parts.length>1?`<button class="lk sp-del" data-i="${i}" title="Retirer">✕</button>`:''}
+      </div>`).join('');
+    card.innerHTML=`
+      <div class="h-row"><h2>Splitter la transaction</h2><button class="lk" id="spClose" style="font-size:16px">✕</button></div>
+      <div class="sub" style="margin:-6px 0 12px">${orig.tiers} · ${orig.date} · <b class="${orig.amount<0?'neg':'pos'}">${signed(orig.amount)}</b> — répartissez le montant entre plusieurs catégories.</div>
+      ${rowsH}
+      <button class="lk" id="spAdd" style="margin-top:2px">+ ajouter une ligne</button>
+      <div class="sp-bar">
+        <div>Total ${eur(total)} · alloué <b class="sp-sum">${eur(sum)}</b> · <span class="sp-rem ${Math.abs(rem)<0.01?'ok':'bad'}">reste ${eur(rem)}</span></div>
+        <div style="display:flex;gap:8px"><button class="btn btn-ghost" id="spCancel">Annuler</button>
+          <button class="btn btn-primary" id="spOk" ${valid?'':'disabled style="opacity:.5;cursor:not-allowed"'}>Confirmer le split</button></div>
+      </div>`;
+    card.querySelector('#spClose').onclick=close;
+    card.querySelector('#spCancel').onclick=close;
+    card.querySelector('#spAdd').onclick=()=>{ syncAmounts(); parts.push({amount:'', high:baseHigh, sub:''}); render(); };
+    card.querySelectorAll('.sp-amt').forEach(inp=>inp.oninput=()=>{ parts[+inp.dataset.i].amount=inp.value;
+      const sum=parts.reduce((a,p)=>a+(parseAmount(p.amount)||0),0), rem=total-sum;
+      const ss=card.querySelector('.sp-sum'); if(ss) ss.textContent=eur(sum);
+      const el=card.querySelector('.sp-rem'); if(el){ el.textContent='reste '+eur(rem); el.className='sp-rem '+(Math.abs(rem)<0.01?'ok':'bad'); }
+      const ok=card.querySelector('#spOk'); const valid=Math.abs(rem)<0.01 && parts.filter(p=>(parseAmount(p.amount)||0)>0).length>=2;
+      if(ok){ ok.disabled=!valid; ok.style.cssText=valid?'':'opacity:.5;cursor:not-allowed'; }
+    });
+    card.querySelectorAll('.sp-cat').forEach(sel=>sel.onchange=()=>{ syncAmounts(); let v=sel.value; const i=+sel.dataset.i;
+      if(v==='__new__'){ v=addCategory(prompt('Nouvelle catégorie :','')||''); if(!v){ render(); return; } }
+      parts[i].high=v; parts[i].sub=''; render(); });
+    card.querySelectorAll('.sp-sub').forEach(sel=>sel.onchange=()=>{ syncAmounts(); let v=sel.value; const i=+sel.dataset.i;
+      if(v==='__new__'){ v=addSubcat(parts[i].high, prompt('Nouvelle sous-catégorie pour « '+parts[i].high+' » :','')||''); if(!v){ render(); return; } }
+      parts[i].sub=v; render(); });
+    card.querySelectorAll('.sp-del').forEach(b=>b.onclick=()=>{ syncAmounts(); parts.splice(+b.dataset.i,1); render(); });
+    card.querySelector('#spOk').onclick=()=>{
+      syncAmounts();
+      const cleaned=parts.map(p=>({amount:parseAmount(p.amount)||0, high:p.high, sub:p.sub})).filter(p=>p.amount>0);
+      const sum=cleaned.reduce((a,p)=>a+p.amount,0);
+      if(cleaned.length<2){ alert('Indiquez au moins deux lignes avec un montant.'); return; }
+      if(Math.abs(sum-total)>0.01){ alert('La somme ('+eur(sum)+') doit égaler '+eur(total)+'.'); return; }
+      if(cleaned.some(p=>!p.high||p.high==='?')){ if(!confirm('Une ligne n’a pas de catégorie. Continuer ?')) return; }
+      close(); splitTransaction(orig, cleaned);
+    };
+  }
+  render(); m.classList.add('open');
+}
