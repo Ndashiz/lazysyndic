@@ -193,8 +193,9 @@ function freshState(){
     reserveTarget: 2000,
     ibanMap: {},   // IBAN normalisé → 'pay' | 'res' (détection apprenante)
     timeline: [
-      {date:'2026-03-09', title:'Régularisation Electrabel', description:'Remboursement en notre faveur sur le décompte annuel.', kind:'manual'},
-      {date:'2026-03-02', title:'Entretien adoucisseur', description:'Passage Minimax — contrat annuel.', kind:'manual'},
+      {date:'2026-03-09', title:'Régularisation Electrabel', description:'Remboursement en notre faveur sur le décompte annuel.', kind:'manual', subs:[]},
+      {date:'2026-03-02', title:'Entretien adoucisseur', description:'Passage Minimax — contrat annuel.', kind:'manual',
+        subs:[{title:'Contact client center', done:true},{title:'Rendez-vous fixé', done:true},{title:'Entretien fait', done:false}]},
     ],
     imports: [
       {v:4, label:'Relevé mai 2026', meta:'2 juin · 5 transactions ajoutées · 2 doublons', cur:true},
@@ -2206,12 +2207,18 @@ const TL_KIND={
 };
 // Ajoute un événement (manuel ou audit) à la chronologie + persiste.
 function logTimeline(ev){
-  const e={date:ev.date||todayISO(), title:ev.title||'', description:ev.description||'', kind:ev.kind||'manual'};
+  const e={date:ev.date||todayISO(), title:ev.title||'', description:ev.description||'', kind:ev.kind||'manual', subs:Array.isArray(ev.subs)?ev.subs:[]};
   state.timeline = state.timeline||[];
   state.timeline.unshift(e);
-  if(writeToDb()) dbWrite(async db=>{ const s=await db.addTimeline({event_date:e.date,title:e.title,description:e.description,kind:e.kind}); e.id=s.id; });
+  if(writeToDb()) dbWrite(async db=>{ const s=await db.addTimeline({event_date:e.date,title:e.title,description:e.description,kind:e.kind,subs:e.subs}); e.id=s.id; });
   else saveState();
   if(document.getElementById('tlContent')) renderTimeline();
+}
+// Persiste les sous-étapes d'un événement (et re-rend la chronologie).
+function tlUpdateSubs(ev){
+  saveState();
+  if(writeToDb() && ev.id) dbWrite(db=>db.updateTimeline(ev.id, {subs: ev.subs}));
+  renderTimeline();
 }
 let tlYear=null;
 let tlCssDone=false;
@@ -2227,7 +2234,19 @@ function ensureTimelineCss(){
     .tl-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px}
     .tl-date{font-size:11.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;display:flex;gap:8px;align-items:center}
     .tl-title{font-weight:600;font-size:14.5px;margin-top:2px}
-    .tl-desc{font-size:13px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap}`;
+    .tl-desc{font-size:13px;color:var(--ink-soft);margin-top:3px;white-space:pre-wrap}
+    .tl-subs{margin-top:9px;border-top:1px dashed var(--line);padding-top:8px}
+    .tl-sub-list{margin:0;padding:0;list-style:none;counter-reset:tlsub}
+    .tl-sub{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;counter-increment:tlsub}
+    .tl-sub::before{content:counter(tlsub) ".";color:var(--ink-faint);font-variant-numeric:tabular-nums;min-width:18px;text-align:right}
+    .tl-sub.done .tl-sub-t{text-decoration:line-through;color:var(--ink-faint)}
+    .tl-sub-chk{background:none;border:none;cursor:pointer;font-size:15px;padding:0;line-height:1;color:var(--green)}
+    .tl-sub-chk-ro{color:var(--ink-faint)}
+    .tl-sub-t{flex:1}
+    .tl-sub-del{color:var(--ink-faint)!important;opacity:.55;font-size:12px}
+    .tl-sub-del:hover{opacity:1}
+    .tl-sub-add{display:flex;gap:8px;margin-top:7px;align-items:center}
+    .tl-sub-add .tl-sub-input{flex:1;min-width:0;font-size:12.5px;padding:5px 9px}`;
   document.head.appendChild(s);
 }
 function tlYears(){ return [...new Set((state.timeline||[]).map(e=>(e.date||'').slice(0,4)).filter(Boolean))].sort().reverse(); }
@@ -2252,13 +2271,24 @@ function renderTimeline(){
     </div>` : '';
   const items = events.length ? events.map(e=>{
     const k=TL_KIND[e.kind]||TL_KIND.manual;
+    const ti=state.timeline.indexOf(e);
     const del = (e.kind==='manual'&&canWrite()) ? ` <button class="lk del tl-del" data-id="${e.id||''}">supprimer</button>` : '';
+    const subs = Array.isArray(e.subs) ? e.subs : [];
+    const subList = (subs.length || canWrite()) ? `<div class="tl-subs">
+        <ol class="tl-sub-list">${subs.map((s,si)=>`<li class="tl-sub${s.done?' done':''}">
+          ${canWrite()?`<button class="tl-sub-chk" data-ti="${ti}" data-si="${si}" title="Marquer fait / à faire">${s.done?'☑':'☐'}</button>`:`<span class="tl-sub-chk-ro">${s.done?'☑':'•'}</span>`}
+          <span class="tl-sub-t">${s.title||''}</span>
+          ${canWrite()?`<button class="lk tl-sub-del" data-ti="${ti}" data-si="${si}" title="Supprimer l'étape">✕</button>`:''}
+        </li>`).join('')}</ol>
+        ${canWrite()?`<div class="tl-sub-add"><input class="fld tl-sub-input" data-ti="${ti}" placeholder="Ajouter une sous-étape…"><button class="lk tl-sub-add-btn" data-ti="${ti}">+ étape</button></div>`:''}
+      </div>` : '';
     return `<div class="tl-item">
       <div class="tl-dot" style="background:${k.c}">${k.ic}</div>
       <div class="tl-card">
         <div class="tl-date">${fmtDateLong(e.date)} · <span style="color:${k.c};font-weight:600">${k.l}</span>${del}</div>
         <div class="tl-title">${e.title}</div>
         ${e.description?`<div class="tl-desc">${e.description}</div>`:''}
+        ${subList}
       </div></div>`;
   }).join('') : '<div class="sub" style="padding:14px">Aucun événement pour cet exercice.</div>';
   root.innerHTML = `
@@ -2279,6 +2309,29 @@ function renderTimeline(){
     const id=b.dataset.id; const idx=state.timeline.findIndex(x=>x.id===id || (!id&&x===events.find(ev=>ev.id===id)));
     const ev=state.timeline.find(x=>x.id===id);
     if(ev){ state.timeline.splice(state.timeline.indexOf(ev),1); if(writeToDb()&&id) dbWrite(db=>db.deleteTimeline(id)); else saveState(); renderTimeline(); }
+  });
+  // --- sous-étapes ---
+  const addSub=(ti)=>{
+    if(!canWrite()) return;
+    const inp=root.querySelector(`.tl-sub-input[data-ti="${ti}"]`); if(!inp) return;
+    const v=(inp.value||'').trim(); if(!v){ inp.focus(); return; }
+    const ev=state.timeline[ti]; if(!ev) return;
+    ev.subs=Array.isArray(ev.subs)?ev.subs:[]; ev.subs.push({title:v, done:false});
+    tlUpdateSubs(ev);
+  };
+  root.querySelectorAll('.tl-sub-add-btn').forEach(b=>b.onclick=()=>addSub(+b.dataset.ti));
+  root.querySelectorAll('.tl-sub-input').forEach(inp=>inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); addSub(+inp.dataset.ti); }
+  }));
+  root.querySelectorAll('.tl-sub-chk').forEach(b=>b.onclick=()=>{
+    if(!canWrite()) return;
+    const ev=state.timeline[+b.dataset.ti]; if(!ev||!ev.subs) return;
+    const s=ev.subs[+b.dataset.si]; if(!s) return; s.done=!s.done; tlUpdateSubs(ev);
+  });
+  root.querySelectorAll('.tl-sub-del').forEach(b=>b.onclick=()=>{
+    if(!canWrite()) return;
+    const ev=state.timeline[+b.dataset.ti]; if(!ev||!ev.subs) return;
+    ev.subs.splice(+b.dataset.si,1); tlUpdateSubs(ev);
   });
 }
 
@@ -2697,8 +2750,12 @@ boot();
     const evs=(state.timeline||[]).filter(e=>{ const d=e.date||''; return d>=p.fromIso && d<=p.toIso; })
       .sort((a,b)=>(a.date||'').localeCompare(b.date||''));   // ordre chronologique (récit de l'année)
     if(!evs.length) return '';
-    const rows=evs.map(e=>`<tr><td style="white-space:nowrap;vertical-align:top">${fmtDateLong(e.date)}</td>
-      <td><b>${e.title}</b>${e.description?`<div class="r-sub">${e.description}</div>`:''}</td></tr>`).join('');
+    const rows=evs.map(e=>{
+      const subs=Array.isArray(e.subs)?e.subs:[];
+      const subHtml = subs.length ? `<ol class="r-sub" style="margin:4px 0 0 18px;padding:0">${subs.map(s=>`<li>${s.title||''}${s.done?' ✓':''}</li>`).join('')}</ol>` : '';
+      return `<tr><td style="white-space:nowrap;vertical-align:top">${fmtDateLong(e.date)}</td>
+      <td><b>${e.title}</b>${e.description?`<div class="r-sub">${e.description}</div>`:''}${subHtml}</td></tr>`;
+    }).join('');
     return `<h2>Chronologie de l'exercice</h2>
       <table><tr><th style="width:160px">Date</th><th>Événement</th></tr>${rows}</table>`;
   }
@@ -3090,7 +3147,9 @@ function ensureCfCss(){
    table.cf tr.cf-tot td:first-child{background:var(--card)}
    table.cf td.cf-pos{color:var(--green)} table.cf td.cf-neg{color:var(--coral)}
    table.cf td.cf-z{color:var(--ink-faint)}
-   table.cf td.cf-tot-col{box-shadow:-1px 0 0 var(--line);font-weight:700}`;
+   table.cf td.cf-tot-col{box-shadow:-1px 0 0 var(--line);font-weight:700}
+   table.cf td.cf-avg-col,table.cf th.cf-avg-col{font-weight:600;font-style:italic;color:var(--ink-soft)}
+   table.cf td.cf-avg-col.cf-pos{color:var(--green)} table.cf td.cf-avg-col.cf-neg{color:var(--coral)}`;
   document.head.appendChild(s);
 }
 function cfTx(){
@@ -3141,22 +3200,25 @@ function renderComptabilite(){
     const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML='';
     const pb=document.getElementById('cfPies'); if(pb) pb.innerHTML=''; return; }
   const D=cfBuild(); const {mkeys}=D;
+  const N=mkeys.length||1;   // nb de mois affichés → pour la moyenne mensuelle
   const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
   const cell=v=>`<td class="${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;
   const tcell=v=>`<td class="cf-tot-col ${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;
+  const acell=v=>`<td class="cf-avg-col ${v>0?'cf-pos':(v<0?'cf-neg':'cf-z')}">${v?cfFmt(v):'·'}</td>`;  // moyenne/mois
   let h='<div class="cf-wrap"><table class="cf"><thead><tr><th>Catégorie</th>'+
     D.months.map(m=>`<th>${CF_MON[m.m-1]}<br><span style="font-weight:400;color:var(--ink-faint)">${String(m.y).slice(2)}</span></th>`).join('')+
-    '<th class="cf-tot-col">Total</th></tr></thead><tbody>';
+    '<th class="cf-tot-col">Total</th><th class="cf-avg-col">Moy.<br><span style="font-weight:400;color:var(--ink-faint)">/ mois</span></th></tr></thead><tbody>';
   D.order.forEach(cat=>{
     const ct=D.catTot[cat]||{};
-    h+=`<tr class="cf-grp"><td>${cat==='?'?'À catégoriser':cat}</td>${mkeys.map(k=>cell(ct[k]||0)).join('')}${tcell(rowSum(ct))}</tr>`;
+    h+=`<tr class="cf-grp"><td>${cat==='?'?'À catégoriser':cat}</td>${mkeys.map(k=>cell(ct[k]||0)).join('')}${tcell(rowSum(ct))}${acell(rowSum(ct)/N)}</tr>`;
     D.subsOf(cat).forEach(s=>{ const a=D.agg[cat+'¦'+s]||{};
-      h+=`<tr class="cf-sub"><td>${s}</td>${mkeys.map(k=>cell(a[k]||0)).join('')}${tcell(rowSum(a))}</tr>`; });
+      h+=`<tr class="cf-sub"><td>${s}</td>${mkeys.map(k=>cell(a[k]||0)).join('')}${tcell(rowSum(a))}${acell(rowSum(a)/N)}</tr>`; });
   });
-  h+=`<tr class="cf-tot"><td>Total entrées</td>${mkeys.map(k=>`<td class="cf-pos">${D.totIn[k]?cfFmt(D.totIn[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-pos">${cfFmt(rowSum(D.totIn))}</td></tr>`;
-  h+=`<tr class="cf-tot"><td>Total sorties</td>${mkeys.map(k=>`<td class="cf-neg">${D.totOut[k]?cfFmt(D.totOut[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-neg">${cfFmt(rowSum(D.totOut))}</td></tr>`;
-  h+=`<tr class="cf-tot"><td>Flux net</td>${mkeys.map(k=>cell(D.totNet[k])).join('')}${tcell(rowSum(D.totNet))}</tr>`;
-  h+=`<tr class="cf-tot" style="border-top:none"><td>Trésorerie fin de mois</td>${mkeys.map(k=>`<td>${eur(D.treso[k]).replace(' €','')}</td>`).join('')}<td class="cf-tot-col">—</td></tr>`;
+  h+=`<tr class="cf-tot"><td>Total entrées</td>${mkeys.map(k=>`<td class="cf-pos">${D.totIn[k]?cfFmt(D.totIn[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-pos">${cfFmt(rowSum(D.totIn))}</td><td class="cf-avg-col cf-pos">${cfFmt(rowSum(D.totIn)/N)}</td></tr>`;
+  h+=`<tr class="cf-tot"><td>Total sorties</td>${mkeys.map(k=>`<td class="cf-neg">${D.totOut[k]?cfFmt(D.totOut[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-neg">${cfFmt(rowSum(D.totOut))}</td><td class="cf-avg-col cf-neg">${cfFmt(rowSum(D.totOut)/N)}</td></tr>`;
+  h+=`<tr class="cf-tot"><td>Flux net</td>${mkeys.map(k=>cell(D.totNet[k])).join('')}${tcell(rowSum(D.totNet))}${acell(rowSum(D.totNet)/N)}</tr>`;
+  const tresoAvg = mkeys.reduce((a,k)=>a+(D.treso[k]||0),0)/N;
+  h+=`<tr class="cf-tot" style="border-top:none"><td>Trésorerie fin de mois</td>${mkeys.map(k=>`<td>${eur(D.treso[k]).replace(' €','')}</td>`).join('')}<td class="cf-tot-col">—</td><td class="cf-avg-col">${eur(tresoAvg).replace(' €','')}</td></tr>`;
   h+='</tbody></table></div>';
   box.innerHTML=h;
   // cartes de synthèse
@@ -3173,18 +3235,19 @@ function renderComptabilite(){
 function exportComptabilite(){
   const months=cfMonths(); if(!months.length){ alert('Rien à exporter.'); return; }
   const D=cfBuild(); const {mkeys}=D;
+  const N=mkeys.length||1;
   const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
   const f=v=>(v||0).toFixed(2).replace('.',',');
-  const head=['Catégorie',...months.map(m=>`${CF_MON[m.m-1]} ${m.y}`),'Total'];
+  const head=['Catégorie',...months.map(m=>`${CF_MON[m.m-1]} ${m.y}`),'Total','Moy./mois'];
   const lines=[head.join(';')];
   D.order.forEach(cat=>{ const ct=D.catTot[cat]||{};
-    lines.push([cat==='?'?'À catégoriser':cat,...mkeys.map(k=>f(ct[k])),f(rowSum(ct))].join(';'));
+    lines.push([cat==='?'?'À catégoriser':cat,...mkeys.map(k=>f(ct[k])),f(rowSum(ct)),f(rowSum(ct)/N)].join(';'));
     D.subsOf(cat).forEach(s=>{ const a=D.agg[cat+'¦'+s]||{};
-      lines.push(['  '+s,...mkeys.map(k=>f(a[k])),f(rowSum(a))].join(';')); }); });
-  lines.push(['Total entrées',...mkeys.map(k=>f(D.totIn[k])),f(rowSum(D.totIn))].join(';'));
-  lines.push(['Total sorties',...mkeys.map(k=>f(D.totOut[k])),f(rowSum(D.totOut))].join(';'));
-  lines.push(['Flux net',...mkeys.map(k=>f(D.totNet[k])),f(rowSum(D.totNet))].join(';'));
-  lines.push(['Trésorerie fin de mois',...mkeys.map(k=>f(D.treso[k])),''].join(';'));
+      lines.push(['  '+s,...mkeys.map(k=>f(a[k])),f(rowSum(a)),f(rowSum(a)/N)].join(';')); }); });
+  lines.push(['Total entrées',...mkeys.map(k=>f(D.totIn[k])),f(rowSum(D.totIn)),f(rowSum(D.totIn)/N)].join(';'));
+  lines.push(['Total sorties',...mkeys.map(k=>f(D.totOut[k])),f(rowSum(D.totOut)),f(rowSum(D.totOut)/N)].join(';'));
+  lines.push(['Flux net',...mkeys.map(k=>f(D.totNet[k])),f(rowSum(D.totNet)),f(rowSum(D.totNet)/N)].join(';'));
+  lines.push(['Trésorerie fin de mois',...mkeys.map(k=>f(D.treso[k])),'',f(mkeys.reduce((a,k)=>a+(D.treso[k]||0),0)/N)].join(';'));
   downloadBlob(new Blob(['﻿'+lines.join('\n')],{type:'text/csv'}), `comptabilite_${cfScope}_${cfPeriod}.csv`);
 }
 /* contrôles */

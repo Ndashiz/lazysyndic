@@ -39,7 +39,9 @@ drop policy if exists ls_members_self on public.ls_members;   -- supprimée : em
 -- Lecture seule pour le client. AUCUNE policy d'écriture : ls_members (rôles)
 -- est géré exclusivement côté serveur (SQL editor / service role). Sans cela,
 -- un membre « read » pouvait se mettre role='admin' sur sa propre ligne.
-create policy ls_members_read on public.ls_members for select using (id = auth.uid() or public.ls_is_admin());
+-- Perf : un membre ne lit que SA propre ligne (pas de `or ls_is_admin()` qui
+-- relançait une sous-requête récursive sur ls_members à chaque évaluation).
+create policy ls_members_read on public.ls_members for select using (id = (select auth.uid()));
 
 -- ============================================================
 --  2. RÉFÉRENTIEL COPRO
@@ -137,9 +139,12 @@ create table if not exists public.ls_timeline (
   title       text not null,
   description text,
   kind        text default 'manual' check (kind in ('manual','import','task')),
+  subs        jsonb default '[]'::jsonb,   -- sous-étapes [{title, done}]
   created_by  uuid references auth.users(id) default auth.uid(),
   created_at  timestamptz not null default now()
 );
+-- déploiements existants : ajoute la colonne si absente
+alter table public.ls_timeline add column if not exists subs jsonb default '[]'::jsonb;
 
 -- ============================================================
 --  6. RLS — lecture = membres invités, écriture = admin
@@ -154,8 +159,10 @@ begin
     execute format('alter table public.%I enable row level security;', t);
     execute format('drop policy if exists %I_read on public.%I;', t, t);
     execute format('drop policy if exists %I_write on public.%I;', t, t);
-    execute format('create policy %I_read on public.%I for select using (public.ls_is_member());', t, t);
-    execute format('create policy %I_write on public.%I for all using (public.ls_is_admin()) with check (public.ls_is_admin());', t, t);
+    -- Perf : (select fn()) → la fonction est évaluée UNE fois par requête
+    -- (initPlan) au lieu d'une fois par ligne. Prédicat identique → sécurité inchangée.
+    execute format('create policy %I_read on public.%I for select using ((select public.ls_is_member()));', t, t);
+    execute format('create policy %I_write on public.%I for all using ((select public.ls_is_admin())) with check ((select public.ls_is_admin()));', t, t);
   end loop;
 end $$;
 

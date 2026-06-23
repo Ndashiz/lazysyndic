@@ -43,10 +43,12 @@
     onChange(cb){ if(sb) sb.auth.onAuthStateChange((_e,s)=>cb(s)); },
   };
 
-  // Profil membre LazySyndic (role + owner) pour l'utilisateur courant
-  async function loadMember(){
+  // Profil membre LazySyndic (role + owner). On réutilise l'utilisateur de la
+  // session (passé en argument) pour éviter un appel réseau getUser() redondant ;
+  // repli sur getUser() seulement si non fourni.
+  async function loadMember(user){
     if(!sb) return null;
-    const {data:{user}} = await sb.auth.getUser();
+    if(!user){ const {data:{user:u}} = await sb.auth.getUser(); user=u; }
     if(!user) return null;
     const {data, error} = await sb.from('ls_members').select('role,owner_short,full_name,email').eq('id', user.id).maybeSingle();
     if (error){ console.warn('ls_members', error.message); return null; }
@@ -85,7 +87,7 @@
       })),
       reminders: res.ls_reminders.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({id:r.id, tx:r.tx, due:r.due, done:!!r.done})),
       imports: res.ls_imports.sort((a,b)=>(b.v||0)-(a.v||0)).map(r=>({id:r.id, v:r.v, label:r.label, meta:r.meta, cur:!!r.cur})),
-      timeline: (res.ls_timeline||[]).map(r=>({id:r.id, date:r.event_date, title:r.title, description:r.description||'', kind:r.kind||'manual'})),
+      timeline: (res.ls_timeline||[]).map(r=>({id:r.id, date:r.event_date, title:r.title, description:r.description||'', kind:r.kind||'manual', subs:Array.isArray(r.subs)?r.subs:[]})),
       opening: { pay:Number(settings.opening_pay||0), res:Number(settings.opening_res||0) },
       contrib: settings.contrib || {},
       ledgerLive: !!settings.ledger_live,
@@ -173,6 +175,7 @@
     async updateOwner(id, patch){ const {error}=await T('ls_owners').update(patch).eq('id',id); if(error)throw error; },
 
     async addTimeline(row){ const {data,error}=await T('ls_timeline').insert(row).select().single(); if(error)throw error; return data; },
+    async updateTimeline(id, patch){ const {error}=await T('ls_timeline').update(patch).eq('id',id); if(error)throw error; },
     async deleteTimeline(id){ const {error}=await T('ls_timeline').delete().eq('id',id); if(error)throw error; },
 
     // Sauvegarde : dump brut de toutes les tables (forme DB, round-trip fidèle).
