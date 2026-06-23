@@ -278,9 +278,10 @@ function monthlyData(acct){
 // contributions suivies dans l'état (state.contrib). Dès qu'un import réel couvre
 // l'exercice, on bascule sur le calcul dérivé des transactions (verseFromTx).
 let OWNERS = [
-  {n:'Alex Martin', short:'Alex', q:500, c:'#2F6B53'},
-  {n:'Sam Bernard', short:'Sam',  q:251, c:'#5B4B86'},
-  {n:'Lou Petit',short:'Lou', q:249, c:'#C9854A'},
+  // Provisions 2026 (Annexe 4) : dû annuel paiement + réserve (mensuel ×12).
+  {n:'Alex Martin', short:'Alex', q:500, c:'#2F6B53', due_pay:952.63, due_res:240.00},
+  {n:'Sam Bernard', short:'Sam',  q:251, c:'#5B4B86', due_pay:744.54, due_res:168.00},
+  {n:'Lou Petit',short:'Lou', q:249, c:'#C9854A', due_pay:742.87, due_res:168.00},
 ];
 const ownersOf = () => (state.owners && state.owners.length) ? state.owners : OWNERS;
 
@@ -1981,14 +1982,28 @@ function renderKeys(){
 
 // --- Onglet « Budget » : postes dérivés des vraies dépenses ---
 const defaultKey = high => high==='Frais ACP' ? 'indiv' : 'quote';
+// Clés de répartition par sous-poste — d'après la Proposition Budget 2026
+// (Annexe 4) : Eau, RC civile et frais ACP en Individuelle ; Électricité,
+// Habitation et Entretien en Quote-part.
+const BUDGET_KEY_BY_SUB = {
+  'eau':'indiv', 'rc civile':'indiv', 'rc civil':'indiv', 'rc':'indiv',
+  'banque':'indiv', 'logiciel':'indiv', 'frais de gestion':'indiv', 'divers':'indiv',
+  'électricité':'quote', 'electricite':'quote', 'gaz':'quote', 'chauffage':'quote',
+  'habitation':'quote', 'incendie':'quote', 'adoucisseur':'quote',
+  'nettoyage':'quote', 'ascenseur':'quote', 'jardin':'quote', 'communs':'quote', 'réparations':'quote',
+};
+function budgetDefaultKey(high, sub){
+  const k = BUDGET_KEY_BY_SUB[norm(sub)];
+  return k || defaultKey(high);
+}
 function budgetPostes(){
   const by={};
   state.tx.filter(t=>t.amount<0).forEach(t=>{
     const label=(t.high==='?'?'À catégoriser':t.high)+(t.sub?(' · '+t.sub):'');
-    by[label]=by[label]||{label, high:t.high, r:0};
+    by[label]=by[label]||{label, high:t.high, sub:t.sub||'', r:0};
     by[label].r+=Math.abs(t.amount);
   });
-  return Object.values(by).sort((a,b)=>b.r-a.r).map(p=>({...p, k:(state.budgetKeys&&state.budgetKeys[p.label])||defaultKey(p.high)}));
+  return Object.values(by).sort((a,b)=>b.r-a.r).map(p=>({...p, k:(state.budgetKeys&&state.budgetKeys[p.label])||budgetDefaultKey(p.high, p.sub)}));
 }
 function persistBudgetKeys(){
   if(!ONLINE) return;
@@ -2662,11 +2677,21 @@ boot();
     postes.forEach(po=>{ const bud=po.r*MARGIN; ow.forEach(o=>{ split[o.short||o.n]+= po.k==='indiv'?bud/n:bud*o.q/tot; }); });
     const totR=sum(postes.map(p=>p.r)), totB=totR*MARGIN;
     const owRows = ow.map(o=>{ const k=o.short||o.n; return `<tr><td>${o.n}</td><td class="num"><b>${eur(split[k]||0)}</b></td><td class="num">${eur((split[k]||0)/12)}</td></tr>`; }).join('');
-    return `<h2>Annexe 4 — Budget prévisionnel (marge +4 %)</h2>
+    // Proposition 2026 : provision par copropriétaire (paiement + réserve), depuis le « dû » saisi.
+    const hasProv = ow.some(o=>(+o.due_pay||0)>0 || (+o.due_res||0)>0);
+    const provRows = ow.map(o=>{ const dp=+(o.due_pay||0), dr=+(o.due_res||0);
+      return `<tr><td>${o.n}</td><td class="num">${o.q}</td><td class="num">${eur(dp)}</td><td class="num"><b>${eur(dp/12)}</b></td><td class="num"><b>${eur(dr/12)}</b></td></tr>`; }).join('');
+    const provTotPay=sum(ow.map(o=>+o.due_pay||0)), provTotRes=sum(ow.map(o=>+o.due_res||0));
+    const provTable = hasProv ? `
+      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Proposition 2026 — provision par copropriétaire</h2>
+      <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges annuelles (paiement)</th><th class="num">Provision mensuelle — paiement</th><th class="num">Provision mensuelle — réserve</th></tr>
+        ${provRows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(provTotPay)}</td><td class="num">${eur(provTotPay/12)}</td><td class="num">${eur(provTotRes/12)}</td></tr></table>` : '';
+    return `<h2>Annexe 4 — Budget prévisionnel 2026 (marge +4 %)</h2>
       <table><tr><th>Poste</th><th>Clé de répartition</th><th class="num">Réalité</th><th class="num">Budget</th></tr>
         ${rows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(totR)}</td><td class="num">${eur(totB)}</td></tr></table>
-      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Charge annuelle par copropriétaire</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>${owRows}</table>`;
+      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Charge annuelle par copropriétaire (budget réparti)</h2>
+      <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>${owRows}</table>
+      ${provTable}`;
   }
   function chronoSection(p){
     const evs=(state.timeline||[]).filter(e=>{ const d=e.date||''; return d>=p.fromIso && d<=p.toIso; })
