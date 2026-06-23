@@ -60,6 +60,13 @@ const CAT_META = {
 const CATS = Object.keys(CAT_META);
 function catClass(high){ return (CAT_META[high]||{}).cls || ''; }
 function isIncomeCat(high){ return high === 'Charges' || high === 'Fonds de réserve'; }
+// Règle de gouvernance — fonds de roulement (compte de paiement) : toute sortie
+// de plus de 10 € doit être justifiée par un commentaire et est automatiquement
+// signalée (flag). commentMissing = règle applicable mais commentaire absent.
+const FDR_RULE = { account:'pay', minOut:10 };
+function commentRequired(t){ return !!t && t.account===FDR_RULE.account && t.amount < -FDR_RULE.minOut; }
+function commentMissing(t){ return commentRequired(t) && !(t.comment && String(t.comment).trim()); }
+function isFlagged(t){ return !!(t && (t.flag || commentRequired(t))); }
 // Catégories = défauts + catégories personnalisées (settings.categories).
 function allCats(){ const custom=((typeof state!=='undefined'&&state&&state.categories)||[]); return [...CATS, ...custom.filter(c=>c&&!CATS.includes(c))]; }
 function addCategory(name){
@@ -515,8 +522,29 @@ function ensureTxCss(){
       background:var(--clay-soft);border-radius:8px;padding:2px 8px;max-width:100%;cursor:help;line-height:1.4}
     .tx-row.editing>td{background:var(--card-2)}
     .tx-row.editing>td:first-child{box-shadow:inset 3px 0 0 var(--green)}
+    .tx-row.req>td{background:rgba(194,86,74,.06)}
+    .tx-row.req>td:first-child{box-shadow:inset 3px 0 0 var(--coral)}
+    .cmt-req-lbl{font-size:11.5px;color:var(--coral);font-weight:600;margin-top:4px}
+    .fld.tx-comment.req{border-color:var(--coral);background:var(--coral-soft)}
+    .fdr-warn{display:flex;align-items:center;gap:9px;background:var(--coral-soft);color:var(--coral);
+      border:1px solid #E7B7AE;border-radius:11px;padding:9px 14px;font-size:13px;font-weight:600;margin-bottom:10px}
+    .fdr-warn .lk{color:var(--coral);text-decoration:underline;font-weight:700;margin-left:auto;cursor:pointer}
     .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}`;
   document.head.appendChild(s);
+}
+// Bannière « sorties > 10 € à justifier » (fonds de roulement, compte courant).
+function renderFdrWarn(acct){
+  const tools=document.getElementById('txTools'); if(!tools) return;
+  let warn=document.getElementById('fdrWarn');
+  if(!warn){ warn=document.createElement('div'); warn.id='fdrWarn'; tools.parentNode.insertBefore(warn, tools); }
+  const pend = txOf(acct).filter(commentMissing).length;
+  warn.innerHTML = pend
+    ? `<div class="fdr-warn">⚠ ${pend} sortie(s) de plus de ${FDR_RULE.minOut} € sans commentaire — justification obligatoire.<span class="lk" id="fdrFilter">Voir</span></div>`
+    : '';
+  const f=document.getElementById('fdrFilter');
+  if(f) f.onclick=()=>{ // filtre : seulement les flaggées (inclut ces sorties)
+    const ff=document.getElementById('flagFilter'); if(ff && !ff.classList.contains('on')) ff.click();
+  };
 }
 function renderTx(acct){
   curAcct = acct;
@@ -529,13 +557,14 @@ function renderTx(acct){
     return (db?db.iso:'').localeCompare(da?da.iso:'');
   });
   rows.forEach(t=>{
-    if (flagOnly && !t.flag) return;
+    if (flagOnly && !isFlagged(t)) return;
     if (catFilter && (catFilter==='?'? t.high!=='?' : t.high!==catFilter)) return;
     if (dirFilter==='in'  && t.amount<0) return;
     if (dirFilter==='out' && t.amount>0) return;
     if (ownerFilter && ownerOfTx(t)!==ownerFilter) return;
     const editing = txEditing.has(t.id);
-    const tr=document.createElement('tr'); tr.className='tx-row'+(t.flag?' flag':'')+(editing?' editing':'');
+    const reqMiss = commentMissing(t);
+    const tr=document.createElement('tr'); tr.className='tx-row'+(isFlagged(t)?' flag':'')+(reqMiss?' req':'')+(editing?' editing':'');
     const catLabel = (t.high==='?'?'À catégoriser':t.high) + (t.sub?(' · '+t.sub):'');
     const amtClass = t.amount>=0 ? 'pos' : 'neg';
     const note = t.note||'';
@@ -552,12 +581,18 @@ function renderTx(acct){
         ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner">${ownerOptions(ownerOfTx(t))}</select></div>`
         : '';
       lastCell = `${note?`<div class="sub" style="margin-bottom:4px">${note}</div>`:''}${ownerEdit}
-        <input class="fld tx-comment" placeholder="Commentaire (revue AG)…" value="${esc(t.comment)}" style="width:100%;font-size:12px;margin-top:6px">
+        ${reqMiss?`<div class="cmt-req-lbl">⚠ Commentaire obligatoire — sortie &gt; ${FDR_RULE.minOut} € (fonds de roulement)</div>`:''}
+        <input class="fld tx-comment${reqMiss?' req':''}" placeholder="${reqMiss?'Justification OBLIGATOIRE…':'Commentaire (revue AG)…'}" value="${esc(t.comment)}" style="width:100%;font-size:12px;margin-top:6px">
         <button class="lk tx-done" style="margin-top:6px">✓ Terminer</button>`;
     } else {
       const ownerFrozen = t.amount>0 ? `<div class="sub" style="margin-top:2px">Versé par : <b>${ownerDisp(ownerOfTx(t))||'—'}</b></div>` : '';
       const mark = hasC ? `<div class="cmt-mark" title="${esc(t.comment)}">💬 ${t.comment.length>44?t.comment.slice(0,44)+'…':t.comment}</div>` : '';
-      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:''}`;
+      const editAction = reqMiss
+        ? (canWrite()
+            ? `<button class="lk tx-edit" style="margin-top:4px;color:var(--coral);font-weight:700">⚠ Commentaire obligatoire — justifier</button>`
+            : `<div class="cmt-req-lbl" style="margin-top:4px">⚠ Commentaire obligatoire (sortie &gt; ${FDR_RULE.minOut} €)</div>`)
+        : (canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:'');
+      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${editAction}`;
     }
     tr.innerHTML = `<td class="tx-selcell">${canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
       <td><button class="flagbtn" title="Marquer « à revoir »">⚑</button></td>
@@ -609,6 +644,7 @@ function renderTx(acct){
       if(!canWrite()) return;
       t.comment = cin.value; saveState();
       dbWrite(db=>db.updateTransaction(t.id, {comment: cin.value}));
+      renderTx(acct);   // met à jour l'état « obligatoire » (rouge) une fois justifié
     };
     tr.style.cursor='pointer';
     tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.tx-edit,.flagbtn,.cmt-mark')) return; showTxDetail(t); });
@@ -618,6 +654,7 @@ function renderTx(acct){
     const filtered = flagOnly||catFilter||dirFilter||ownerFilter;
     tb.innerHTML = `<tr><td colspan="7" class="sub" style="padding:16px">Aucune transaction ${filtered?'ne correspond aux filtres':'sur ce compte'}.</td></tr>`;
   }
+  renderFdrWarn(acct);
   renderTxTools(acct);
 }
 
@@ -1345,6 +1382,11 @@ async function commitImport(){
       + `\nVérifiez une transaction manquante, en double, ou un solde d'ouverture erroné.`;
   } else if (rs && rs.ok){
     msg += `\n\n✓ Réconcilié : le solde calculé correspond à la clôture du relevé.`;
+  }
+  const needJust = toAdd.filter(commentRequired).length;
+  if (needJust){
+    msg += `\n\n⚑ ${needJust} sortie(s) de plus de ${FDR_RULE.minOut} € automatiquement signalée(s) : `
+      + `un commentaire de justification est OBLIGATOIRE (écran Comptes › compte de paiement).`;
   }
   alert(msg);
 }
@@ -2261,15 +2303,17 @@ function loadDemoState(){
   try { const raw=localStorage.getItem(DEMO_KEY); if(raw) return JSON.parse(raw); } catch(e){}
   return freshState();
 }
-async function bootData(){
+// Accepte des données déjà préchargées (loadAll lancé en parallèle dans boot)
+// pour éviter un aller-retour séquentiel.
+async function bootData(preloaded){
   if (demoMode){
     state = loadDemoState();
     OWNERS = (state.owners && state.owners.length) ? state.owners
       : [{n:'Alex Martin',short:'Alex',q:500,c:'#2F6B53'},{n:'Sam Bernard',short:'Sam',q:251,c:'#5B4B86'},{n:'Lou Petit',short:'Lou',q:249,c:'#C9854A'}];
   } else {
     try {
-      state = await window.LS.db.loadAll();
-    if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
+      state = preloaded || await window.LS.db.loadAll();
+      if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
       if (state.owners && state.owners.length) OWNERS = state.owners;
     } catch(e){
       console.error(e);
@@ -2410,10 +2454,16 @@ async function boot(){
   }
 
   // réagit aux connexions / déconnexions
+  let bootedFor = null;   // id utilisateur déjà chargé (évite un rechargement complet sur refresh token)
   window.LS.auth.onChange(async (s)=>{
     if (s){
+      if (bootedFor === s.user.id) return;   // déjà chargé pour cet utilisateur (TOKEN_REFRESHED, focus…)
+      // On lance le chargement des données EN PARALLÈLE du profil membre
+      // (la RLS protège : un non-membre récupère 0 ligne, jeté ensuite).
+      const dataP = demoMode ? Promise.resolve(undefined)
+                  : window.LS.db.loadAll().catch(e=>{ console.error(e); return undefined; });
       let member=null;
-      try { member = await window.LS.db.loadMember(); } catch(e){ console.error(e); }
+      try { member = await window.LS.db.loadMember(s.user); } catch(e){ console.error(e); }
       window.LS.member = member;
       window.LS.canWrite = !!(member && member.role==='admin');
       if (!member){
@@ -2424,16 +2474,18 @@ async function boot(){
         await window.LS.auth.signOut();
         return;
       }
+      bootedFor = s.user.id;
       // le mode démo est réservé à l'admin réel
       if (demoMode && member.role!=='admin'){ demoMode=false; localStorage.removeItem(DEMO_FLAG); }
       const demoTag = demoMode ? ' · <b style="color:var(--clay)">🧪 Démo</b>' : '';
       bar.querySelector('#sbWho').innerHTML = `${member.full_name||member.userEmail} ${member.role==='admin'?'· <b>Syndic</b>':'· <span class="ro">Lecture seule</span>'}${demoTag}`;
-      await bootData();          // charge les données
+      await bootData(await dataP);   // données déjà préchargées en parallèle
       ov.classList.remove('on');
       bar.classList.add('on');
       unlockApp();               // l'app n'apparaît qu'ici, membre confirmé + données chargées
     } else {
       // déconnecté : on reverrouille et on remet le login
+      bootedFor = null;
       lockApp(); bar.classList.remove('on'); ov.classList.add('on');
     }
   });
@@ -2705,7 +2757,7 @@ function exportTransactionsCSV(){
   const rows=[head];
   state.tx.slice().sort((a,b)=>{const da=parseDate(a.date),db=parseDate(b.date);return (da?da.iso:'').localeCompare(db?db.iso:'');})
     .forEach(t=>rows.push([t.date, t.account==='res'?'réserve':'paiement', t.tiers, t.high, t.sub||'',
-      ownerOfTx(t), String(t.amount).replace('.',','), t.note||'', t.flag?'oui':'', t.comment||'']));
+      ownerOfTx(t), String(t.amount).replace('.',','), t.note||'', isFlagged(t)?'oui':'', t.comment||'']));
   const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
   downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `lazysyndic-transactions-${new Date().toISOString().slice(0,10)}.csv`);
 }
