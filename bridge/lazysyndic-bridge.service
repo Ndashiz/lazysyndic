@@ -1,0 +1,21 @@
+[Unit]
+Description=LazySyndic → Jarvis bridge (alerts API + optional webhook push)
+After=network.target
+
+[Service]
+Type=simple
+User=jarvis
+WorkingDirectory=/opt/lazysyndic/bridge
+Environment=NODE_ENV=production
+# Secrets (SUPABASE_SERVICE_ROLE_KEY, BRIDGE_TOKEN, …) live here, chmod 600.
+EnvironmentFile=/opt/lazysyndic/bridge/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+# Light hardening (same profile as jarvis-backend).
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
