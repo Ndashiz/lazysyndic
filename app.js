@@ -379,6 +379,31 @@ document.querySelectorAll('.nav button[data-s]').forEach(b=>{
 });
 function animateBars(){ document.querySelectorAll('.fill[data-w]').forEach(f=>{ setTimeout(()=>f.style.width=f.dataset.w+'%',120); }); }
 
+/* ---- Liens profonds (#imp, #acc?filter=unmapped) ------------------------------
+   La routine mensuelle de Jarvis envoie ici : elle doit pouvoir déposer l'utilisateur
+   directement sur l'import, ou sur la liste filtrée des mouvements à catégoriser,
+   sans qu'il ait à retrouver l'écran lui-même. */
+function goToScreen(id){
+  const btn = document.querySelector(`.nav button[data-s="${id}"]`);
+  if(!btn || btn.disabled) return false;
+  btn.click();
+  window.scrollTo({top:0, behavior:'smooth'});
+  return true;
+}
+function applyDeepLink(){
+  const raw = (location.hash || '').replace(/^#/, '');
+  if(!raw) return;
+  const [screen, query] = raw.split('?');
+  if(!goToScreen(screen)) return;
+  const filter = new URLSearchParams(query || '').get('filter');
+  if(filter === 'unmapped'){
+    // « À catégoriser » = high '?', la même valeur que pose l'import.
+    const cf = document.getElementById('catFilter');
+    if(cf){ cf.value = '?'; catFilter = '?'; renderTx(curAcct); }
+  }
+}
+window.addEventListener('hashchange', applyDeepLink);
+
 /* ============================================================
    DASHBOARD (dérivé)
    ============================================================ */
@@ -2396,6 +2421,8 @@ async function bootData(preloaded){
   applyRoleUI();
   applyDemoUI();
   renderAll();
+  // Après le rendu seulement : l'écran ciblé et ses filtres doivent exister pour être atteints.
+  applyDeepLink();
 }
 
 /* ----- MODE DÉMO ----- */

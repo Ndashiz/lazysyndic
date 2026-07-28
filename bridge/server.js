@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRest } from './supabase.js';
-import { buildAlerts } from './alerts.js';
+import { buildAlerts, coproStatus } from './alerts.js';
 
 // --- minimal .env loader (KEY=VALUE lines); systemd EnvironmentFile also works ---
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +81,12 @@ const server = http.createServer(async (req, res) => {
       if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
       const alerts = await currentAlerts();
       return sendJson(res, 200, { alerts });
+    }
+    // Mapping backlog, read by Jarvis's monthly routine to know whether the copro statement
+    // has been categorised — LazySyndic owns that work, so it is the only place that knows.
+    if (req.method === 'GET' && url.pathname === '/api/jarvis/copro') {
+      if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      return sendJson(res, 200, coproStatus(await rest.loadCoproRows()));
     }
     return sendJson(res, 404, { error: 'not_found' });
   } catch (err) {

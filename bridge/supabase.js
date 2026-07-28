@@ -46,5 +46,10 @@ export function createRest(url, serviceRoleKey) {
     };
   }
 
-  return { select, loadForAlerts };
+  /** Rows the mapping backlog is computed from (the rule itself lives in alerts.js). */
+  async function loadCoproRows() {
+    return (await select('ls_transactions', 'select=tx_date,high,tiers,amount,created_at,deleted_at&deleted_at=is.null')) || [];
+  }
+
+  return { select, loadForAlerts, loadCoproRows };
 }

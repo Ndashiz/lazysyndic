@@ -1,7 +1,7 @@
 // Run: node --test  (from bridge/)  — no dependencies.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { norm, detectOwner, ownerLedger, buildAlerts } from './alerts.js';
+import { norm, detectOwner, ownerLedger, buildAlerts, coproStatus } from './alerts.js';
 
 const owners = [
   { id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 900, due_res: 100 }, // due 1000
@@ -73,4 +73,47 @@ test('buildAlerts: recent manual timeline → document, old/non-manual skipped',
   assert.equal(docs.length, 1);
   assert.equal(docs[0].id, 'tl-t1');
   assert.equal(docs[0].dueDate, '2026-07-01');
+});
+
+// « Le mapping est fini » n'a de définition que côté LazySyndic : une ligne importée arrive à
+// high='?' et n'en sort que quand on l'a catégorisée. Jarvis lit ce compteur, il ne le devine pas.
+test('coproStatus: compte les lignes restées à catégoriser', () => {
+  const rows = [
+    { tx_date: '2026-07-02', high: 'Énergie', created_at: '2026-07-10T08:00:00Z' },
+    { tx_date: '2026-07-05', high: '?', created_at: '2026-07-10T08:00:00Z' },
+    { tx_date: '2026-06-28', high: '', created_at: '2026-07-01T08:00:00Z' },
+    { tx_date: '2026-07-06', created_at: '2026-07-12T09:00:00Z' }, // high absent = pas mappée
+  ];
+  const s = coproStatus(rows);
+  assert.equal(s.total, 4);
+  assert.equal(s.unmapped, 3);
+  assert.equal(s.oldestUnmappedDate, '2026-06-28');
+  assert.equal(s.lastImportAt, '2026-07-12T09:00:00Z');
+});
+
+test('coproStatus: liste les tiers réellement payés récemment', () => {
+  const recent = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  const old = new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
+  const s = coproStatus([
+    { tx_date: recent, high: 'Énergie', tiers: 'Engie', amount: -88.4 },
+    { tx_date: recent, high: 'Énergie', tiers: 'Vivaqua', amount: -306.77 },
+    { tx_date: recent, high: 'Charges', tiers: 'Alex Martin', amount: +79.39 }, // entrée, pas payée
+    { tx_date: old, high: 'Énergie', tiers: 'Luminus', amount: -50 },           // hors fenêtre
+  ]);
+  assert.deepEqual(s.paidRecently.sort(), ['Engie', 'Vivaqua']);
+});
+
+test('coproStatus: rien à faire quand tout est catégorisé', () => {
+  const s = coproStatus([{ tx_date: '2026-07-02', high: 'Charges', created_at: '2026-07-10T08:00:00Z' }]);
+  assert.equal(s.unmapped, 0);
+  assert.equal(s.oldestUnmappedDate, null);
+});
+
+test('coproStatus: tolère une table vide ou une réponse inattendue', () => {
+  for (const input of [[], null, undefined]) {
+    const s = coproStatus(input);
+    assert.equal(s.total, 0);
+    assert.equal(s.unmapped, 0);
+    assert.equal(s.lastImportAt, null);
+  }
 });
