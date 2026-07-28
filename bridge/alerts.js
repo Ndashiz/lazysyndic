@@ -130,3 +130,43 @@ export function buildAlerts(data, opts = {}) {
 
   return alerts;
 }
+
+/**
+ * The mapping backlog Jarvis's monthly routine needs.
+ *
+ * A line lands from the import with `high = '?'` — LazySyndic's marker for « À catégoriser ».
+ * So "the mapping is finished" has an exact definition here, and only here: no transaction
+ * left at '?'. Jarvis used to keep its own uncategorised copy of the statement and guess from
+ * label regexes, because nothing exposed this.
+ *
+ * Pure on purpose: the I/O lives in supabase.js, the rule lives here and is testable.
+ *
+ * @param {Array<{tx_date?: string, high?: string, tiers?: string, amount?: number, created_at?: string}>} rows
+ *        Non-deleted ls_transactions rows.
+ */
+export function coproStatus(rows) {
+  const all = Array.isArray(rows) ? rows : [];
+  const unmapped = all.filter((t) => !t.high || t.high === '?');
+  const dates = unmapped.map((t) => t.tx_date).filter(Boolean).sort();
+  const imported = all.map((t) => t.created_at).filter(Boolean).sort();
+  // Who was actually paid, over the last two months. Jarvis's routine checks Engie and Vivaqua;
+  // it used to regex its own uncategorised copy of the statement — this is the real ledger.
+  const cutoff = new Date(Date.now() - 62 * 86400000).toISOString().slice(0, 10);
+  const paidRecently = [
+    ...new Set(
+      all
+        .filter((t) => Number(t.amount) < 0 && String(t.tx_date || '') >= cutoff)
+        .map((t) => String(t.tiers || '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  return {
+    total: all.length,
+    unmapped: unmapped.length,
+    /** Oldest movement still waiting — says how far back the backlog goes. */
+    oldestUnmappedDate: dates[0] ?? null,
+    /** Most recent line created, i.e. when a statement was last imported. */
+    lastImportAt: imported[imported.length - 1] ?? null,
+    paidRecently,
+  };
+}
