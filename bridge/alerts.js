@@ -141,7 +141,7 @@ export function buildAlerts(data, opts = {}) {
  *
  * Pure on purpose: the I/O lives in supabase.js, the rule lives here and is testable.
  *
- * @param {Array<{tx_date?: string, high?: string, tiers?: string, amount?: number, created_at?: string}>} rows
+ * @param {Array<{tx_date?: string, high?: string, tiers?: string, note?: string, amount?: number, created_at?: string}>} rows
  *        Non-deleted ls_transactions rows.
  */
 export function coproStatus(rows) {
@@ -149,14 +149,18 @@ export function coproStatus(rows) {
   const unmapped = all.filter((t) => !t.high || t.high === '?');
   const dates = unmapped.map((t) => t.tx_date).filter(Boolean).sort();
   const imported = all.map((t) => t.created_at).filter(Boolean).sort();
-  // Who was actually paid, over the last two months. Jarvis's routine checks Engie and Vivaqua;
-  // it used to regex its own uncategorised copy of the statement — this is the real ledger.
+  // Who was actually paid, over the last two months. Jarvis's routine checks Engie and Vivaqua.
+  //
+  // `tiers` alone is not enough: on real imported rows it holds the statement's own wording —
+  // "SEPA Credit Transfer", "Account subscription", a structured communication — and the supplier
+  // name sits in `note`. app.js's own categorize() searches `tiers + ' ' + note` for exactly that
+  // reason; this mirrors it 1:1, as the bridge README requires.
   const cutoff = new Date(Date.now() - 62 * 86400000).toISOString().slice(0, 10);
   const paidRecently = [
     ...new Set(
       all
         .filter((t) => Number(t.amount) < 0 && String(t.tx_date || '') >= cutoff)
-        .map((t) => String(t.tiers || '').trim())
+        .map((t) => `${String(t.tiers || '').trim()} ${String(t.note || '').trim()}`.trim())
         .filter(Boolean),
     ),
   ];

@@ -94,13 +94,17 @@ test('coproStatus: compte les lignes restées à catégoriser', () => {
 test('coproStatus: liste les tiers réellement payés récemment', () => {
   const recent = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
   const old = new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
+  // Sur les lignes réellement importées, `tiers` porte le libellé de la banque et le nom du
+  // fournisseur se trouve dans `note` — d'où la recherche sur les deux, comme categorize().
   const s = coproStatus([
-    { tx_date: recent, high: 'Énergie', tiers: 'Engie', amount: -88.4 },
+    { tx_date: recent, high: 'Énergie', tiers: 'SEPA Credit Transfer', note: 'ENGIE ELECTRABEL', amount: -88.4 },
     { tx_date: recent, high: 'Énergie', tiers: 'Vivaqua', amount: -306.77 },
     { tx_date: recent, high: 'Charges', tiers: 'Alex Martin', amount: +79.39 }, // entrée, pas payée
     { tx_date: old, high: 'Énergie', tiers: 'Luminus', amount: -50 },           // hors fenêtre
   ]);
-  assert.deepEqual(s.paidRecently.sort(), ['Engie', 'Vivaqua']);
+  assert.equal(s.paidRecently.length, 2);
+  assert.ok(s.paidRecently.some((t) => /engie/i.test(t)), 'Engie doit être trouvé via note');
+  assert.ok(s.paidRecently.some((t) => /vivaqua/i.test(t)), 'Vivaqua doit être trouvé via tiers');
 });
 
 test('coproStatus: rien à faire quand tout est catégorisé', () => {
