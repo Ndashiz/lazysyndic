@@ -91,20 +91,31 @@ test('coproStatus: compte les lignes restées à catégoriser', () => {
   assert.equal(s.lastImportAt, '2026-07-12T09:00:00Z');
 });
 
-test('coproStatus: liste les tiers réellement payés récemment', () => {
+// Un relevé Swan n'a pas de colonne « tiers » : mapCols() y recopie la description, donc les
+// deux champs portent le libellé de la banque et le nom du fournisseur n'existe nulle part.
+// C'est la catégorie posée au mapping qui dit ce qui a été payé.
+test('coproStatus: liste les catégories réellement payées récemment', () => {
   const recent = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
   const old = new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
-  // Sur les lignes réellement importées, `tiers` porte le libellé de la banque et le nom du
-  // fournisseur se trouve dans `note` — d'où la recherche sur les deux, comme categorize().
   const s = coproStatus([
-    { tx_date: recent, high: 'Énergie', tiers: 'SEPA Credit Transfer', note: 'ENGIE ELECTRABEL', amount: -88.4 },
-    { tx_date: recent, high: 'Énergie', tiers: 'Vivaqua', amount: -306.77 },
-    { tx_date: recent, high: 'Charges', tiers: 'Alex Martin', amount: +79.39 }, // entrée, pas payée
-    { tx_date: old, high: 'Énergie', tiers: 'Luminus', amount: -50 },           // hors fenêtre
+    { tx_date: recent, high: 'Énergie', sub: 'Électricité', tiers: 'SEPA Credit Transfer', note: 'SEPA Credit Transfer', amount: -88.4 },
+    { tx_date: recent, high: 'Énergie', sub: 'Eau', tiers: '+++810/7734/58662+++', amount: -306.77 },
+    { tx_date: recent, high: 'Énergie', sub: 'Électricité', tiers: 'autre ligne', amount: -12 }, // doublon de catégorie
+    { tx_date: recent, high: 'Charges', sub: '', tiers: 'Alex Martin', amount: +79.39 },         // entrée, pas payée
+    { tx_date: old, high: 'Énergie', sub: 'Gaz', tiers: 'Luminus', amount: -50 },                // hors fenêtre
   ]);
-  assert.equal(s.paidRecently.length, 2);
-  assert.ok(s.paidRecently.some((t) => /engie/i.test(t)), 'Engie doit être trouvé via note');
-  assert.ok(s.paidRecently.some((t) => /vivaqua/i.test(t)), 'Vivaqua doit être trouvé via tiers');
+  assert.deepEqual(s.paidCategories, [
+    { high: 'Énergie', sub: 'Électricité' },
+    { high: 'Énergie', sub: 'Eau' },
+  ]);
+  // Le texte brut reste exposé pour diagnostiquer, même quand il ne dit rien d'utile.
+  assert.ok(s.paidRecently.some((t) => t.includes('SEPA Credit Transfer')));
+});
+
+test('coproStatus: une ligne non catégorisée ne prouve aucun paiement', () => {
+  const recent = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  const s = coproStatus([{ tx_date: recent, high: '?', tiers: 'Virement', amount: -100 }]);
+  assert.deepEqual(s.paidCategories, []);
 });
 
 test('coproStatus: rien à faire quand tout est catégorisé', () => {
