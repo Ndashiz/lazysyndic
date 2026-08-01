@@ -49,7 +49,10 @@ export function ownerOfTx(t, owners, ownerRules) {
  * @returns Array<{short,name,due,verse,solde,...}>
  */
 export function ownerLedger(owners, transactions, ownerRules) {
-  const alive = transactions.filter((t) => !t.deleted_at);
+  // Les brouillons sont exclus : un relevé déposé mais pas encore validé n'est pas de l'argent
+  // reçu. Le compter effacerait l'alerte « impayé » d'un copropriétaire sur la foi d'un import
+  // que le syndic peut encore écarter.
+  const alive = transactions.filter((t) => !t.deleted_at && !t.draft);
   return owners.map((o) => {
     const due = Number(o.due_pay || 0) + Number(o.due_res || 0);
     const verse = alive
@@ -141,12 +144,17 @@ export function buildAlerts(data, opts = {}) {
  *
  * Pure on purpose: the I/O lives in supabase.js, the rule lives here and is testable.
  *
- * @param {Array<{tx_date?: string, high?: string, sub?: string, tiers?: string, note?: string, amount?: number, created_at?: string}>} rows
- *        Non-deleted ls_transactions rows.
+ * @param {Array<{tx_date?: string, high?: string, sub?: string, tiers?: string, note?: string, amount?: number, created_at?: string, draft?: boolean}>} rows
+ *        Non-deleted ls_transactions rows, drafts included — they are what is still pending.
  */
 export function coproStatus(rows) {
   const all = Array.isArray(rows) ? rows : [];
-  const unmapped = all.filter((t) => !t.high || t.high === '?');
+  // Un relevé importé attend d'être validé avant d'entrer dans les comptes. Tant qu'il est là, il
+  // reste du travail : `unmapped` compte donc les lignes sans catégorie ET les lignes en attente
+  // de validation, même déjà catégorisées. C'est ce compteur que Jarvis lit pour décider si
+  // l'étape de la routine peut se fermer, et la réponse est non dans les deux cas.
+  const pendingValidation = all.filter((t) => t.draft);
+  const unmapped = all.filter((t) => t.draft || !t.high || t.high === '?');
   const dates = unmapped.map((t) => t.tx_date).filter(Boolean).sort();
   const imported = all.map((t) => t.created_at).filter(Boolean).sort();
   // What was actually paid over the last two months — bills settle for the previous period, so
@@ -160,7 +168,9 @@ export function coproStatus(rows) {
   // already happened here (Engie resiliated, moved to Electrabel). "L'électricité est payée" is
   // the question being asked; "Engie a été payé" only ever approximated it.
   const cutoff = new Date(Date.now() - 62 * 86400000).toISOString().slice(0, 10);
-  const outflows = all.filter((t) => Number(t.amount) < 0 && String(t.tx_date || '') >= cutoff);
+  // Les brouillons sont exclus : « l'électricité est payée » se lit dans les comptes, et un relevé
+  // non validé n'y est pas encore. Le cocher sur la foi d'un import ferait sauter l'étape.
+  const outflows = all.filter((t) => !t.draft && Number(t.amount) < 0 && String(t.tx_date || '') >= cutoff);
   const seen = new Set();
   const paidCategories = [];
   for (const t of outflows) {
@@ -181,7 +191,10 @@ export function coproStatus(rows) {
   ];
   return {
     total: all.length,
+    /** Lignes qui demandent encore quelque chose : sans catégorie, ou en attente de validation. */
     unmapped: unmapped.length,
+    /** Dont celles d'un relevé importé mais pas encore validé. */
+    pendingValidation: pendingValidation.length,
     /** Oldest movement still waiting — says how far back the backlog goes. */
     oldestUnmappedDate: dates[0] ?? null,
     /** Most recent line created, i.e. when a statement was last imported. */

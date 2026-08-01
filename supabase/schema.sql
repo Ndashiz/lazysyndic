@@ -85,6 +85,18 @@ create table if not exists public.ls_transactions (
 create index if not exists ls_transactions_date_idx on public.ls_transactions(tx_date);
 create index if not exists ls_transactions_account_idx on public.ls_transactions(account);
 
+-- Colonnes ajoutées après coup sur les déploiements existants.
+-- `owner` et `deleted_at` étaient déjà écrites et lues par db.js sans figurer ici : un schéma
+-- rejoué à neuf donnait une base sur laquelle l'app plantait. Elles sont rétablies.
+alter table public.ls_transactions add column if not exists owner      text;
+alter table public.ls_transactions add column if not exists deleted_at timestamptz;
+-- Un relevé importé n'entre pas dans les comptes tant qu'il n'a pas été vérifié : il arrive en
+-- brouillon, se catégorise à tête reposée, et ne rejoint le grand livre qu'à la validation.
+-- `import_v` rattache la ligne à son relevé, pour valider (ou jeter) un import d'un bloc.
+alter table public.ls_transactions add column if not exists draft    boolean default false;
+alter table public.ls_transactions add column if not exists import_v int;
+create index if not exists ls_transactions_draft_idx on public.ls_transactions(draft) where draft;
+
 -- ============================================================
 --  4. RÈGLES, ALIAS, CONTRATS, RAPPELS
 -- ============================================================
@@ -131,6 +143,11 @@ create table if not exists public.ls_imports (
   v int, label text, meta text, cur boolean default false,
   created_at timestamptz not null default now()
 );
+-- Le relevé est enregistré dès le dépôt, mais son solde d'ouverture et sa clôture ne sont
+-- appliqués qu'à la validation : `stmt` les met de côté entre les deux. Écarter le relevé les
+-- jette avec lui, au lieu de laisser une réconciliation calée sur un relevé qui n'existe plus.
+alter table public.ls_imports add column if not exists stmt    jsonb;
+alter table public.ls_imports add column if not exists pending boolean default false;
 
 -- Chronologie / journal de bord (événements manuels + audit log)
 create table if not exists public.ls_timeline (

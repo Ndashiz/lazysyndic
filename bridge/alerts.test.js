@@ -124,6 +124,46 @@ test('coproStatus: rien à faire quand tout est catégorisé', () => {
   assert.equal(s.oldestUnmappedDate, null);
 });
 
+// Un versement encore en brouillon n'est pas de l'argent reçu : il ne doit pas éteindre l'alerte
+// d'impayé, sinon un import que le syndic écarte ensuite aura fait disparaître la relance.
+test('ownerLedger: un versement en brouillon ne solde aucun impayé', () => {
+  const owners = [{ short: 'Lou', name: 'Lou Petit', due_pay: 1000, due_res: 0 }];
+  const draft = [{ tx_date: '2026-07-05', tiers: 'Lou Petit', amount: 1000, owner: 'Lou', draft: true }];
+  const [pending] = ownerLedger(owners, draft, {});
+  assert.equal(pending.verse, 0);
+  assert.equal(pending.solde, -1000);
+
+  // La même ligne, une fois validée, solde bien la dette.
+  const [settled] = ownerLedger(owners, [{ ...draft[0], draft: false }], {});
+  assert.equal(settled.verse, 1000);
+  assert.equal(settled.solde, 0);
+});
+
+// Un relevé importé attend sa validation avant d'entrer dans les comptes. Jarvis ne lit qu'un
+// compteur pour fermer son étape : il doit donc voir ces lignes-là comme du travail restant,
+// même quand elles sont déjà catégorisées.
+test('coproStatus: un relevé en brouillon reste du travail, même catégorisé', () => {
+  const s = coproStatus([
+    { tx_date: '2026-07-02', high: 'Énergie', created_at: '2026-07-10T08:00:00Z' },              // validée
+    { tx_date: '2026-07-05', high: 'Charges', draft: true, created_at: '2026-08-01T08:00:00Z' }, // catégorisée, pas validée
+    { tx_date: '2026-07-06', high: '?', draft: true, created_at: '2026-08-01T08:00:00Z' },       // ni l'un ni l'autre
+  ]);
+  assert.equal(s.total, 3);
+  assert.equal(s.unmapped, 2);
+  assert.equal(s.pendingValidation, 2);
+  assert.equal(s.oldestUnmappedDate, '2026-07-05');
+});
+
+test('coproStatus: un brouillon ne prouve aucun paiement', () => {
+  const recent = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+  const s = coproStatus([
+    { tx_date: recent, high: 'Énergie', sub: 'Électricité', tiers: 'Luminus', amount: -88.4, draft: true },
+  ]);
+  // La ligne existe, mais elle n'est pas dans les comptes : cocher « électricité payée » ici
+  // ferait sauter l'étape sur la foi d'un simple import.
+  assert.deepEqual(s.paidCategories, []);
+});
+
 test('coproStatus: tolère une table vide ou une réponse inattendue', () => {
   for (const input of [[], null, undefined]) {
     const s = coproStatus(input);

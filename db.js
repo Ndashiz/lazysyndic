@@ -55,6 +55,14 @@
     return data ? {...data, id:user.id, userEmail:user.email} : null;
   }
 
+  /** Ligne SQL → transaction telle que l'app la manipule. Une seule définition : les trois listes
+   *  (grand livre, brouillons, corbeille) doivent avoir exactement la même forme. */
+  const mapTx = r => ({
+    id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
+    amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag,
+    comment:r.comment||'', owner:r.owner||'', importV:r.import_v ?? null
+  });
+
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
     const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline'];
@@ -71,14 +79,14 @@
     const settings = res.ls_settings[0] || {};
     const ownersRows = res.ls_owners.sort((a,b)=>(a.sort||0)-(b.sort||0));
     return {
-      tx: res.ls_transactions.filter(r=>!r.deleted_at).map(r=>({
-        id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
-        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||''
-      })),
+      // Le grand livre ne contient que le validé. Un brouillon vit dans sa propre liste : c'est ce
+      // qui permet à tous les calculs (soldes, réconciliation, appels de fonds) de continuer à lire
+      // `state.tx` sans jamais avoir à se demander si une ligne compte ou pas.
+      tx: res.ls_transactions.filter(r=>!r.deleted_at && !r.draft).map(mapTx),
+      draftTx: res.ls_transactions.filter(r=>!r.deleted_at && r.draft).map(mapTx),
       trash: res.ls_transactions.filter(r=>r.deleted_at && r.deleted_at>=new Date(Date.now()-7*86400000).toISOString())
         .sort((a,b)=>(b.deleted_at||'').localeCompare(a.deleted_at||''))
-        .map(r=>({ id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
-          amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||'', deleted_at:r.deleted_at })),
+        .map(r=>({ ...mapTx(r), deleted_at:r.deleted_at })),
       rules:   res.ls_rules.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.high, r.sub||'', r.id]),
       aliases: res.ls_aliases.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>[r.label, r.entity, !!r.is_owner, r.short||'', r.id]),
       contracts: res.ls_contracts.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({
@@ -86,7 +94,7 @@
         status:r.status, end:r.end_date, endNote:r.end_note, fournisseur:r.fournisseur||''
       })),
       reminders: res.ls_reminders.sort((a,b)=>(a.sort||0)-(b.sort||0)).map(r=>({id:r.id, tx:r.tx, due:r.due, done:!!r.done})),
-      imports: res.ls_imports.sort((a,b)=>(b.v||0)-(a.v||0)).map(r=>({id:r.id, v:r.v, label:r.label, meta:r.meta, cur:!!r.cur})),
+      imports: res.ls_imports.sort((a,b)=>(b.v||0)-(a.v||0)).map(r=>({id:r.id, v:r.v, label:r.label, meta:r.meta, cur:!!r.cur, pending:!!r.pending, stmt:r.stmt||null})),
       timeline: (res.ls_timeline||[]).map(r=>({id:r.id, date:r.event_date, title:r.title, description:r.description||'', kind:r.kind||'manual', subs:Array.isArray(r.subs)?r.subs:[]})),
       opening: { pay:Number(settings.opening_pay||0), res:Number(settings.opening_res||0) },
       contrib: settings.contrib || {},
@@ -123,15 +131,28 @@
   const db = {
     loadAll, loadMember, isoToDisp, dispToIso,
 
-    async addTransactions(rows){
+    /** `opts.draft` marque l'insertion comme brouillon, `opts.importV` la rattache à son relevé. */
+    async addTransactions(rows, opts={}){
       const payload = rows.map(t=>({
         tx_date:dispToIso(t.date), tiers:t.tiers, high:t.high, sub:t.sub||'',
-        amount:t.amount, account:t.account, note:t.note||'', flag:!!t.flag, comment:t.comment||'', owner:t.owner||''
+        amount:t.amount, account:t.account, note:t.note||'', flag:!!t.flag, comment:t.comment||'', owner:t.owner||'',
+        draft: !!opts.draft, import_v: opts.importV ?? null
       }));
       const {data, error} = await T('ls_transactions').insert(payload).select();
       if (error) throw error;
-      return data.map(r=>({id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
-        amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag, comment:r.comment||'', owner:r.owner||''}));
+      return data.map(mapTx);
+    },
+
+    /** Le relevé rejoint le grand livre. Les lignes gardent leur id : rien n'est recréé. */
+    async confirmImport(importV){
+      const {error} = await T('ls_transactions').update({draft:false}).eq('import_v', importV).eq('draft', true);
+      if (error) throw error;
+    },
+
+    /** Jeter un relevé mal importé — ne touche que ses brouillons, jamais le grand livre. */
+    async discardDraftImport(importV){
+      const {error} = await T('ls_transactions').delete().eq('import_v', importV).eq('draft', true);
+      if (error) throw error;
     },
     async updateTransaction(id, patch){
       const {error} = await T('ls_transactions').update(patch).eq('id', id); if (error) throw error;
@@ -147,6 +168,12 @@
     },
     async clearCurrentImport(){
       const {error} = await T('ls_imports').update({cur:false}).eq('cur', true); if (error) throw error;
+    },
+    async updateImport(id, patch){
+      const {error} = await T('ls_imports').update(patch).eq('id', id); if (error) throw error;
+    },
+    async deleteImport(id){
+      const {error} = await T('ls_imports').delete().eq('id', id); if (error) throw error;
     },
 
     async updateReminder(id, patch){ const {error}=await T('ls_reminders').update(patch).eq('id',id); if(error)throw error; },
