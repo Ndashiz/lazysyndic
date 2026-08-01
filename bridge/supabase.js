@@ -28,7 +28,7 @@ export function createRest(url, serviceRoleKey) {
   async function loadForAlerts() {
     const [owners, transactions, settingsRows, reminders, timeline] = await Promise.all([
       select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
-      select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at&deleted_at=is.null'),
+      select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at,draft&deleted_at=is.null'),
       select('ls_settings', 'select=owner_rules&id=eq.1'),
       select('ls_reminders', 'select=id,tx,due,done'),
       // ls_timeline is optional (may not be migrated yet) — tolerate a 404-ish empty.
@@ -48,7 +48,7 @@ export function createRest(url, serviceRoleKey) {
 
   /** Rows the mapping backlog is computed from (the rule itself lives in alerts.js). */
   async function loadCoproRows() {
-    return (await select('ls_transactions', 'select=tx_date,high,sub,tiers,note,amount,created_at,deleted_at&deleted_at=is.null')) || [];
+    return (await select('ls_transactions', 'select=tx_date,high,sub,tiers,note,amount,created_at,deleted_at,draft&deleted_at=is.null')) || [];
   }
 
   return { select, loadForAlerts, loadCoproRows };

@@ -180,6 +180,9 @@ const lockApp   = ()=>document.documentElement.classList.add('ls-locked');
 function freshState(){
   return {
     tx: SEED_TX.map(t => ({...t})),
+    // Relevés importés mais pas encore vérifiés. Volontairement hors de `tx` : tant qu'une ligne
+    // est là, elle ne pèse sur aucun solde, aucune réconciliation, aucun appel de fonds.
+    draftTx: [],
     rules: SEED_RULES.map(r => [...r]),
     aliases: SEED_ALIASES.map(a => [...a]),
     contracts: SEED_CONTRACTS.map(c => ({...c})),
@@ -209,7 +212,9 @@ function freshState(){
 function loadState(){
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw);
+    // Un état enregistré avant les brouillons n'a pas la liste : sans ce repli, le premier import
+    // meurt sur un push d'undefined et l'écran ne dit rien.
+    if (raw) return {draftTx: [], ...JSON.parse(raw)};
   } catch(e){ console.warn('localStorage illisible', e); }
   return freshState();
 }
@@ -1101,9 +1106,12 @@ function signature(t){
 // identique existe DÉJÀ dans le store (les doublons légitimes intra-fichier,
 // ex. deux virements identiques le même jour, sont conservés).
 function interpret(){
-  // index des transactions déjà en mémoire, par signature (multiset)
+  // Index des transactions déjà en mémoire, par signature (multiset). Le grand livre ET les
+  // brouillons : depuis que l'import passe par une file d'attente, un relevé déjà déposé mais pas
+  // encore validé n'est pas dans `tx`. L'oublier ici, c'est annoncer « 0 doublon » sur un relevé
+  // redéposé et le compter deux fois à la validation.
   const existingBySig = {};
-  state.tx.forEach(t=>{ const s=signature(t); (existingBySig[s]=existingBySig[s]||[]).push(t); });
+  [...state.tx, ...(state.draftTx||[])].forEach(t=>{ const s=signature(t); (existingBySig[s]=existingBySig[s]||[]).push(t); });
   const usedCount = {};
   const out = [];
   parsedRows.forEach(cells=>{
@@ -1139,7 +1147,7 @@ function interpret(){
     const sig = signature(t);
     const matches = existingBySig[sig] || [];
     const used = usedCount[sig] || 0;
-    if (used < matches.length){ t._dupe = true; t._match = matches[used]; usedCount[sig] = used + 1; } // doublon d'une tx existante
+    if (used < matches.length){ t._dupe = true; t._match = matches[used]; t._matchDraft = !!matches[used].importV && !state.tx.includes(matches[used]); usedCount[sig] = used + 1; } // doublon d'une tx existante
     else { t._dupe = false; }
     t._skip = false;   // exclu manuellement
     t._force = false;  // doublon réimporté volontairement
@@ -1251,7 +1259,7 @@ function renderPreviewRow(t,i){
     actions=`<button class="lk del" data-act="skip" data-i="${i}">supprimer</button>`;
   }
   const orig = isDupe && t._match
-    ? `<div class="pv-orig">↳ déjà en mémoire : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
+    ? `<div class="pv-orig">↳ ${t._matchDraft?'déjà dans un relevé en attente de validation':'déjà en mémoire'} : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
   const ownerCell = (t.amount>0 && !t._skip && !isDupe)
     ? `<div class="cmt" style="font-style:normal;margin-top:3px"><span style="color:var(--ink-faint)">Versé par :</span> <select class="pv-owner" data-i="${i}">${ownerOptions(t.owner||'')}</select></div>` : '';
   return `<tr class="${cls}"><td>${t.date}</td><td><b>${t.tiers}</b>${ownerCell}${orig}</td>
@@ -1352,48 +1360,49 @@ async function commitImport(){
   // à importer = non supprimées ET (nouvelles OU doublons forcés)
   const toAdd = interpreted
     .filter(t=>!t._skip && (!t._dupe || t._force))
-    .map(t=>{ const {_dupe,_match,_skip,_force, ...rest}=t; return rest; });
+    .map(t=>{ const {_dupe,_match,_matchDraft,_skip,_force, ...rest}=t; return rest; });
   if (!toAdd.length){ alert('Aucune transaction à importer.'); return; }
-  const nextV = (state.imports[0]?.v || 0) + 1;
-  const imp = {v:nextV, label:`Import ${new Date().toLocaleDateString('fr-BE')}`, meta:`${toAdd.length} transaction(s) ajoutée(s)`, cur:true};
-  // mémoriser l'IBAN → compte (détection apprenante)
+  // Le prochain numéro doit tenir compte des relevés déjà en attente, sinon deux brouillons
+  // partagent le même `import_v` et se valident (ou se jettent) l'un l'autre.
+  const nextV = Math.max(state.imports[0]?.v || 0, ...draftsOf().map(t=>t.importV||0)) + 1;
   const acct = importTargetAcct;
+
+  // Ce que le relevé annonce de lui-même. Mis de côté, PAS appliqué : le solde d'ouverture et la
+  // clôture de réconciliation décrivent un grand livre où les lignes sont entrées. Les appliquer
+  // dès le dépôt ferait afficher un « déséquilibre » de la valeur du relevé entier à l'écran
+  // Comptes, pendant tout le temps où il attend d'être vérifié.
+  const toNorm = importMeta ? parseImportDate(importMeta.to, dateOrder) : null;
+  const fromNorm = importMeta ? parseImportDate(importMeta.from, dateOrder) : null;
+  const stmt = {
+    acct,
+    opening: importMeta && !isNaN(importMeta.opening) ? importMeta.opening : null,
+    closing: importMeta && !isNaN(importMeta.closing) ? importMeta.closing : null,
+    iban: (importMeta && importMeta.iban) || null,
+    asOf: (toNorm && toNorm.disp) || (toAdd.length ? toAdd[toAdd.length-1].date : ''),
+    from: fromNorm ? fromNorm.disp : '',
+  };
+  const imp = {v:nextV, label:`Import ${new Date().toLocaleDateString('fr-BE')}`,
+    meta:`${toAdd.length} transaction(s) — en attente de validation`, cur:false, pending:true, stmt};
+
+  // L'IBAN → compte est une préférence apprise, pas de l'argent : la mémoriser tout de suite rend
+  // le prochain dépôt du même compte plus sûr, et l'écarter n'aurait rien corrompu.
   const ibanKey = importMeta && importMeta.iban ? normIban(importMeta.iban) : null;
   const learnIban = ibanKey && (!state.ibanMap || state.ibanMap[ibanKey]!==acct);
-
-  // Solde d'ouverture (au 1er relevé du compte), IBAN du compte, et clôture
-  // du relevé (pour la réconciliation) — alimentés depuis le relevé.
   const settingsPatch = {};
-  if (importMeta && !isNaN(importMeta.opening) && !((state.opening||{})[acct])){
-    state.opening = {...(state.opening||{}), [acct]: importMeta.opening};
-    settingsPatch[acct==='res'?'opening_res':'opening_pay'] = importMeta.opening;
-  }
-  if (importMeta && importMeta.iban && !((state.ibans||{})[acct])){
-    state.ibans = {...(state.ibans||{}), [acct]: importMeta.iban};
-    settingsPatch[acct==='res'?'iban_res':'iban_pay'] = importMeta.iban;
-  }
-  if (importMeta && !isNaN(importMeta.closing)){
-    const toNorm = parseImportDate(importMeta.to, dateOrder), fromNorm = parseImportDate(importMeta.from, dateOrder);
-    const asOf = (toNorm && toNorm.disp) || (toAdd.length ? toAdd[toAdd.length-1].date : '');
-    state.recon = {...(state.recon||{}), [acct]: {closing: importMeta.closing, asOf, from: fromNorm?fromNorm.disp:''}};
-    settingsPatch.recon = state.recon;
-  }
 
   if (writeToDb()){
     try {
-      const saved = await window.LS.db.addTransactions(toAdd);   // renvoie les lignes avec id
-      state.tx.push(...saved);
-      await window.LS.db.clearCurrentImport();
+      // Brouillon : le relevé est enregistré, mais il n'entre dans les comptes qu'une fois vérifié.
+      const saved = await window.LS.db.addTransactions(toAdd, {draft:true, importV:nextV});
+      state.draftTx.push(...saved);
       const savedImp = await window.LS.db.addImport(imp);
-      state.imports.forEach(im=>im.cur=false);
       state.imports.unshift({id:savedImp.id, ...imp});
       if (learnIban){ state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:acct}; settingsPatch.iban_map = state.ibanMap; }
       if (Object.keys(settingsPatch).length) await window.LS.db.updateSettings(settingsPatch);
     } catch(e){ console.error(e); alert('Import non enregistré : '+(e.message||e)); return; }
   } else {
-    // démo ou hors-ligne : tout reste local
-    state.tx.push(...toAdd.map((t,i)=>({id:'local-'+Date.now()+'-'+i, ...t})));
-    state.imports.forEach(im=>im.cur=false);
+    // démo ou hors-ligne : tout reste local, mais le même passage par le brouillon
+    state.draftTx.push(...toAdd.map((t,i)=>({id:'local-'+Date.now()+'-'+i, ...t, importV:nextV})));
     state.imports.unshift(imp);
     if (learnIban) state.ibanMap = {...(state.ibanMap||{}), [ibanKey]:acct};
     saveState();
@@ -1404,22 +1413,128 @@ async function commitImport(){
   resetImport();
   logTimeline({title:tlTitle, description:tlDesc, kind:'import'});
   renderAll();
-  // Alerte de réconciliation : solde calculé vs clôture du relevé
-  const rs = reconStatus(acct);
-  let msg = `✓ ${toAdd.length} transaction(s) ${demoMode?'ajoutées (démo, non enregistrées en base)':'sauvegardée(s) — version v'+nextV+' créée'}.`;
-  if (rs && !rs.ok){
-    msg += `\n\n⚠ DÉSÉQUILIBRE sur le ${acct==='res'?'compte de réserve':'compte de paiement'} : `
-      + `solde calculé ${eur(balance(acct))} ≠ clôture du relevé ${eur(rs.closing)} (écart ${rs.diff>0?'+':''}${eur(rs.diff)}).`
-      + `\nVérifiez une transaction manquante, en double, ou un solde d'ouverture erroné.`;
-  } else if (rs && rs.ok){
-    msg += `\n\n✓ Réconcilié : le solde calculé correspond à la clôture du relevé.`;
+  const nUncat = toAdd.filter(t=>!t.high || t.high==='?').length;
+  // Le rapport de réconciliation appartient à la validation, pas à l'import : tant que le relevé
+  // est en brouillon il ne compte dans aucun solde, donc le comparer à la clôture n'aurait aucun
+  // sens (il annoncerait systématiquement un déséquilibre de tout le relevé).
+  alert(
+    `✓ ${toAdd.length} transaction(s) en brouillon${demoMode?' (démo, non enregistrées en base)':` — relevé v${nextV}`}.\n\n`
+    + (nUncat ? `${nUncat} ligne(s) attendent une catégorie. ` : '')
+    + `Rien n'entre dans les comptes tant que le relevé n'est pas validé : reprenez-le à tête reposée `
+    + `dans « Relevés à valider », en haut de cet écran.`
+  );
+}
+
+/* ─── Validation d'un relevé importé ────────────────────────────────────────
+   Le relevé est en base mais hors du grand livre. On le relit, on complète les
+   catégories, puis on le valide — c'est à ce moment-là qu'il compte. */
+
+/** Les brouillons d'un relevé, ou tous quand `v` est omis. */
+function draftsOf(v){
+  const rows = state.draftTx || [];
+  return v===undefined ? rows : rows.filter(t=>t.importV===v);
+}
+
+/** Les relevés en attente, du plus récent au plus ancien. */
+function pendingImports(){
+  const byV = new Map();
+  for (const t of draftsOf()){
+    const v = t.importV ?? 0;
+    const g = byV.get(v) || {v, rows:[], uncat:0, accounts:new Set()};
+    g.rows.push(t);
+    if (!t.high || t.high==='?') g.uncat++;
+    g.accounts.add(t.account);
+    byV.set(v, g);
   }
-  const needJust = toAdd.filter(commentRequired).length;
+  return [...byV.values()].sort((a,b)=>b.v-a.v);
+}
+
+async function confirmDraftImport(v){
+  if(!canWrite()){ alert('Lecture seule : seul le syndic peut valider un relevé.'); return; }
+  const rows = draftsOf(v);
+  if(!rows.length) return;
+  const uncat = rows.filter(t=>!t.high || t.high==='?').length;
+  if (uncat && !confirm(`${uncat} ligne(s) n'ont pas de catégorie. Valider quand même ? Elles resteront « à trier ».`)) return;
+
+  const rec = state.imports.find(im=>im.v===v);
+  const stmt = (rec && rec.stmt) || null;
+  const stmtAcct = (stmt && stmt.acct) || rows[0].account;
+
+  // C'est maintenant que le relevé décrit le grand livre : on applique ce qu'il annonçait.
+  const settingsPatch = {};
+  if (stmt && stmt.opening != null && !((state.opening||{})[stmtAcct])){
+    state.opening = {...(state.opening||{}), [stmtAcct]: stmt.opening};
+    settingsPatch[stmtAcct==='res'?'opening_res':'opening_pay'] = stmt.opening;
+  }
+  if (stmt && stmt.iban && !((state.ibans||{})[stmtAcct])){
+    state.ibans = {...(state.ibans||{}), [stmtAcct]: stmt.iban};
+    settingsPatch[stmtAcct==='res'?'iban_res':'iban_pay'] = stmt.iban;
+  }
+  if (stmt && stmt.closing != null){
+    state.recon = {...(state.recon||{}), [stmtAcct]: {closing: stmt.closing, asOf: stmt.asOf, from: stmt.from}};
+    settingsPatch.recon = state.recon;
+  }
+
+  if (writeToDb()){
+    try {
+      await window.LS.db.confirmImport(v);
+      await window.LS.db.clearCurrentImport();
+      if (rec && rec.id) await window.LS.db.updateImport(rec.id, {cur:true, pending:false, meta:`${rows.length} transaction(s)`});
+      if (Object.keys(settingsPatch).length) await window.LS.db.updateSettings(settingsPatch);
+    }
+    catch(e){ console.error(e); alert('Validation non enregistrée : '+(e.message||e)); return; }
+  }
+  // Le grand livre récupère les lignes telles quelles — mêmes id, aucune recréation.
+  state.tx.push(...rows);
+  state.draftTx = draftsOf().filter(t=>t.importV!==v);
+  state.imports.forEach(im=>{ im.cur = false; });
+  if (rec){ rec.cur = true; rec.pending = false; rec.meta = `${rows.length} transaction(s)`; }
+  saveState();
+  logTimeline({title:`Relevé v${v} validé`, description:`${rows.length} transaction(s) entrées dans les comptes`, kind:'import'});
+  renderAll();
+
+  // Maintenant seulement la réconciliation a un sens : les lignes comptent.
+  const accts = [...new Set(rows.map(t=>t.account))];
+  let msg = `✓ Relevé v${v} validé — ${rows.length} transaction(s) dans les comptes.`;
+  for (const acct of accts){
+    const rs = reconStatus(acct);
+    const label = acct==='res'?'compte de réserve':'compte de paiement';
+    if (rs && !rs.ok){
+      msg += `\n\n⚠ DÉSÉQUILIBRE sur le ${label} : solde calculé ${eur(balance(acct))} ≠ clôture du relevé `
+        + `${eur(rs.closing)} (écart ${rs.diff>0?'+':''}${eur(rs.diff)}).`
+        + `\nVérifiez une transaction manquante, en double, ou un solde d'ouverture erroné.`;
+    } else if (rs && rs.ok){
+      msg += `\n\n✓ Réconcilié sur le ${label} : le solde calculé correspond à la clôture du relevé.`;
+    }
+  }
+  const needJust = rows.filter(commentRequired).length;
   if (needJust){
     msg += `\n\n⚑ ${needJust} sortie(s) de plus de ${FDR_RULE.minOut} € automatiquement signalée(s) : `
       + `un commentaire de justification est OBLIGATOIRE (écran Comptes › compte de réserve).`;
   }
   alert(msg);
+}
+
+async function discardDraftImport(v){
+  if(!canWrite()){ alert('Lecture seule : seul le syndic peut supprimer un relevé.'); return; }
+  const rows = draftsOf(v);
+  if(!rows.length) return;
+  if(!confirm(`Supprimer le relevé v${v} et ses ${rows.length} ligne(s) non validées ? Le grand livre n'est pas touché.`)) return;
+  const rec = state.imports.find(im=>im.v===v);
+  if (writeToDb()){
+    try {
+      await window.LS.db.discardDraftImport(v);
+      // La fiche du relevé part avec ses lignes : elle ne portait qu'un solde d'ouverture et une
+      // clôture jamais appliqués, et la laisser afficherait un relevé qui n'existe plus.
+      if (rec && rec.id) await window.LS.db.deleteImport(rec.id);
+    }
+    catch(e){ console.error(e); alert('Suppression non enregistrée : '+(e.message||e)); return; }
+  }
+  state.draftTx = draftsOf().filter(t=>t.importV!==v);
+  state.imports = state.imports.filter(im=>im.v!==v);
+  saveState();
+  logTimeline({title:`Relevé v${v} écarté`, description:`${rows.length} ligne(s) non validées supprimées`, kind:'import'});
+  renderAll();
 }
 
 function resetImport(){
@@ -1501,6 +1616,86 @@ wireDrop(document.getElementById('drop'));
 wireDrop(document.getElementById('acctDrop'));
 
 // historique des imports
+/* Panneau « Relevés à valider » — en haut de l'écran Import, avant la zone de dépôt : ce qui
+   attend passe avant ce qu'on s'apprête à ajouter. */
+let openDraftV = null;   // relevé déplié pour vérification
+
+function renderPendingImports(){
+  const box = document.getElementById('pendingImports');
+  if (!box) return;
+  const groups = pendingImports();
+  if (!groups.length){ box.innerHTML=''; openDraftV=null; return; }
+
+  const acctLabel = a => a==='res' ? 'compte de réserve' : 'compte de paiement';
+  box.innerHTML = groups.map(g=>{
+    const open = g.v===openDraftV;
+    const accts = [...g.accounts].map(acctLabel).join(' + ');
+    const net = sum(g.rows.map(t=>t.amount));
+    return `
+    <div class="card" style="margin-bottom:14px;border-color:var(--clay);background:var(--clay-soft)">
+      <div class="h-row" style="align-items:flex-start">
+        <div>
+          <h2 style="margin:0">Relevé v${g.v} — à valider</h2>
+          <div class="sub">${g.rows.length} mouvement(s) · ${accts} · net ${signed(net)}${
+            g.uncat ? ` · <b style="color:#8A551F">${g.uncat} sans catégorie</b>` : ' · tout est catégorisé'}</div>
+          <div class="sub" style="margin-top:4px">Ces lignes ne comptent dans aucun solde tant qu'elles ne sont pas validées.</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost dr-toggle" data-v="${g.v}">${open?'Replier':'Vérifier'}</button>
+          ${canWrite() ? `<button class="btn btn-ghost dr-discard" data-v="${g.v}" style="color:var(--coral)">Écarter</button>
+          <button class="btn btn-primary dr-confirm" data-v="${g.v}">Valider le relevé</button>` : ''}
+        </div>
+      </div>
+      ${open ? `<div class="card" style="padding:8px 14px;margin-top:12px;background:var(--paper)">
+        <table><tr><th>Date</th><th>Tiers</th><th class="num">Montant</th><th>Catégorie</th></tr>
+        <tbody>${g.rows.map(t=>renderDraftRow(t)).join('')}</tbody></table>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('.dr-toggle').forEach(b=>b.onclick=()=>{
+    openDraftV = (+b.dataset.v===openDraftV) ? null : +b.dataset.v;
+    renderPendingImports();
+  });
+  box.querySelectorAll('.dr-confirm').forEach(b=>b.onclick=()=>confirmDraftImport(+b.dataset.v));
+  box.querySelectorAll('.dr-discard').forEach(b=>b.onclick=()=>discardDraftImport(+b.dataset.v));
+  box.querySelectorAll('.dr-cat').forEach(s=>s.onchange=()=>{
+    const t = draftsOf().find(x=>x.id===s.dataset.id); if(!t) return;
+    if(s.value==='__new__'){ const name=addCategory(prompt('Nom de la nouvelle catégorie :','')||''); if(name){ setDraftCat(t, name, ''); } renderPendingImports(); return; }
+    setDraftCat(t, s.value, '');
+  });
+  box.querySelectorAll('.dr-sub').forEach(s=>s.onchange=()=>{
+    const t = draftsOf().find(x=>x.id===s.dataset.id); if(!t) return;
+    if(s.value==='__new__'){ const name=addSubcat(t.high, prompt('Nouvelle sous-catégorie pour « '+t.high+' » :','')||''); if(name){ setDraftCat(t, t.high, name); } renderPendingImports(); return; }
+    setDraftCat(t, t.high, s.value);
+  });
+}
+
+/** Catégorise une ligne en attente : on apprend la règle et on persiste tout de suite, pour que
+ *  le travail de tri survive à un rechargement même si la validation vient plus tard. */
+function setDraftCat(t, high, sub){
+  if(!canWrite()){ alert('Lecture seule : seul le syndic peut catégoriser un relevé.'); renderPendingImports(); return; }
+  t.high = high; t.sub = sub || '';
+  learnCategory(t.tiers, high);
+  if (sub) learnSubcat(t.tiers, high, sub);
+  if (writeToDb()) dbWrite(db=>db.updateTransaction(t.id, {high:t.high, sub:t.sub}));
+  else saveState();
+  renderPendingImports();
+}
+
+function renderDraftRow(t){
+  const uncat = !t.high || t.high==='?';
+  const cats = [...allCats().map(c=>({v:c,l:c})), {v:'?',l:'À catégoriser'}, {v:'__new__',l:'➕ Nouvelle catégorie…'}];
+  return `<tr${uncat?' style="background:var(--clay-soft)"':''}>
+    <td>${t.date}</td><td><b>${t.tiers}</b>${t.note?`<div class="cmt">${t.note}</div>`:''}</td>
+    <td class="num ${t.amount>=0?'pos':'neg'}">${signed(t.amount)}</td>
+    <td>${!canWrite()
+      ? `<span class="cat ${catClass(t.high)}">${uncat?'À catégoriser':t.high}${t.sub?` › ${t.sub}`:''}</span>`
+      : `<select class="fld dr-cat" data-id="${t.id}">${
+        cats.map(o=>`<option value="${o.v}" ${(t.high||'?')===o.v?'selected':''}>${o.l}</option>`).join('')}</select>${
+        !uncat?`<br><select class="fld dr-sub" data-id="${t.id}" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`}</td></tr>`;
+}
+
 function renderImports(){
   const box = document.querySelector('#imp .card:last-of-type');
   // la dernière .card de l'écran import est l'historique
@@ -2385,6 +2580,7 @@ function renderAll(){
   renderProvisions();
   renderAG();
   renderTimeline();
+  renderPendingImports();
   renderImports();
   animateBars();
 }
@@ -2405,11 +2601,15 @@ function loadDemoState(){
 async function bootData(preloaded){
   if (demoMode){
     state = loadDemoState();
+    state.draftTx = state.draftTx || [];
     OWNERS = (state.owners && state.owners.length) ? state.owners
       : [{n:'Alex Martin',short:'Alex',q:500,c:'#2F6B53'},{n:'Sam Bernard',short:'Sam',q:251,c:'#5B4B86'},{n:'Lou Petit',short:'Lou',q:249,c:'#C9854A'}];
   } else {
     try {
       state = preloaded || await window.LS.db.loadAll();
+      // Une base d'avant la colonne `draft` ne renvoie pas la liste : mieux vaut aucune ligne en
+      // attente qu'un `undefined` qui casse le panneau de validation.
+      state.draftTx = state.draftTx || [];
       if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
       if (state.owners && state.owners.length) OWNERS = state.owners;
     } catch(e){
