@@ -23,8 +23,20 @@ implementing the pull contract in Jarvis's `docs/08-lazysyndic-bridge.md`.
 
 ## Endpoints
 
+All `/api/jarvis/*` routes require `Authorization: Bearer $BRIDGE_TOKEN`.
+
 - `GET /health` → `{ "status": "ok" }`
-- `GET /api/jarvis/alerts` → `{ "alerts": [...] }` — requires `Authorization: Bearer $BRIDGE_TOKEN`.
+- `GET /api/jarvis/alerts` → `{ "alerts": [...] }`
+- `GET /api/jarvis/copro` → the mapping backlog (`total`, `unmapped`, `paidCategories`…).
+- `GET /api/jarvis/dashboard` → **the front page, as the app computes it**: reserve gauge,
+  balances, who-pays-what ledger, reminders, expense breakdown. Amounts are integer **cents**
+  (Jarvis's `…Cents` convention). Jarvis renders this verbatim — it recomputes nothing — so
+  « LazySyndic » in Jarvis and LazySyndic itself show the same building.
+
+  The derivations live in `dashboard.js`, ported from `app.js` (`balance` / `receivables` /
+  `ownerLedger` / `donutData` + the reserve banner) and unit-tested in `dashboard.test.js`.
+  Drafts and soft-deleted rows move no balance, exactly as in the app: a statement that has
+  been uploaded but not yet validated is not money in the accounts.
 
 ## Local run / test
 
@@ -34,6 +46,7 @@ cp .env.example .env      # fill SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BRIDGE
 node --test               # unit tests (no deps)
 node server.js            # starts on 127.0.0.1:3011
 curl -H "Authorization: Bearer $BRIDGE_TOKEN" http://127.0.0.1:3011/api/jarvis/alerts
+curl -H "Authorization: Bearer $BRIDGE_TOKEN" http://127.0.0.1:3011/api/jarvis/dashboard
 ```
 
 ## Deploy on the VPS (alongside Jarvis)
