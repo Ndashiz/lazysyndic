@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRest } from './supabase.js';
 import { buildAlerts, coproStatus } from './alerts.js';
+import { buildDashboard } from './dashboard.js';
 
 // --- minimal .env loader (KEY=VALUE lines); systemd EnvironmentFile also works ---
 const __dir = path.dirname(fileURLToPath(import.meta.url));
@@ -87,6 +88,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/jarvis/copro') {
       if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
       return sendJson(res, 200, coproStatus(await rest.loadCoproRows()));
+    }
+    // La page de garde, telle que LazySyndic la calcule : Jarvis l'affiche au lieu de bricoler
+    // sa propre vue de l'immeuble à partir des seules alertes.
+    if (req.method === 'GET' && url.pathname === '/api/jarvis/dashboard') {
+      if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized' });
+      return sendJson(res, 200, buildDashboard(await rest.loadForDashboard()));
     }
     return sendJson(res, 404, { error: 'not_found' });
   } catch (err) {

@@ -51,5 +51,35 @@ export function createRest(url, serviceRoleKey) {
     return (await select('ls_transactions', 'select=tx_date,high,sub,tiers,note,amount,created_at,deleted_at,draft&deleted_at=is.null')) || [];
   }
 
-  return { select, loadForAlerts, loadCoproRows };
+  /**
+   * Ce que la page de garde calcule (dashboard.js) : le référentiel copro, les mouvements avec
+   * leur compte ET leur catégorie, le pense-bête, et les paramètres (soldes d'ouverture, objectif
+   * de réserve) — sans lesquels un solde n'est qu'une somme de mouvements.
+   */
+  async function loadForDashboard() {
+    const [owners, transactions, settingsRows, reminders] = await Promise.all([
+      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
+      select('ls_transactions', 'select=tx_date,tiers,note,amount,account,high,owner,deleted_at,draft&deleted_at=is.null'),
+      // `copro_name` a été ajoutée après coup : sur un déploiement qui n'a pas la colonne,
+      // PostgREST répond 400 sur toute la requête. On retombe sur les colonnes du schéma
+      // d'origine plutôt que de faire échouer la page entière pour un titre.
+      select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name&id=eq.1').catch(() =>
+        select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules&id=eq.1'),
+      ),
+      select('ls_reminders', 'select=id,tx,due,done,sort'),
+    ]);
+    const settings = (settingsRows || [])[0] || {};
+    return {
+      owners: (owners || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
+      transactions: transactions || [],
+      reminders: (reminders || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
+      settings,
+      // Les mêmes règles apprises que pour les alertes : sans elles, un versement attribué à la
+      // main dans LazySyndic redeviendrait « non attribué » ici, et le tableau « qui paie quoi »
+      // contredirait l'alerte « impayé » construite sur les mêmes lignes.
+      ownerRules: settings.owner_rules || {},
+    };
+  }
+
+  return { select, loadForAlerts, loadCoproRows, loadForDashboard };
 }
