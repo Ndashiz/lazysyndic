@@ -368,7 +368,7 @@
       <div class="drop" id="acctDrop" style="padding:22px;margin-bottom:16px">
         <div style="font-size:24px">↧</div>
         <b style="font-size:15px">Mettre à jour <span id="dropAcct">le compte de paiement</span></b>
-        <p>Glissez-déposez le relevé CSV de ce compte — doublons, trous et catégories sont vérifiés avant sauvegarde</p>
+        <p>Glissez-déposez le relevé (CSV ou PDF) de ce compte — doublons, trous et catégories sont vérifiés avant sauvegarde</p>
       </div>
 
       <!-- reserve target shows only on reserve tab -->
@@ -469,14 +469,14 @@
       <!-- Relevés importés mais pas encore entrés dans les comptes -->
       <div id="pendingImports"></div>
 
-      <!-- Convertisseur : coller le texte copié depuis Swan → CSV importable -->
+      <!-- Coller la liste copiée depuis l'app Swan → aperçu d'import (comme un fichier) -->
       <details id="pasteTool" style="margin-bottom:16px">
-        <summary style="cursor:pointer;font-weight:600;color:var(--green-deep);padding:6px 2px">📋 Coller un relevé copié depuis Swan (→ CSV)</summary>
+        <summary style="cursor:pointer;font-weight:600;color:var(--green-deep);padding:6px 2px">📋 Coller la liste copiée depuis l'app Swan</summary>
         <div class="card" style="margin-top:8px">
-          <div class="sub" style="margin-bottom:8px">Copie la liste des transactions depuis l'interface Swan (Description · Méthode · Date · Montant) et colle-la ici. Tu obtiens un CSV à importer ci-dessous.</div>
+          <div class="sub" style="margin-bottom:8px">Copie la liste des transactions depuis l'interface Swan (Description · Méthode · Date · Montant) et colle-la ici — ou fais ⌘V n'importe où sur cet écran. Les transactions passent directement à l'aperçu ; les doublons d'un relevé déjà importé sont écartés.</div>
           <textarea class="fld" id="pasteArea" style="width:100%;min-height:120px;resize:vertical;font-family:monospace;font-size:12px" placeholder="Colle ici tout le texte des transactions…"></textarea>
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
-            <button class="btn btn-primary" id="pasteToCsv">⬇ Convertir &amp; télécharger le CSV</button>
+            <button class="btn btn-primary" id="pasteImport">Importer ces transactions</button>
             <span class="sub" id="pasteCount"></span>
           </div>
         </div>
@@ -485,7 +485,7 @@
       <div class="drop" id="drop">
         <div class="big">↧</div>
         <b>Glissez-déposez votre relevé (CSV ou PDF) ici</b>
-        <p>Relevé Swan / Syndic4you (CSV ou PDF) · ou cliquez pour parcourir — seules les données interprétées sont sauvegardées, pas le fichier</p>
+        <p>Relevé Swan / Syndic4you (CSV ou PDF, français ou anglais) · ou cliquez pour parcourir · ou collez (⌘V) la liste copiée depuis l’app Swan — seules les données interprétées sont sauvegardées, pas le fichier</p>
       </div>
 
       <div id="afterDrop" style="display:none">

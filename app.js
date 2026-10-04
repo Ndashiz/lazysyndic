@@ -959,8 +959,21 @@ async function parsePdfStatement(arrayBuffer){
       items.push({ str:it.str, x:it.transform[4], y:pageOff + (vh - it.transform[5]) });
     });
   }
+  return statementFromPdfItems(items);
+}
+
+// Partie sans pdf.js : morceaux de texte positionnés {str,x,y} → {headers,data,meta}.
+// Swan édite le même relevé en français (« 14,00 », JJ/MM/AAAA, Virement/Frais) ou en
+// anglais (« 14.00 », MM/JJ/AAAA, Credit transfer/Fee) selon la langue du compte. Rien
+// ici ne dépend donc des mots : Type et Description sont séparés par l'abscisse de
+// l'en-tête « Description », les soldes sont lus à côté de leur libellé.
+const PDF_AMOUNT = /^-?\d[\d.,\s  ]*[.,]\d{2}$/;
+const PDF_DATE = /^\d{2}\/\d{2}\/\d{4}$/;
+function statementFromPdfItems(items){
+  const isNum = s => PDF_AMOUNT.test(String(s).trim());
+  const find = re => items.find(i=>re.test(i.str.trim()));
   // regrouper en lignes (même y ± tolérance), puis trier par x
-  items.sort((a,b)=> Math.abs(a.y-b.y)>3 ? a.y-b.y : a.x-b.x);
+  items = [...items].sort((a,b)=> Math.abs(a.y-b.y)>3 ? a.y-b.y : a.x-b.x);
   const rows=[]; let cur=null;
   items.forEach(it=>{
     if (!cur || Math.abs(it.y-cur.y)>3){ cur={y:it.y, items:[it]}; rows.push(cur); }
@@ -971,34 +984,69 @@ async function parsePdfStatement(arrayBuffer){
 
   // métadonnées
   const meta={}; let m;
-  if ((m=joined.match(/ouverture[^\d]{0,8}([\d.\s]*\d,\d{2})/i))) meta.opening=parseAmount(m[1]);
-  if ((m=joined.match(/cl[oô]ture[^\d]{0,8}([\d.\s]*\d,\d{2})/i))) meta.closing=parseAmount(m[1]);
-  if ((m=joined.match(/Du\s+(\d{2}\/\d{2}\/\d{4})\s+au\s+(\d{2}\/\d{2}\/\d{4})/i))){ meta.from=m[1]; meta.to=m[2]; }
+  // Montant d'un libellé : à sa droite sur la même ligne (« Closing balance … 1 234.56 »)
+  // ou juste dessous, dans la même colonne (« Opening balance » puis « 1 200.00 »).
+  const amountNear = re=>{
+    const lab = find(re); if (!lab) return NaN;
+    const c = items.filter(i=>isNum(i.str)).map(i=>({i, dy:i.y-lab.y, dx:Math.abs(i.x-lab.x)}))
+      .filter(o=> (Math.abs(o.dy)<=3 && o.i.x>lab.x) || (o.dy>3 && o.dy<=25 && o.dx<80))
+      .sort((a,b)=> Math.abs(a.dy)-Math.abs(b.dy) || a.dx-b.dx);
+    return c.length ? parseAmount(c[0].i.str) : NaN;
+  };
+  meta.opening = amountNear(/^(opening balance|solde d['’]ouverture)$/i);
+  meta.closing = amountNear(/^(closing balance|solde de cl[oô]ture)$/i);
+  if ((m=joined.match(/\b(?:Du|From)\s+(\d{2}\/\d{2}\/\d{4})\s+(?:au|to)\s+(\d{2}\/\d{2}\/\d{4})/i))){ meta.from=m[1]; meta.to=m[2]; }
   if ((m=joined.match(/IBAN\s+([A-Z]{2}[0-9A-Z][0-9A-Z \t]{8,})/))) meta.iban=m[1].replace(/\s+/g,' ').trim();
+  const title = find(/^(account statement|relevé de compte)$/i);
+  if (title) meta.holder = items.filter(i=>Math.abs(i.y-title.y)<=3 && i.x<title.x).map(i=>i.str.trim()).join(' ') || undefined;
 
-  // lignes de transaction : commencent par une date JJ/MM/AAAA, finissent par 2 montants
-  const isNum = s => /^-?\d[\d.\s  ]*,\d{2}$/.test(String(s).trim());
-  const data=[];
+  // colonnes du tableau, d'après sa ligne d'en-tête
+  const head = rows.find(r=>r.items.some(i=>/^date$/i.test(i.str.trim())) && r.items.some(i=>/^description$/i.test(i.str.trim())));
+  const descX = head ? head.items.find(i=>/^description$/i.test(i.str.trim())).x : null;
+
+  // lignes de transaction : commencent par une date, finissent par 2 montants (crédit, débit)
+  const data=[]; let last=null;
   rows.forEach(r=>{
     const its=r.items; if(!its.length) return;
-    if(!/^\d{2}\/\d{2}\/\d{4}$/.test(its[0].str.trim())) return;     // pas une ligne de transaction
+    if(!PDF_DATE.test(its[0].str.trim())){
+      // suite d'une description trop longue, repliée sur la ligne du dessous
+      if (last && descX!=null && r.y-last.y < 14 && its.every(i=>!isNum(i.str) && i.x>=descX-2 && i.x<last.creditX-1)){
+        last.row[2] = (last.row[2]+' '+its.map(i=>i.str.trim()).join(' ')).trim();
+        last.y = r.y;
+      }
+      return;
+    }
+    last = null;
     const date=its[0].str.trim();
     const nums=its.slice(1).filter(i=>isNum(i.str));
     if(nums.length<2) return;                                        // besoin crédit + débit
-    const credit=nums[nums.length-2].str.trim();
-    const debit =nums[nums.length-1].str.trim();
-    const firstNumX=nums[nums.length-2].x;
-    const middle=its.slice(1).filter(i=>!isNum(i.str) && i.x<firstNumX-1).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
-    let type='', desc=middle;
-    const tm=middle.match(/^(Frais|Virement|Pr[ée]l[èe]vement automatique|Pr[ée]l[èe]vement|Paiement|Domiciliation|Ch[èe]que)\s*(.*)$/i);
-    if(tm){ type=tm[1]; desc=tm[2].trim(); }
-    data.push([date, type, desc||type||'—', credit, debit]);
+    const credit=nums[nums.length-2], debit=nums[nums.length-1];
+    const middle=its.slice(1).filter(i=>i!==credit && i!==debit && i.x<credit.x-1);
+    const words = list => list.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
+    let type, desc;
+    if (descX!=null){
+      type = words(middle.filter(i=>i.x<descX-2));
+      desc = words(middle.filter(i=>i.x>=descX-2));
+    } else {
+      // pas d'en-tête lisible : on reconnaît le type à son libellé
+      const all = words(middle);
+      const tm = all.match(/^(Frais|Fee|Virement|Credit transfer|Transfer|Pr[ée]l[èe]vement automatique|Pr[ée]l[èe]vement|Direct debit|Paiement|Card payment|Domiciliation|Ch[èe]que|Check)\s*(.*)$/i);
+      type = tm ? tm[1] : ''; desc = tm ? tm[2].trim() : all;
+    }
+    const row = [date, type, desc||type||'—', credit.str.trim(), debit.str.trim()];
+    data.push(row);
+    last = {row, y:r.y, creditX:credit.x};
   });
   // solde d'ouverture : déduit de clôture − (Σ crédits − Σ débits) si non lu directement
-  if ((meta.opening===undefined || isNaN(meta.opening)) && !isNaN(meta.closing)){
+  if (isNaN(meta.opening) && !isNaN(meta.closing)){
     const net = data.reduce((a,r)=> a + (parseAmount(r[3])||0) - (parseAmount(r[4])||0), 0);
     meta.opening = +(meta.closing - net).toFixed(2);
+    meta.openingDeduced = true;
   }
+  // Ordre des dates : lu sur les mouvements ET la période (le dernier jour du mois dépasse
+  // toujours 12, donc tranche même quand aucun mouvement ne le fait) ; à défaut, la langue.
+  const en = /\b(account statement|opening balance|closing balance)\b/i.test(joined);
+  meta.dateOrder = detectDateOrder([...data.map(r=>r[0]), meta.from, meta.to], en ? 'mdy' : 'dmy');
   return { headers:['Date','Type','Description','Crédit','Débit'], data, meta };
 }
 
@@ -1026,7 +1074,8 @@ function detectTable(rows){
 }
 
 // Détecte l'ordre des dates sur l'ensemble de la colonne (jour/mois ambigus).
-function detectDateOrder(values){
+// `fallback` tranche quand aucune valeur ne le fait (aucun nombre > 12).
+function detectDateOrder(values, fallback='dmy'){
   let firstGt12=false, secondGt12=false;
   values.forEach(v=>{
     const m = String(v||'').match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-]\d{2,4}/);
@@ -1034,7 +1083,59 @@ function detectDateOrder(values){
   });
   if (secondGt12 && !firstGt12) return 'mdy';  // ex. 01/28/2026
   if (firstGt12 && !secondGt12) return 'dmy';  // ex. 28/01/2026
-  return 'dmy'; // défaut belge
+  return fallback; // défaut belge
+}
+
+// Texte copié depuis la liste des transactions de l'app Swan (web) : en-têtes
+// « Transaction / Method / Date / Amount », intertitres de mois (« October 2026 »),
+// puis par mouvement : libellé, méthode, date en toutes lettres, montant signé
+// (« -€0.60 », « +€50.00 »). Une cellule par ligne, ou par tabulation si le
+// navigateur a copié le tableau. Pas d'IBAN ni de soldes : le compte se choisit
+// à la main dans l'aperçu.
+const MONTHS = {january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12,
+  janvier:1,'février':2,fevrier:2,mars:3,avril:4,mai:5,juin:6,juillet:7,'août':8,aout:8,septembre:9,octobre:10,novembre:11,'décembre':12,decembre:12};
+function monthNum(w){
+  w = String(w||'').toLowerCase().replace(/\.$/,'');
+  if (MONTHS[w]) return MONTHS[w];
+  const hits = w.length>=3 ? [...new Set(Object.keys(MONTHS).filter(k=>k.startsWith(w)).map(k=>MONTHS[k]))] : [];
+  return hits.length===1 ? hits[0] : 0;   // « Oct », « sept. » ; « ju » ambigu → rien
+}
+// « October 2, 2026 » / « Oct 2, 2026 » / « 2 octobre 2026 » → 'YYYY-MM-DD' ; null sinon.
+function parseLongDate(s){
+  const t = String(s||'').trim();
+  let m, d, mo, y;
+  if ((m = t.match(/^([A-Za-zÀ-ÿ]+\.?)\s+(\d{1,2}),?\s+(\d{4})$/))){ mo=monthNum(m[1]); d=+m[2]; y=+m[3]; }
+  else if ((m = t.match(/^(\d{1,2})(?:er)?\s+([A-Za-zÀ-ÿ]+\.?)\s+(\d{4})$/))){ d=+m[1]; mo=monthNum(m[2]); y=+m[3]; }
+  else return null;
+  if (!mo || d<1 || d>31) return null;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function parseSwanPaste(text){
+  const isMonthHead = s => { const m=s.match(/^([A-Za-zÀ-ÿ]+)\s+(\d{4})$/); return !!(m && monthNum(m[1])); };
+  const isColHead = s => /^(transaction|method|méthode|moyen de paiement|date|amount|montant|status|statut)$/i.test(s);
+  // montant signé et/ou en euros — un nombre nu n'en est pas un (référence, n° de facture…)
+  const isAmount = s => /^[+\-−]?\s*€?\s*\d[\d\s  .,]*[.,]\d{2}\s*€?$/.test(s) && /[+\-−€]/.test(s);
+  const cells = String(text||'').replace(/^﻿/,'').split(/\r?\n|\t/).map(s=>s.trim()).filter(Boolean);
+  const data=[]; let buf=[];
+  cells.forEach(c=>{
+    if (isMonthHead(c) || isColHead(c)) return;
+    if (!isAmount(c)){ buf.push(c); return; }
+    const di = buf.map(parseLongDate).map((v,i)=>v?i:-1).filter(i=>i>=0).pop();
+    if (di===undefined){ buf=[]; return; }            // montant sans date : on ne devine pas
+    const iso = parseLongDate(buf[di]);
+    const rest = buf.filter((_,i)=>i!==di);
+    const amt = parseAmount(c);
+    if (!isNaN(amt) && amt!==0){
+      const desc = rest[0] || '', type = rest.slice(1).join(' ');
+      data.push([iso, type, desc||type||'—', amt>0?amt.toFixed(2):'0.00', amt<0?(-amt).toFixed(2):'0.00']);
+    }
+    buf=[];
+  });
+  // l'app liste du plus récent au plus ancien ; le grand livre veut l'ordre chronologique
+  // (retourné d'abord : le tri stable garde alors aussi l'ordre des mouvements d'un même jour)
+  data.reverse().sort((a,b)=> a[0]<b[0]?-1 : a[0]>b[0]?1 : 0);
+  const meta = data.length ? {source:'paste', from:data[0][0], to:data[data.length-1][0]} : {source:'paste'};
+  return { headers:['Date','Type','Description','Crédit','Débit'], data, meta };
 }
 // Parse une date selon l'ordre choisi → {iso, disp}.
 function parseImportDate(raw, order){
@@ -1176,7 +1277,7 @@ function showMapping(){
     <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)">
       <span class="ic">✓</span><div>Relevé détecté${m.holder?` — <b>${m.holder}</b>`:''}${m.iban?` · ${m.iban}`:''}.
       ${!isNaN(m.opening)?`Solde d'ouverture <b>${eur(m.opening)}</b>`:''}${!isNaN(m.closing)?` → clôture <b>${eur(m.closing)}</b>`:''}.
-      ${(m.from||m.to)?` Période ${m.from} → ${m.to}.`:''}
+      ${(m.from||m.to)?` Période ${importPeriod(m)}.`:''}
       ${m.iban ? (ibanDetected
         ? `<br><b>Compte reconnu via l'IBAN : ${acctLabel}.</b>`
         : `<br>IBAN inconnu — choisissez le compte ci-dessous, il sera <b>mémorisé</b> pour cet IBAN.`) : ''}</div></div>` : '';
@@ -1277,6 +1378,12 @@ function importGap(){
   const days=Math.round((Date.parse(newFrom.iso)-Date.parse(lastTo.iso))/86400000);
   return days>5 ? {asOf:r.asOf, newFrom:newFrom.disp, days} : null;
 }
+// Période du relevé, affichée à la belge quel que soit le format du fichier (US, ISO…).
+function importPeriod(m){
+  if (!m || !(m.from||m.to)) return '';
+  const f = s => { const d = s ? parseImportDate(s, dateOrder) : null; return d ? d.disp : (s||'?'); };
+  return `${f(m.from)} → ${f(m.to)}`;
+}
 function paintPreview(){
   ensurePreviewCss();
   const box=document.getElementById('previewBox');
@@ -1284,19 +1391,24 @@ function paintPreview(){
   const m = importMeta||{};
   const gap = importGap();
   const ibanTail = m.iban ? normIban(m.iban).slice(-4) : '';
-  const period = (m.from||m.to) ? `${m.from||'?'} → ${m.to||'?'}` : '';
+  const period = importPeriod(m);
   const balLine = !isNaN(m.opening) ? `ouverture ${eur(m.opening)} → clôture ${eur(m.closing)}` : '';
+  // Les lignes lues doivent refaire le chemin ouverture → clôture du relevé ; sinon une ligne a
+  // été perdue (ou mal lue) en route. Muet quand l'ouverture a elle-même été déduite des lignes.
+  const reconGap = (!m.openingDeduced && !isNaN(m.opening) && !isNaN(m.closing))
+    ? +(m.opening + sum(interpreted.map(t=>t.amount)) - m.closing).toFixed(2) : 0;
+  const pasted = m.source==='paste';
   // En-tête « relevé reconnu » + choix du compte (au lieu des 8 menus)
   const header = `
     <div class="card" style="margin-bottom:14px;background:var(--green-soft);border-color:#BcD6c2">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <div style="font-size:26px;line-height:1">✓</div>
         <div style="flex:1;min-width:220px">
-          <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:var(--green-deep)">Relevé reconnu${m.holder?` — ${m.holder}`:''}</div>
+          <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:var(--green-deep)">${pasted?'Liste Swan reconnue (copiée depuis l’app)':'Relevé reconnu'}${m.holder?` — ${m.holder}`:''}</div>
           <div class="sub" style="color:var(--green-deep)">${parsedRows.length} mouvement(s)${ibanTail?` · IBAN …${ibanTail}`:''}${period?` · ${period}`:''}${balLine?` · ${balLine}`:''}</div>
         </div>
         <div style="text-align:right">
-          <div class="l" style="font-size:11px;color:var(--green-deep)">${ibanDetected?'Compte (reconnu via l’IBAN)':'Sur quel compte ? (mémorisé)'}</div>
+          <div class="l" style="font-size:11px;color:var(--green-deep)">${ibanDetected?'Compte (reconnu via l’IBAN)':(m.iban?'Sur quel compte ? (mémorisé)':'Sur quel compte ?')}</div>
           <select class="fld" id="pvAcct" style="margin-top:4px;font-weight:600${ibanDetected?'':';border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)'}">
             <option value="pay" ${importTargetAcct==='pay'?'selected':''}>💳 Compte de paiement</option>
             <option value="res" ${importTargetAcct==='res'?'selected':''}>🏦 Compte de réserve</option>
@@ -1306,6 +1418,7 @@ function paintPreview(){
     </div>`;
   box.innerHTML = `
     ${header}
+    ${reconGap?`<div class="alert"><span class="ic">⚠</span><div><b>Le relevé ne tombe pas juste — écart ${signed(reconGap)}.</b> Ouverture + mouvements lus ≠ clôture annoncée : une ligne manque peut-être, ou a été mal lue. Comparez avec le relevé avant de valider.</div></div>`:''}
     ${gap?`<div class="alert"><span class="ic">⚠</span><div><b>Trou possible — ${gap.days} jours.</b> Ce relevé démarre le ${gap.newFrom}, mais le dernier relevé importé sur ce compte s'arrêtait au ${gap.asOf}. Un relevé (ou des transactions) manque peut-être entre les deux.</div></div>`:''}
     ${nUncat?`<div class="alert"><span class="ic">⚠</span><div><b>${nUncat} transaction(s) non reconnue(s).</b> Choisissez une catégorie, ou ajoutez une règle dans « Règles & alias ».</div></div>`:''}
     <div class="h-row" style="margin:4px 0 6px"><div class="mini-h" style="margin:0">Vérifiez et validez — doublons en rouge</div>
@@ -1544,43 +1657,66 @@ function resetImport(){
   if (after){ after.style.display='none'; const live=document.getElementById('importLive'); if(live) live.remove(); }
 }
 
-// Lecture d'un fichier déposé / choisi (CSV ou PDF)
+// Lecture d'un fichier déposé / choisi (CSV, PDF, ou texte copié depuis Swan)
 function handleFile(file){
   if (!file) return;
   const isPdf = /\.pdf$/i.test(file.name||'') || file.type==='application/pdf';
   const reader = new FileReader();
   reader.onload = async e=>{
-    let headers, data, meta;
+    let parsed;
     try {
-      if (isPdf){
-        ({headers, data, meta} = await parsePdfStatement(e.target.result));
-      } else {
-        const rows = parseCSV(e.target.result);
-        if (rows.length < 2){ alert('Fichier vide ou illisible.'); return; }
-        ({headers, data, meta} = detectTable(rows));
-      }
+      parsed = isPdf ? await parsePdfStatement(e.target.result) : parseStatementText(e.target.result);
     } catch(err){ console.error(err); alert('Lecture du fichier impossible : '+(err.message||err)); return; }
-    if (!data || !data.length){ alert('Aucune transaction détectée dans ce fichier.'); return; }
-    parsedHeaders = headers.map(h=>String(h).trim());
-    parsedRows = data;
-    importMeta = meta;
-    mapping = guessMapping(parsedHeaders);
-    if (mapping.date<0) mapping.date=0;
-    if (mapping.amount<0 && mapping.credit<0 && mapping.debit<0) mapping.amount=Math.min(parsedHeaders.length-1, 2);
-    dateOrder = detectDateOrder(parsedRows.map(r=>r[mapping.date]));
-    // détection du compte via l'IBAN (apprise aux imports précédents)
-    ibanDetected = false;
-    const key = meta && meta.iban ? normIban(meta.iban) : null;
-    if (key && state.ibanMap && state.ibanMap[key]){ importTargetAcct = state.ibanMap[key]; ibanDetected = true; }
-    // Format Syndic4you/Swan reconnu (Date + Crédit + Débit présents) → on saute
-    // l'association manuelle et on va droit à l'aperçu. Sinon : mapping manuel.
-    recognizedFormat = mapping.date>=0 && mapping.credit>=0 && mapping.debit>=0;
-    showImportScreen();
-    if (recognizedFormat) showPreview();
-    else showMapping();
+    if (!parsed){ alert('Fichier vide ou illisible.'); return; }
+    if (!parsed.data || !parsed.data.length){ alert('Aucune transaction détectée dans ce fichier.'); return; }
+    loadStatement(parsed);
   };
   if (isPdf) reader.readAsArrayBuffer(file); else reader.readAsText(file, 'utf-8');
 }
+
+// Texte brut : la liste copiée depuis l'app Swan (dates en toutes lettres, montants
+// signés — rien d'autre n'y ressemble), sinon un export CSV. null si illisible.
+function parseStatementText(text){
+  const pasted = parseSwanPaste(text);
+  if (pasted.data.length) return pasted;
+  const rows = parseCSV(text);
+  return rows.length < 2 ? null : detectTable(rows);
+}
+
+// Relevé lu (quelle que soit sa source) → écran d'import.
+function loadStatement({headers, data, meta}){
+  parsedHeaders = headers.map(h=>String(h).trim());
+  parsedRows = data;
+  importMeta = meta || {};
+  mapping = guessMapping(parsedHeaders);
+  if (mapping.date<0) mapping.date=0;
+  if (mapping.amount<0 && mapping.credit<0 && mapping.debit<0) mapping.amount=Math.min(parsedHeaders.length-1, 2);
+  // la période du relevé départage aussi jour/mois (son dernier jour dépasse 12)
+  dateOrder = importMeta.dateOrder || detectDateOrder([...parsedRows.map(r=>r[mapping.date]), importMeta.from, importMeta.to]);
+  // détection du compte via l'IBAN (apprise aux imports précédents)
+  ibanDetected = false;
+  const key = importMeta.iban ? normIban(importMeta.iban) : null;
+  if (key && state.ibanMap && state.ibanMap[key]){ importTargetAcct = state.ibanMap[key]; ibanDetected = true; }
+  // Format Syndic4you/Swan reconnu (Date + Crédit + Débit présents) → on saute
+  // l'association manuelle et on va droit à l'aperçu. Sinon : mapping manuel.
+  recognizedFormat = mapping.date>=0 && mapping.credit>=0 && mapping.debit>=0;
+  showImportScreen();
+  if (recognizedFormat) showPreview();
+  else showMapping();
+}
+
+// ⌘V sur l'écran Import : la liste des transactions copiée depuis l'app Swan (ou un CSV)
+// s'importe comme un fichier. Un collage dans un champ de saisie garde son sens habituel.
+document.addEventListener('paste', e=>{
+  if (!document.getElementById('imp')?.classList.contains('on')) return;
+  if (e.target && e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (!text || !text.trim()) return;
+  e.preventDefault();
+  const parsed = parseStatementText(text);
+  if (!parsed || !parsed.data || !parsed.data.length){ alert('Le texte collé ne contient aucune transaction reconnaissable.'); return; }
+  loadStatement(parsed);
+});
 
 let fileInput;
 function pickFile(){
@@ -3237,53 +3373,20 @@ ${syndic} - Syndic, ${cn}
 }
 
 /* ============================================================
-   CONVERTISSEUR : texte copié depuis Swan → CSV importable
-   Format collé : blocs Description · Méthode · Date · Montant,
-   regroupés par en-têtes de mois.
+   COLLER depuis Swan : la liste copiée dans l'app (Description ·
+   Méthode · Date · Montant, par mois) part droit à l'aperçu d'import.
+   Lecture : parseSwanPaste (section IMPORT).
    ============================================================ */
-const PASTE_MON={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
-function parsePastedTransactions(text){
-  const monthHdr=/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}$/i;
-  const dateRe=/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),\s+(\d{4})$/i;
-  const amtRe=/^([+\-−])\s*€\s*([\d.,]+)\s*$/;
-  const skip=new Set(['transaction','method','date','amount']);
-  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean)
-    .filter(l=>!monthHdr.test(l) && !skip.has(l.toLowerCase()));
-  const out=[]; let block=[];
-  const pad=n=>String(n).padStart(2,'0');
-  for(const l of lines){
-    block.push(l);
-    const am=l.match(amtRe);
-    if(am){
-      const dateL=block[block.length-2], method=block[block.length-3]||'';
-      const desc=block.slice(0, Math.max(0,block.length-3)).join(' ').trim();
-      const dm=dateL && dateL.match(dateRe);
-      if(dm){
-        const mm=PASTE_MON[dm[1].toLowerCase()], dd=+dm[2], yyyy=+dm[3];
-        const sign=(am[1]==='-'||am[1]==='−')?-1:1;
-        const val=parseFloat(am[2].replace(/\s/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.'));
-        if(mm && !isNaN(val)){
-          out.push({ date:`${pad(mm)}/${pad(dd)}/${yyyy}`, type:method, desc:desc||method,
-            credit: sign>0 ? val.toFixed(2) : '', debit: sign<0 ? val.toFixed(2) : '' });
-        }
-      }
-      block=[];
-    }
-  }
-  return out;
-}
-document.getElementById('pasteToCsv')?.addEventListener('click', ()=>{
+document.getElementById('pasteImport')?.addEventListener('click', ()=>{
   const ta=document.getElementById('pasteArea'); const txt=(ta?.value||'').trim();
   const cnt=document.getElementById('pasteCount');
   if(!txt){ if(cnt) cnt.textContent='Colle d\'abord le texte.'; return; }
-  const txs=parsePastedTransactions(txt);
-  if(!txs.length){ if(cnt) cnt.textContent='Aucune transaction reconnue dans ce texte.'; return; }
-  const esc=v=>`"${String(v).replace(/"/g,'""')}"`;
-  const rows=[['Date','Type','Description','Credit EUR','Debit EUR'].map(esc).join(';')];
-  txs.forEach(t=>rows.push([t.date, t.type, t.desc, t.credit, t.debit].map(esc).join(';')));
-  const csv=rows.join('\r\n');
-  downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `releve-swan-${new Date().toISOString().slice(0,10)}.csv`);
-  if(cnt) cnt.textContent=`✓ ${txs.length} transaction(s) → CSV téléchargé. Importe-le ci-dessous.`;
+  const parsed=parseStatementText(txt);
+  if(!parsed || !parsed.data || !parsed.data.length){ if(cnt) cnt.textContent='Aucune transaction reconnue dans ce texte.'; return; }
+  if(cnt) cnt.textContent='';
+  if(ta) ta.value='';
+  document.getElementById('pasteTool')?.removeAttribute('open');
+  loadStatement(parsed);
 });
 
 /* ============================================================
