@@ -19,8 +19,9 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
 
 ## Périmètre
 
-Import CSV bancaire (format Swan/Syndic4you géré) → catégorisation par règles &
-alias → tableau de bord (réserve, soldes, qui-paie-quoi, dépenses par catégorie,
+Import du relevé Swan/Syndic4you (CSV, PDF en édition française ou anglaise, ou
+liste copiée-collée depuis l'app Swan) → catégorisation par règles & alias →
+tableau de bord (réserve, soldes, qui-paie-quoi, dépenses par catégorie,
 pense-bête) → budget & clés de répartition → générateur de rapports PDF (AG,
 compte de paiement, résultats, Annexes 2/3/4). Module AG (convocation + notes +
 PV) interactif.
