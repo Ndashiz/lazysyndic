@@ -2925,7 +2925,9 @@ async function boot(){
     }
   });
 }
-boot();
+// Différé : hors-ligne, boot() rend tout de suite, et renderAll lit des `let` déclarés plus bas
+// (bfrMonths, cfScope…) — encore en zone morte si on l'appelle avant la fin du script.
+setTimeout(boot, 0);
 
 /* ============================================================
    GÉNÉRATEUR DE RAPPORTS (PDF via impression navigateur)
