@@ -2802,7 +2802,11 @@ function injectLoginCSS(){
   s.textContent=`
     #loginOverlay{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;
       background:var(--green-deep);background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.05) 1px,transparent 0);background-size:22px 22px;padding:20px}
-    #loginOverlay.on{display:flex}
+    #loginOverlay.on{display:flex;flex-direction:column;gap:18px}
+    .login-credit{display:flex;align-items:center;gap:7px;font-size:12px;color:#9DB6A6;text-decoration:none;transition:color .18s}
+    .login-credit svg{width:16px;height:15px;flex:none}
+    .login-credit b{color:#EAF1E8;font-weight:600;transition:color .18s}
+    .login-credit:hover,.login-credit:hover b{color:#fff}
     .login-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);width:380px;max-width:92vw;padding:30px 30px 26px}
     .login-card .brand{font-family:'Fraunces',serif;font-size:27px;font-weight:600}
     .login-card .brand .z{font-style:italic;color:var(--clay)}
@@ -2841,7 +2845,10 @@ function buildLogin(){
       <div class="login-alt"><a id="toPw">← Connexion par mot de passe</a></div>
     </div>
     <div class="login-msg" id="loginMsg"></div>
-  </div>`;
+  </div>
+  <a class="login-credit" href="https://lagoffinerie.be" target="_blank" rel="noopener">Site développé par
+    <svg viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" style="isolation:isolate" aria-hidden="true"><path d="M62 6 L102 80 L22 80 Z" fill="#EDAF2F" style="mix-blend-mode:multiply"/><rect x="12" y="48" width="58" height="58" rx="15" fill="#2823EE" style="mix-blend-mode:multiply"/><circle cx="90" cy="78" r="27" fill="#E2452C" style="mix-blend-mode:multiply"/></svg>
+    <b>La Goffinerie</b></a>`;
   document.body.appendChild(ov);
 
   const bar=document.createElement('div'); bar.id='sessionBar';
