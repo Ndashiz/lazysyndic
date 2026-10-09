@@ -420,8 +420,10 @@ function renderDashboard(){
   if (kpis.length>=4){
     kpis[0].textContent = eur(balPay);
     kpis[1].textContent = eur(balRes);
-    kpis[2].textContent = '+'+eur(recv);
-    kpis[3].textContent = '−'+eur(0);
+    kpis[2].textContent = signed(recv);
+    kpis[3].textContent = eur(0);                    // aucune dette fournisseur suivie : zéro, sans signe
+    kpis[2].style.color = recv ? 'var(--green)' : 'var(--ink-soft)';
+    kpis[3].style.color = 'var(--ink-soft)';
   }
   // qui paie quoi
   const tbl = document.querySelector('#dash .card table');
@@ -854,7 +856,7 @@ function renderAcctInfo(acct){
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde d'ouverture</div>
         <input class="fld" id="acctOpening" ${ed?'':'disabled'} style="width:100%;margin-top:4px" value="${eur(open)}"></div>
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde calculé (ouverture + transactions)</div>
-        <div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:2px">${eur(bal)}</div></div>
+        <div style="font-family:var(--display);font-size:22px;font-weight:600;margin-top:2px">${eur(bal)}</div></div>
     </div>
     ${acct==='res' ? `<div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="l" style="font-size:12px;color:var(--ink-faint)">Objectif du fonds de réserve</div>
@@ -1404,7 +1406,7 @@ function paintPreview(){
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <div style="font-size:26px;line-height:1">✓</div>
         <div style="flex:1;min-width:220px">
-          <div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;color:var(--green-deep)">${pasted?'Liste Swan reconnue (copiée depuis l’app)':'Relevé reconnu'}${m.holder?` — ${m.holder}`:''}</div>
+          <div style="font-family:var(--display);font-weight:600;font-size:16px;color:var(--green-deep)">${pasted?'Liste Swan reconnue (copiée depuis l’app)':'Relevé reconnu'}${m.holder?` — ${m.holder}`:''}</div>
           <div class="sub" style="color:var(--green-deep)">${parsedRows.length} mouvement(s)${ibanTail?` · IBAN …${ibanTail}`:''}${period?` · ${period}`:''}${balLine?` · ${balLine}`:''}</div>
         </div>
         <div style="text-align:right">
@@ -1902,7 +1904,7 @@ function renderAG(){
     createBox.style.display='block';
     createBox.innerHTML=`<div class="card" style="text-align:center;padding:36px">
       <div style="font-size:40px">🗳️</div>
-      <h2 style="font-family:'Fraunces',serif;font-size:20px;margin-top:8px">Aucune assemblée en cours</h2>
+      <h2 style="font-family:var(--display);font-size:20px;margin-top:8px">Aucune assemblée en cours</h2>
       <div class="sub" style="max-width:480px;margin:8px auto 20px">Créez une assemblée pour préparer l'ordre du jour, convoquer, tenir la séance et générer le PV. Les AG finalisées restent dans l'historique ci-dessous.</div>
       ${canWrite()?'<button class="btn btn-primary" id="agCreate">+ Nouvelle assemblée</button>':'<div class="sub">Seul le syndic peut créer une assemblée.</div>'}</div>`;
     createBox.querySelector('#agCreate')?.addEventListener('click',agCreateNew);
@@ -1943,7 +1945,7 @@ function renderAgenda(){
     const card=document.createElement('div'); card.className='card'; card.style.marginBottom='12px';
     card.innerHTML=`
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <span style="font-family:'Fraunces',serif;font-weight:600;color:var(--ink-faint)">${i+1}</span>
+        <span style="font-family:var(--display);font-weight:600;color:var(--ink-faint)">${i+1}</span>
         <input class="fld pt-title" ${ro?'disabled':''} style="flex:1;font-weight:600" value="${(p.title||'').replace(/"/g,'&quot;')}">
         <select class="fld pt-kind" ${ro?'disabled':''} style="width:130px"><option value="decision" ${isDec?'selected':''}>Décision</option><option value="info" ${!isDec?'selected':''}>Information</option></select>
         <button class="flagbtn pt-up" style="opacity:.5" title="Monter">↑</button>
@@ -2114,7 +2116,7 @@ function renderSeance(){
           <span style="font-size:13px;color:var(--ink-soft)">Pour : <b class="pourq">0</b>/${agTotalQuot()} · requis ${majNeed(p.majorite)} (${MAJ[p.majorite]})</span>
           <span class="vbadge badge b-ok">Adopté</span></div></div>`;
     } else votesHtml='<div class="sub" style="margin-top:8px">Point informatif — pas de vote</div>';
-    card.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-family:'Fraunces',serif;font-weight:600;color:var(--ink-faint)">${idx+1}</span>
+    card.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--display);font-weight:600;color:var(--ink-faint)">${idx+1}</span>
       <b style="flex:1;font-size:14.5px">${p.title}</b>${isDec?`<span class="cat acp">${MAJ[p.majorite]}</span>`:'<span class="cat ent">Information</span>'}</div>
       <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:10px;min-height:38px;font-size:13px;color:var(--ink-soft)">${p.seance_notes||''}</div>${votesHtml}`;
     if(!ro){ const sn=card.querySelector('.pt-snotes'); if(sn) sn.onblur=e=>persistPoint(p,{seance_notes:e.target.innerText}); }
@@ -2488,11 +2490,40 @@ document.getElementById('addAlias')?.addEventListener('click',()=>{
    INIT
    ============================================================ */
 // En-têtes pilotés par les données (greeting, sidebar, bannière réserve).
+// Page de garde : date de la prochaine assemblée générale (l'AG en cours, pas encore finalisée).
+// La date est le texte saisi à l'étape 1 de l'AG ; sans AG en cours, on rappelle la dernière.
+function renderNextAG(){
+  const box=document.getElementById('agNext'); if(!box) return;
+  const ags=state.ags||[];
+  const cur=ags.find(a=>a.status!=='finalisee');
+  const last=ags.find(a=>a.status==='finalisee');
+  const ic='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>';
+  const esc=v=>String(v||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let v, sub, cta;
+  if(cur){
+    v = cur.ag_date ? esc(cur.ag_date) : 'Date à fixer';
+    sub = [cur.type?`AG ${esc(cur.type).toLowerCase()}`:'', esc(cur.lieu), AG_STATUS[cur.status]||''].filter(Boolean).join(' · ');
+    cta = canWrite() ? 'Préparer l’AG →' : 'Voir l’AG →';
+  } else {
+    v = 'Aucune AG planifiée';
+    sub = last ? `Dernière AG : ${esc(last.ag_date||last.title||'—')}` : 'Aucune assemblée enregistrée pour l’instant';
+    cta = canWrite() ? 'Planifier l’AG →' : 'Voir les AG →';
+  }
+  box.classList.toggle('todo', !cur || !cur.ag_date);
+  box.innerHTML=`<div class="agn-ic">${ic}</div>
+    <div class="agn-b"><div class="agn-l">Prochaine assemblée générale</div><div class="agn-v">${v}</div><div class="agn-s">${sub}</div></div>
+    <button class="btn btn-ghost" type="button" id="agNextGo">${cta}</button>`;
+  box.querySelector('#agNextGo').onclick=()=>goToScreen('ag');
+}
+// revenir sur la page de garde rafraîchit la date (elle se saisit dans l'écran AG)
+document.querySelector('.nav button[data-s="dash"]')?.addEventListener('click', renderNextAG);
+
 function renderChrome(){
   const m = (window.LS && window.LS.member) || null;
   const prenom = m ? (((m.full_name||'').trim().split(/\s+/)[0]) || m.owner_short || m.userEmail) : '';
   const set = (id,v)=>{ const e=document.getElementById(id); if(e) e.textContent=v; };
-  set('greet', prenom ? `Bonjour ${prenom} 👋` : 'Bonjour 👋');
+  set('greet', prenom ? `Bonjour ${prenom}` : 'Bonjour');
+  renderNextAG();
   // sidebar : copropriété + utilisateur connecté
   const ow = ownersOf(); const total = sum(ow.map(o=>o.q||0));
   set('sideCopro', state.coproName || 'Ma copropriété');
@@ -2800,24 +2831,43 @@ window.LazySyndic.toggleDemo = toggleDemo;
 function injectLoginCSS(){
   const s=document.createElement('style');
   s.textContent=`
-    #loginOverlay{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;
-      background:var(--green-deep);background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.05) 1px,transparent 0);background-size:22px 22px;padding:20px}
-    #loginOverlay.on{display:flex;flex-direction:column;gap:18px}
-    .login-credit{display:flex;align-items:center;gap:7px;font-size:12px;color:#9DB6A6;text-decoration:none;transition:color .18s}
-    .login-credit svg{width:16px;height:15px;flex:none}
-    .login-credit b{color:#EAF1E8;font-weight:600;transition:color .18s}
-    .login-credit:hover,.login-credit:hover b{color:#fff}
-    .login-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);width:380px;max-width:92vw;padding:30px 30px 26px}
-    .login-card .brand{font-family:'Fraunces',serif;font-size:27px;font-weight:600}
-    .login-card .brand .z{font-style:italic;color:var(--clay)}
-    .login-card .sub{font-size:13px;color:var(--ink-soft);margin:2px 0 20px}
-    .login-card label{font-size:12px;color:var(--ink-faint)}
-    .login-card input{width:100%;font-family:inherit;font-size:14px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;background:var(--card-2);margin:4px 0 14px}
-    .login-card .btn{width:100%;justify-content:center}
-    .login-msg{font-size:12.5px;margin-top:12px;min-height:16px}
+    #loginOverlay{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;overflow-y:auto;
+      background:var(--paper);background-image:radial-gradient(circle at 1px 1px,rgba(33,40,30,.035) 1px,transparent 0);background-size:22px 22px;padding:24px}
+    #loginOverlay.on{display:flex;flex-direction:column;gap:20px}
+    .login-shell{display:grid;grid-template-columns:1fr 1fr;width:880px;max-width:100%;background:var(--card);border:1px solid var(--line);
+      border-radius:24px;box-shadow:0 2px 4px rgba(33,40,30,.05),0 24px 60px rgba(33,40,30,.12);overflow:hidden}
+    .login-aside{background:var(--green-deep);color:#C8D6CC;padding:38px 36px;display:flex;flex-direction:column;gap:22px;position:relative;overflow:hidden}
+    .login-aside::after{content:"";position:absolute;right:-90px;bottom:-90px;width:300px;height:300px;border-radius:50%;
+      background:radial-gradient(circle,rgba(201,133,74,.2),transparent 65%);pointer-events:none}
+    .login-aside img{height:36px;width:auto;align-self:flex-start}
+    .login-aside h2{font-family:var(--display);font-weight:700;font-size:27px;line-height:1.15;letter-spacing:-.03em;color:#fff;margin-top:auto}
+    .login-aside ul{list-style:none;display:grid;gap:10px;font-size:13.5px}
+    .login-aside li{display:flex;gap:10px;align-items:flex-start}
+    .login-aside li::before{content:"";flex:none;width:7px;height:7px;border-radius:2px;background:var(--clay);margin-top:7px}
+    .login-aside a{color:#E5B98F;font-size:13px;font-weight:600;text-decoration:none;position:relative;z-index:1}
+    .login-aside a:hover{color:#fff}
+    .login-card{padding:40px 40px 34px;display:flex;flex-direction:column;justify-content:center}
+    .login-card .login-mlogo{display:none;height:32px;width:auto;margin-bottom:18px}
+    .login-card h1{font-family:var(--display);font-size:26px;font-weight:700;letter-spacing:-.03em}
+    .login-card .sub{font-size:13.5px;color:var(--ink-soft);margin:4px 0 24px}
+    .login-card label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft)}
+    .login-card input{width:100%;font-family:inherit;font-size:15px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;margin:6px 0 16px;color:var(--ink);transition:border-color .15s,box-shadow .15s}
+    .login-card input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+    .login-card .btn{width:100%;justify-content:center;padding:13px 18px;font-size:15px}
+    .login-msg{font-size:13px;margin-top:14px;min-height:18px}
     .login-msg.err{color:var(--coral)} .login-msg.ok{color:var(--green)}
-    .login-alt{margin-top:14px;text-align:center;font-size:12.5px;color:var(--ink-soft)}
+    .login-alt{margin-top:16px;text-align:center;font-size:13px;color:var(--ink-soft)}
     .login-alt a{color:var(--green);font-weight:600;cursor:pointer}
+    .login-credit{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-faint);text-decoration:none;transition:color .18s}
+    .login-credit svg{width:16px;height:15px;flex:none}
+    .login-credit b{color:var(--ink-soft);font-weight:600;transition:color .18s}
+    .login-credit:hover,.login-credit:hover b{color:var(--ink)}
+    @media(max-width:760px){
+      .login-shell{grid-template-columns:1fr;width:420px}
+      .login-aside{display:none}
+      .login-card{padding:30px 24px 26px}
+      .login-card .login-mlogo{display:block}
+    }
     /* bandeau session + lecture seule */
     #sessionBar{position:fixed;top:10px;right:14px;z-index:60;display:none;align-items:center;gap:10px;font-size:12.5px;
       background:var(--card);border:1px solid var(--line);border-radius:30px;padding:5px 6px 5px 14px;box-shadow:var(--shadow)}
@@ -2830,21 +2880,34 @@ function injectLoginCSS(){
 function buildLogin(){
   injectLoginCSS();
   const ov=document.createElement('div'); ov.id='loginOverlay';
-  ov.innerHTML=`<div class="login-card">
-    <div class="brand">Lazy<span class="z">Syndic</span></div>
-    <div class="sub">La copropriété en pilote automatique</div>
-    <div id="pwBox">
-      <label>Email</label><input id="loginEmail" type="email" placeholder="vous@exemple.be" autocomplete="username">
-      <label>Mot de passe</label><input id="loginPw" type="password" placeholder="••••••" autocomplete="current-password">
-      <button class="btn btn-primary" id="loginBtn">Se connecter</button>
-      <div class="login-alt"><a id="toMagic">Recevoir un lien magique par email →</a></div>
+  ov.innerHTML=`<div class="login-shell">
+    <div class="login-aside">
+      <img src="brand/logo-white.svg" alt="LazySyndic" width="148" height="36">
+      <h2>La copropriété en pilote automatique.</h2>
+      <ul>
+        <li>Les comptes de l'immeuble, à jour à chaque relevé</li>
+        <li>Le solde de chaque copropriétaire, en clair</li>
+        <li>L'assemblée générale préparée pas à pas</li>
+      </ul>
+      <a href="decouvrir/">Découvrir LazySyndic →</a>
     </div>
-    <div id="magicBox" style="display:none">
-      <label>Email</label><input id="magicEmail" type="email" placeholder="vous@exemple.be" autocomplete="username">
-      <button class="btn btn-primary" id="magicBtn">Envoyer le lien de connexion</button>
-      <div class="login-alt"><a id="toPw">← Connexion par mot de passe</a></div>
+    <div class="login-card">
+      <img class="login-mlogo" src="brand/logo.svg" alt="LazySyndic" width="132" height="32">
+      <h1>Connexion</h1>
+      <div class="sub">Accédez aux comptes de votre copropriété.</div>
+      <div id="pwBox">
+        <label for="loginEmail">Email</label><input id="loginEmail" type="email" placeholder="vous@exemple.be" autocomplete="username">
+        <label for="loginPw">Mot de passe</label><input id="loginPw" type="password" placeholder="••••••" autocomplete="current-password">
+        <button class="btn btn-primary" id="loginBtn">Se connecter</button>
+        <div class="login-alt"><a id="toMagic">Recevoir un lien de connexion par email →</a></div>
+      </div>
+      <div id="magicBox" style="display:none">
+        <label for="magicEmail">Email</label><input id="magicEmail" type="email" placeholder="vous@exemple.be" autocomplete="username">
+        <button class="btn btn-primary" id="magicBtn">Envoyer le lien de connexion</button>
+        <div class="login-alt"><a id="toPw">← Connexion par mot de passe</a></div>
+      </div>
+      <div class="login-msg" id="loginMsg" role="status"></div>
     </div>
-    <div class="login-msg" id="loginMsg"></div>
   </div>
   <a class="login-credit" href="https://lagoffinerie.be" target="_blank" rel="noopener">Site développé par
     <svg viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" style="isolation:isolate" aria-hidden="true"><path d="M62 6 L102 80 L22 80 Z" fill="#EDAF2F" style="mix-blend-mode:multiply"/><rect x="12" y="48" width="58" height="58" rx="15" fill="#2823EE" style="mix-blend-mode:multiply"/><circle cx="90" cy="78" r="27" fill="#E2452C" style="mix-blend-mode:multiply"/></svg>
@@ -2954,10 +3017,10 @@ setTimeout(boot, 0);
     #reportModal{display:none;position:fixed;inset:0;background:rgba(33,40,30,.5);z-index:100;overflow:auto;padding:28px 16px}
     #reportModal.open{display:block}
     .report-toolbar{max-width:820px;margin:0 auto 14px;display:flex;gap:10px;justify-content:flex-end;align-items:center}
-    .report-toolbar .rt-title{margin-right:auto;color:#EAF1E8;font-family:'Fraunces',serif;font-size:16px}
+    .report-toolbar .rt-title{margin-right:auto;color:#EAF1E8;font-family:var(--display);font-size:16px}
     .report-sheet{max-width:820px;margin:0 auto;background:#fff;color:#20251F;padding:46px 52px;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-size:13px;line-height:1.5}
-    .report-sheet h1{font-family:'Fraunces',serif;font-size:26px;font-weight:600;margin:0 0 2px}
-    .report-sheet h2{font-family:'Fraunces',serif;font-size:16px;font-weight:600;margin:26px 0 8px;padding-bottom:5px;border-bottom:2px solid #21503D;color:#21503D}
+    .report-sheet h1{font-family:var(--display);font-size:26px;font-weight:600;margin:0 0 2px}
+    .report-sheet h2{font-family:var(--display);font-size:16px;font-weight:600;margin:26px 0 8px;padding-bottom:5px;border-bottom:2px solid #21503D;color:#21503D}
     .report-sheet .r-sub{color:#5C6153;font-size:12px}
     .report-sheet table{width:100%;border-collapse:collapse;margin-top:6px}
     .report-sheet th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#5C6153;text-align:left;padding:6px 8px;border-bottom:1.5px solid #20251F}
@@ -2966,8 +3029,7 @@ setTimeout(boot, 0);
     .report-sheet tr.tot td{font-weight:700;border-top:1.5px solid #20251F;border-bottom:none}
     .report-sheet .pos{color:#2F6B53}.report-sheet .neg{color:#C2564A}
     .report-sheet .r-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px double #21503D;padding-bottom:14px;margin-bottom:6px}
-    .report-sheet .r-brand{font-family:'Fraunces',serif;font-size:20px;color:#21503D}
-    .report-sheet .r-brand .z{font-style:italic;color:#C9854A}
+    .report-sheet .r-brand img{height:30px;width:auto;display:block}
     .report-sheet .chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:#E2ECE3;color:#21503D}
     .report-sheet .sig{display:flex;gap:40px;margin-top:40px;flex-wrap:wrap}
     .report-sheet .sig div{flex:1;min-width:180px;border-top:1px solid #20251F;padding-top:6px;font-size:11.5px;color:#5C6153}
@@ -3029,11 +3091,11 @@ setTimeout(boot, 0);
   /* ---- sections HTML ---- */
   function headEl(title, p){
     return `<div class="r-head">
-      <div><div class="r-brand">Lazy<span class="z">Syndic</span></div>
+      <div><div class="r-brand"><img src="brand/logo.svg" alt="LazySyndic" width="123" height="30"></div>
         <div style="margin-top:6px"><b>${COPRO().name}</b>${(COPRO().addr||COPRO().kbo)?`<div class="r-sub">${[COPRO().addr,COPRO().kbo].filter(Boolean).join(' · ')}</div>`:''}</div></div>
       <div style="text-align:right"><span class="chip">${title}</span>
         <div class="r-sub" style="margin-top:8px">Période : <b>${p.label}</b></div>
-        <div class="r-sub">Édité le 4 juin 2026</div></div>
+        <div class="r-sub">Édité le ${new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}</div></div>
     </div>
     <h1 style="margin-top:18px">${title}</h1>`;
   }
@@ -3247,7 +3309,7 @@ document.getElementById('restoreBtn')?.addEventListener('click', ()=>{
   if (document.getElementById('mobileBar')) return;
   const bar=document.createElement('div'); bar.id='mobileBar';
   bar.innerHTML=`<button class="burger" aria-label="Menu">☰</button>
-    <span class="mbrand">Lazy<span class="z">Syndic</span></span>
+    <span class="mbrand"><img src="brand/logo-white.svg" alt="LazySyndic" width="111" height="27"></span>
     <button class="mout" id="mobileLogout" title="Déconnexion">⎋</button>`;
   document.body.appendChild(bar);
   const back=document.createElement('div'); back.id='navBackdrop'; document.body.appendChild(back);
@@ -3457,10 +3519,10 @@ function renderBFR(){
       <div class="seg" id="bfrSeg">${[3,6,12].map(n=>`<button data-n="${n}" class="${n===bfrMonths?'on':''}">${n} mois</button>`).join('')}</div></div>
     <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:14px;margin-top:8px">
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">BFR estimé</div>
-        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:600;color:var(--clay);margin-top:2px">${eur(bfr)}</div>
+        <div style="font-family:var(--display);font-size:26px;font-weight:600;color:var(--clay);margin-top:2px">${eur(bfr)}</div>
         <div class="sub">${bfrMonths} mois × ${eur(depMoy)} + créances ${eur(creances)}</div></div>
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Trésorerie d'exploitation</div>
-        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:600;margin-top:2px">${eur(dispo)}</div>
+        <div style="font-family:var(--display);font-size:26px;font-weight:600;margin-top:2px">${eur(dispo)}</div>
         <div class="sub">solde du compte de paiement</div></div>
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Couverture</div>
         <div style="margin-top:6px">${ok?'<span class="badge b-ok">✓ Couvert</span>':'<span class="badge b-late">⚠ À renflouer</span>'}</div>
@@ -3541,7 +3603,8 @@ function renderComptabilite(){
   const months=cfMonths();
   if(!months.length){ box.innerHTML='<div class="sub" style="padding:20px">Aucune transaction à afficher.</div>';
     const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML='';
-    const pb=document.getElementById('cfPies'); if(pb) pb.innerHTML=''; return; }
+    const pb=document.getElementById('cfPies'); if(pb) pb.innerHTML='';
+    const fl=document.getElementById('cfFlow'); if(fl) fl.innerHTML=''; return; }
   const D=cfBuild(); const {mkeys}=D;
   const N=mkeys.length||1;   // nb de mois affichés → pour la moyenne mensuelle
   const rowSum=obj=>mkeys.reduce((a,k)=>a+(obj[k]||0),0);
@@ -3566,13 +3629,14 @@ function renderComptabilite(){
   box.innerHTML=h;
   // cartes de synthèse
   const sIn=rowSum(D.totIn), sOut=rowSum(D.totOut), net=sIn+sOut;
-  const card=(l,v,c)=>`<div class="card" style="padding:14px 16px"><div class="l" style="font-size:12px;color:var(--ink-faint)">${l}</div><div style="font-family:'Fraunces',serif;font-size:22px;font-weight:600;margin-top:3px${c?';color:'+c:''}">${v}</div></div>`;
+  const card=(l,v,c,extra)=>`<div class="card" style="padding:14px 16px"><div class="l" style="font-size:12px;color:var(--ink-faint)">${l}</div><div style="font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:3px${c?';color:'+c:''}">${v}</div>${extra||''}</div>`;
   const sm=document.getElementById('cfSummary');
   if(sm) sm.innerHTML =
     card('Entrées sur la période','+'+eur(sIn),'var(--green)')+
     card('Sorties sur la période','−'+eur(Math.abs(sOut)),'var(--coral)')+
     card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--green)':'var(--coral)')+
-    card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]));
+    card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]),'',cfSparkline(mkeys.map(k=>D.treso[k])));
+  renderCfFlow(D);
   renderExpensePies();
 }
 function exportComptabilite(){
@@ -3603,44 +3667,123 @@ document.getElementById('cfAcct')?.addEventListener('click',e=>{ const b=e.targe
 document.getElementById('cfExport')?.addEventListener('click', exportComptabilite);
 
 /* ============================================================
-   CAMEMBERT DES DÉPENSES + DRILL-DOWN (sous-catégories)
+   GRAPHIQUES DE LA COMPTABILITÉ
+   Flux mensuels (entrées au-dessus de zéro, sorties en dessous), tendance de la
+   trésorerie dans sa carte, répartition des dépenses en barres classées.
+   Couleurs passées au validateur dataviz (daltonisme, chroma) : le vert et le
+   rouge corail de l'app se confondent pour un protanope, pas ce vert et cet orange.
    ============================================================ */
-let cfSelCat = null;   // catégorie sélectionnée pour le détail
-// secteur annulaire (donut) entre rayons r..R, angles a0..a1 (radians)
-function arcPath(cx,cy,R,r,a0,a1){
-  const p=(rad,ang)=>[cx+rad*Math.cos(ang), cy+rad*Math.sin(ang)];
-  const large=(a1-a0)>Math.PI?1:0;
-  const [x0,y0]=p(R,a0),[x1,y1]=p(R,a1),[x2,y2]=p(r,a1),[x3,y3]=p(r,a0);
-  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} L${x2.toFixed(2)} ${y2.toFixed(2)} A${r} ${r} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`;
-}
-// éclaircit une couleur hex vers le blanc (amt 0..1)
-function tint(hex, amt){
-  const n=parseInt(String(hex).replace('#',''),16); if(isNaN(n)) return hex;
-  let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
-  r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt);
-  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
-}
-function ensureCfPieCss(){
-  if(document.getElementById('cfPieCss')) return;
-  const s=document.createElement('style'); s.id='cfPieCss';
+const CF_IN = '#1F7A55', CF_OUT = '#D9822B', CF_MUTED = '#C9D5CC';
+let cfSelCat = null;   // catégorie dont on détaille les sous-catégories
+
+function ensureCfChartCss(){
+  if(document.getElementById('cfChartCss')) return;
+  const s=document.createElement('style'); s.id='cfChartCss';
   s.textContent=`
-   .cf-pie-block{flex:1;min-width:250px}
-   .cf-pie-h{font-size:12px;color:var(--ink-faint);font-weight:600;margin-bottom:6px}
-   .cf-leg{margin-top:10px;display:flex;flex-direction:column;gap:1px}
-   .cf-leg-row{display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:8px;font-size:12.5px;border:1px solid transparent}
-   .cf-leg-row.click{cursor:pointer}
-   .cf-leg-row.click:hover{background:var(--card-2)}
-   .cf-leg-row.on{background:var(--card-2);border-color:var(--line)}
-   .cf-leg .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto}
-   .cf-leg-l{flex:1;color:var(--ink)} .cf-leg-p{font-weight:700;width:40px;text-align:right}
-   .cf-leg-v{width:84px;text-align:right;color:var(--ink-soft)}
-   .cfpie path{transition:opacity .12s,transform .12s;transform-origin:center}
-   .cfpie.click path{cursor:pointer}
-   .cfpie.click:hover path{opacity:.5}
-   .cfpie.click path:hover{opacity:1}
-   .cfpie path.sel{opacity:1;stroke:var(--ink);stroke-width:2}`;
+   .cf-legend{display:flex;gap:16px;font-size:12.5px;color:var(--ink-soft)}
+   .cf-legend span{display:inline-flex;align-items:center;gap:7px}
+   .cf-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+   #cfFlow{position:relative;margin-top:10px}
+   #cfFlow svg{display:block;overflow:visible}
+   #cfFlow text{font-size:11px;fill:var(--ink-faint);font-variant-numeric:tabular-nums}
+   #cfFlow .hit{fill:transparent;cursor:default}
+   .cf-tip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;border-radius:10px;padding:9px 12px;
+     font-size:12px;line-height:1.5;box-shadow:0 8px 24px rgba(33,40,30,.25);white-space:nowrap;transform:translate(-50%,-100%);display:none;z-index:5}
+   .cf-tip b{display:block;font-size:12.5px;margin-bottom:2px}
+   .cf-tip .r{display:flex;justify-content:space-between;gap:18px;font-variant-numeric:tabular-nums}
+   .cf-tip i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:6px}
+   .cf-split{display:flex;gap:36px;flex-wrap:wrap;margin-top:8px;flex:1 1 100%;min-width:0}
+   .cf-split>div{flex:1 1 300px;min-width:0}
+   .cf-bh{font-size:12px;font-weight:600;color:var(--ink-faint);margin-bottom:8px}
+   .cf-bh b{color:var(--ink)}
+   .cfb{display:flex;flex-direction:column;gap:2px}
+   .cfb-row{all:unset;box-sizing:border-box;width:100%;display:grid;grid-template-columns:minmax(90px,150px) minmax(0,1fr) 88px 40px;align-items:center;gap:12px;
+     padding:7px 9px;border-radius:9px;font-size:13px;color:var(--ink)}
+   button.cfb-row{cursor:pointer}
+   button.cfb-row:hover{background:var(--card-2)}
+   button.cfb-row:focus-visible{outline:2px solid var(--green);outline-offset:1px}
+   .cfb-row.on{background:var(--card-2)}
+   .cfb-row.on .cfb-l{font-weight:700}
+   .cfb-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+   .cfb-track{height:12px;border-radius:0 4px 4px 0;background:var(--line-2);overflow:hidden}
+   .cfb-bar{display:block;height:100%;border-radius:0 4px 4px 0;min-width:2px}
+   .cfb-v{text-align:right;font-variant-numeric:tabular-nums}
+   .cfb-p{text-align:right;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+   .cf-spark{display:block;margin-top:8px}`;
   document.head.appendChild(s);
 }
+
+// Pas « rond » pour un axe : 1, 2, 2,5 ou 5 × 10ⁿ.
+function niceStep(span, n){
+  const raw=span/Math.max(1,n), p=Math.pow(10,Math.floor(Math.log10(raw||1))), f=raw/p;
+  return (f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10)*p;
+}
+const cfTick = v => (v<0?'−':'')+Math.abs(v).toLocaleString('fr-BE',{maximumFractionDigits:0})+' €';
+const cfSigned = v => (v>0?'+':v<0?'−':'')+eur(Math.abs(v));
+
+// Colonnes mensuelles : entrées vers le haut, sorties vers le bas, une seule échelle.
+function renderCfFlow(D){
+  const box=document.getElementById('cfFlow'); if(!box) return;
+  ensureCfChartCss();
+  const ks=D.mkeys, ins=ks.map(k=>D.totIn[k]||0), outs=ks.map(k=>-(D.totOut[k]||0)), n=ks.length;
+  if(!ins.some(Boolean) && !outs.some(Boolean)){ box.innerHTML='<div class="sub" style="padding:14px 0">Aucun mouvement sur la période.</div>'; return; }
+  const W=Math.max(300, box.clientWidth||880), H=250, L=58, R=8, T=10, B=36, pw=W-L-R, ph=H-T-B;
+  const up=Math.max(...ins,0), dn=Math.max(...outs,0);
+  const step=niceStep(up+dn, 4), top=Math.ceil(up/step)*step||step, bot=Math.ceil(dn/step)*step;
+  const y=v=>T+(top-v)/(top+bot)*ph, y0=y(0);
+  const band=pw/n, bw=Math.max(4, Math.min(24, band*0.5));
+  const ticks=[]; for(let v=-bot; v<=top+1e-9; v+=step) ticks.push(+v.toFixed(2));
+  const col=(x,yA,yB,roundTop)=>{          // bord arrondi côté donnée, carré sur la ligne de base
+    const h=Math.abs(yB-yA); if(h<0.5) return '';
+    const r=Math.min(4,bw/2,h), x2=x+bw;
+    return roundTop
+      ? `M${x} ${yB}V${yA+r}Q${x} ${yA} ${x+r} ${yA}H${x2-r}Q${x2} ${yA} ${x2} ${yA+r}V${yB}Z`
+      : `M${x} ${yA}V${yB-r}Q${x} ${yB} ${x+r} ${yB}H${x2-r}Q${x2} ${yB} ${x2} ${yB-r}V${yA}Z`;
+  };
+  let g='', bars='', hits='', xl='';
+  ticks.forEach(v=>{ const yy=y(v).toFixed(1);
+    g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="${v===0?'var(--ink-faint)':'var(--line)'}" stroke-width="1"/>`+
+       `<text x="${L-10}" y="${yy}" text-anchor="end" dominant-baseline="middle">${cfTick(v)}</text>`; });
+  D.months.forEach((m,i)=>{
+    const cx=L+band*(i+.5), x=+(cx-bw/2).toFixed(1);
+    bars+=`<path d="${col(x,y(ins[i]),y0,true)}" fill="${CF_IN}"/><path d="${col(x,y0,y(-outs[i]),false)}" fill="${CF_OUT}"/>`;
+    hits+=`<rect class="hit" data-i="${i}" x="${(L+band*i).toFixed(1)}" y="${T}" width="${band.toFixed(1)}" height="${ph}"/>`;
+    const showYear=i===0||m.m===1;
+    if(n<=14 || i%2===0) xl+=`<text x="${cx.toFixed(1)}" y="${H-B+16}" text-anchor="middle">${CF_MON[m.m-1]}</text>`;
+    if(showYear) xl+=`<text x="${cx.toFixed(1)}" y="${H-B+30}" text-anchor="middle" style="fill:var(--ink-soft);font-weight:600">${m.y}</text>`;
+  });
+  box.innerHTML=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Entrées et sorties par mois sur la période ; le détail chiffré est dans le tableau ci-dessous">
+      <rect class="cf-hl" x="0" y="${T}" width="${band.toFixed(1)}" height="${ph}" fill="var(--card-2)" style="display:none"/>
+      ${g}${bars}${xl}${hits}</svg><div class="cf-tip"></div>`;
+  const svg=box.querySelector('svg'), hl=box.querySelector('.cf-hl'), tip=box.querySelector('.cf-tip');
+  svg.addEventListener('mousemove',e=>{
+    const t=e.target.closest('.hit'); if(!t){ hl.style.display='none'; tip.style.display='none'; return; }
+    const i=+t.dataset.i, m=D.months[i];
+    hl.setAttribute('x',t.getAttribute('x')); hl.style.display='';
+    tip.innerHTML=`<b>${CF_MON[m.m-1]} ${m.y}</b>
+      <div class="r"><span><i style="background:${CF_IN}"></i>Entrées</span><span>${cfSigned(ins[i])}</span></div>
+      <div class="r"><span><i style="background:${CF_OUT}"></i>Sorties</span><span>${cfSigned(-outs[i])}</span></div>
+      <div class="r" style="border-top:1px solid rgba(255,255,255,.18);margin-top:3px;padding-top:3px"><span>Net</span><span>${cfSigned(ins[i]-outs[i])}</span></div>`;
+    tip.style.display='block';
+    const cx=L+band*(i+.5), half=tip.offsetWidth/2;
+    tip.style.left=Math.min(Math.max(cx, half), W-half)+'px';
+    tip.style.top=(Math.min(y(ins[i]), y0)-10)+'px';
+  });
+  svg.addEventListener('mouseleave',()=>{ hl.style.display='none'; tip.style.display='none'; });
+}
+
+// Tendance de la trésorerie, en petit, dans sa carte (deux échelles ne cohabitent jamais sur un graphique).
+function cfSparkline(vals){
+  if(vals.length<2) return '';
+  const W=180, H=34, P=4, mn=Math.min(...vals), mx=Math.max(...vals), span=(mx-mn)||1;
+  const pt=(v,i)=>[P+i*(W-2*P)/(vals.length-1), P+(mx-v)/span*(H-2*P)];
+  const d=vals.map((v,i)=>pt(v,i).map(n=>n.toFixed(1)).join(' ')).join(' L');
+  const [ex,ey]=pt(vals[vals.length-1], vals.length-1);
+  return `<svg class="cf-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <path d="M${d}" fill="none" stroke="var(--ink-faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="4" fill="${CF_IN}" stroke="var(--card)" stroke-width="2"/></svg>`;
+}
+
 // agrège les dépenses (sorties) de la période/compte courants
 function cfExpenseData(){
   const mkeys=cfMonths().map(m=>m.key);
@@ -3649,67 +3792,41 @@ function cfExpenseData(){
   tx.forEach(t=>{ const h=t.high||'?', s=t.sub||'(sans sous-catégorie)', v=-t.amount;
     byCat[h]=(byCat[h]||0)+v; (bySub[h]=bySub[h]||{}); bySub[h][s]=(bySub[h][s]||0)+v; });
   const total=sum(Object.values(byCat))||1;
-  const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1])
-    .map(([high,v])=>({high,v,color:(CAT_META[high]||{}).color||'#8a8a8a'}));
+  const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([high,v])=>({high,v}));
   return {cats,bySub,total};
 }
-// SVG donut cliquable ; pourcentages affichés sur les secteurs ≥ 6 %
-function cfPie(slices, opts){
-  const R=92,r=52,cx=100,cy=100; let a=-Math.PI/2;
-  const totV=sum(slices.map(s=>s.v))||1;
-  const parts=[],labels=[];
-  if(slices.length===1){
-    parts.push(`<circle cx="${cx}" cy="${cy}" r="${(R+r)/2}" fill="none" stroke="${slices[0].color}" stroke-width="${R-r}" data-key="${encodeURIComponent(slices[0].label)}"><title>${slices[0].label} · ${eur(slices[0].v)} · 100%</title></circle>`);
-    labels.push(`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#fff">100%</text>`);
-  } else slices.forEach(s=>{
-    const frac=s.v/totV, a1=a+frac*2*Math.PI;
-    const selCls=(opts.sel===s.label)?' class="sel"':'';
-    parts.push(`<path d="${arcPath(cx,cy,R,r,a,a1)}" fill="${s.color}" stroke="#fff" stroke-width="1.5"${selCls} data-key="${encodeURIComponent(s.label)}"><title>${s.label} · ${eur(s.v)} · ${Math.round(frac*100)}%</title></path>`);
-    if(frac>=0.06){ const mid=(a+a1)/2, lr=(R+r)/2;
-      labels.push(`<text x="${(cx+lr*Math.cos(mid)).toFixed(1)}" y="${(cy+lr*Math.sin(mid)).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="700" fill="#fff" style="pointer-events:none">${Math.round(frac*100)}%</text>`); }
-    a=a1;
-  });
-  const center = opts.center?`<text x="100" y="95" text-anchor="middle" font-size="11" fill="var(--ink-faint)">${opts.center.l}</text><text x="100" y="113" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)" style="font-family:'Fraunces',serif">${opts.center.v}</text>`:'';
-  return `<svg viewBox="0 0 200 200" width="186" height="186" class="cfpie${opts.clickable?' click':''}" data-pie="${opts.id}">${parts.join('')}${center}${labels.join('')}</svg>`;
-}
-function cfLegend(slices, totV, clickable, sel){
-  return `<div class="cf-leg" data-leg="${clickable?'main':'sub'}">${slices.map(s=>{
-    const pct=Math.round(s.v/totV*100);
-    return `<div class="cf-leg-row${clickable?' click':''}${sel===s.label?' on':''}" data-key="${encodeURIComponent(s.label)}">
-      <span class="sw" style="background:${s.color}"></span><span class="cf-leg-l">${s.label}</span>
-      <span class="cf-leg-p">${pct}%</span><span class="cf-leg-v">${eur(s.v)}</span></div>`;}).join('')}</div>`;
+// Barres classées : longueur = part du total, valeur et pourcentage au bout.
+function cfBarList(rows, total, opts){
+  return `<div class="cfb">${rows.map(r=>{
+    const pct=r.v/total*100, on=opts.sel===r.key, tag=opts.clickable?'button':'div';
+    const color=opts.clickable ? (on?CF_IN:CF_MUTED) : CF_IN;
+    return `<${tag} class="cfb-row${on?' on':''}"${opts.clickable?` type="button" data-key="${encodeURIComponent(r.key)}" aria-pressed="${on}"`:''}>
+      <span class="cfb-l" title="${r.label}">${r.label}</span>
+      <span class="cfb-track"><span class="cfb-bar" style="width:${pct.toFixed(1)}%;background:${color}"></span></span>
+      <span class="cfb-v">${eur(r.v)}</span><span class="cfb-p">${Math.round(pct)} %</span></${tag}>`;}).join('')}</div>`;
 }
 function renderExpensePies(){
   const box=document.getElementById('cfPies'); if(!box) return;
-  ensureCfPieCss();
+  ensureCfChartCss();
   const {cats,bySub,total}=cfExpenseData();
   if(!cats.length){ box.innerHTML='<div class="sub" style="padding:14px">Aucune dépense sur la période sélectionnée.</div>'; return; }
   if(!cfSelCat || !cats.some(c=>c.high===cfSelCat)) cfSelCat=cats[0].high;
-  // camembert principal
-  const mainSlices=cats.map(c=>({label:c.high,v:c.v,color:c.color}));
-  // camembert de détail (sous-catégories de la catégorie sélectionnée)
-  const subObj=bySub[cfSelCat]||{};
-  const subEntries=Object.entries(subObj).sort((a,b)=>b[1]-a[1]);
-  const subTot=sum(subEntries.map(e=>e[1]))||1;
-  const parentColor=(CAT_META[cfSelCat]||{}).color||'#8a8a8a';
-  const subSlices=subEntries.map(([s,v],i)=>({label:s,v,
-    color:tint(parentColor, subEntries.length>1?(i/(subEntries.length-1))*0.6:0.25)}));
-  box.innerHTML=`
-    <div class="cf-pie-block">
-      <div class="cf-pie-h">Par catégorie — total ${eur(total)}</div>
-      ${cfPie(mainSlices,{id:'main',clickable:true,sel:cfSelCat,center:{l:'Dépenses',v:eur(total)}})}
-      ${cfLegend(mainSlices,total,true,cfSelCat)}
-    </div>
-    <div class="cf-pie-block">
-      <div class="cf-pie-h">Détail de « ${cfSelCat==='?'?'À catégoriser':cfSelCat} » — ${eur(subTot)} <span style="color:var(--ink-faint)">(% relatif à la catégorie)</span></div>
-      ${cfPie(subSlices,{id:'sub',clickable:false,center:{l:cfSelCat==='?'?'À cat.':cfSelCat,v:eur(subTot)}})}
-      ${cfLegend(subSlices,subTot,false,null)}
-    </div>`;
-  // sélection : secteurs du camembert principal + lignes de sa légende
-  const pick=el=>{ const k=el.getAttribute('data-key'); if(!k) return; cfSelCat=decodeURIComponent(k); renderExpensePies(); };
-  box.querySelectorAll('[data-pie="main"] path, [data-pie="main"] circle').forEach(el=>el.addEventListener('click',()=>pick(el)));
-  box.querySelectorAll('[data-leg="main"] .cf-leg-row').forEach(el=>el.addEventListener('click',()=>pick(el)));
+  const name=h=>h==='?'?'À catégoriser':h;
+  const subs=Object.entries(bySub[cfSelCat]||{}).sort((a,b)=>b[1]-a[1]);
+  const subTot=sum(subs.map(e=>e[1]))||1;
+  box.innerHTML=`<div class="cf-split">
+    <div><div class="cf-bh">Par catégorie · <b>${eur(total)}</b></div>
+      ${cfBarList(cats.map(c=>({key:c.high,label:name(c.high),v:c.v})), total, {clickable:true, sel:cfSelCat})}</div>
+    <div><div class="cf-bh">Détail de ${name(cfSelCat)} · <b>${eur(subTot)}</b></div>
+      ${cfBarList(subs.map(([s,v])=>({key:s,label:s,v})), subTot, {clickable:false})}</div>
+  </div>`;
+  box.querySelectorAll('button.cfb-row').forEach(b=>b.addEventListener('click',()=>{ cfSelCat=decodeURIComponent(b.dataset.key); renderExpensePies(); }));
 }
+// Le graphique mensuel suit la largeur de sa carte.
+let _cfResize=null;
+window.addEventListener('resize',()=>{ clearTimeout(_cfResize); _cfResize=setTimeout(()=>{
+  if(document.getElementById('cpta')?.classList.contains('on') && typeof cfBuild==='function' && cfMonths().length) renderCfFlow(cfBuild());
+},150); });
 
 /* ============================================================
    BANNIÈRE DE CONFIRMATION (sauvegarde)

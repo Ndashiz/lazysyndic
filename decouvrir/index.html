@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LazySyndic — La copropriété en pilote automatique</title>
+<meta name="description" content="LazySyndic tient les comptes de votre copropriété, répond à « qui a payé quoi ? » et prépare l'assemblée générale. L'outil du syndic bénévole, sans tableur.">
+<link rel="canonical" href="https://ndashiz.be/lazysyndic/decouvrir/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LazySyndic">
+<meta property="og:locale" content="fr_BE">
+<meta property="og:url" content="https://ndashiz.be/lazysyndic/decouvrir/">
+<meta property="og:title" content="LazySyndic — La copropriété en pilote automatique">
+<meta property="og:description" content="Relevés classés tout seuls, soldes de chaque copropriétaire, AG prête : l'outil du syndic bénévole.">
+<meta property="og:image" content="https://ndashiz.be/lazysyndic/brand/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#21503D">
+<link rel="icon" href="../brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..800&display=swap" rel="stylesheet">
+<script>document.documentElement.classList.add('js')</script>
+<style>
+  :root{
+    color-scheme:light only;
+    --paper:#F4F0E6; --card:#FBF8F1; --card-2:#F7F2E7;
+    --ink:#20251F; --ink-soft:#5C6153; --ink-faint:#7D8274;
+    --green:#2F6B53; --green-deep:#21503D; --green-ink:#183B2D; --green-soft:#E2ECE3;
+    --clay:#C9854A; --clay-deep:#9A5E2B; --clay-soft:#F2E2CE;
+    --coral:#C2564A; --coral-soft:#F4DCD6;
+    --line:#E6DECE; --line-2:#EFE9DB;
+    --shadow:0 1px 2px rgba(33,40,30,.04),0 8px 24px rgba(33,40,30,.06);
+    --shadow-lg:0 2px 4px rgba(33,40,30,.05),0 24px 60px rgba(33,40,30,.14);
+    --radius:18px;
+    --serif:'Hanken Grotesk',system-ui,sans-serif;   /* titres : même famille que le logo */
+    --sans:'Hanken Grotesk',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+  body{font-family:var(--sans);background:var(--paper);color:var(--ink);line-height:1.55;font-size:17px;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;
+    background-image:radial-gradient(circle at 1px 1px,rgba(33,40,30,.03) 1px,transparent 0);background-size:22px 22px}
+  img,svg{display:block;max-width:100%}
+  a{color:inherit}
+  :focus-visible{outline:3px solid var(--clay);outline-offset:3px;border-radius:6px}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+  .skip{position:absolute;left:-9999px;top:8px;background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;z-index:100}
+  .skip:focus{left:12px}
+
+  /* ---------- Boutons ---------- */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;font:600 15.5px/1 var(--sans);
+    padding:15px 24px;border-radius:999px;text-decoration:none;border:1px solid transparent;cursor:pointer;
+    transition:transform .18s ease,background .18s ease,box-shadow .18s ease,color .18s ease;white-space:nowrap}
+  .btn:hover{transform:translateY(-1px)}
+  .btn-primary{background:var(--green-deep);color:#fff;box-shadow:0 6px 18px rgba(33,80,61,.25)}
+  .btn-primary:hover{background:var(--green-ink)}
+  .btn-ghost{background:transparent;border-color:#CFC6B3;color:var(--ink)}
+  .btn-ghost:hover{background:var(--card)}
+  .btn-clay{background:var(--clay);color:#2A1B0C}
+  .btn-clay:hover{background:#D6935A}
+  .btn-sm{padding:10px 17px;font-size:14px}
+  .btn .arr{transition:transform .18s}
+  .btn:hover .arr{transform:translateX(3px)}
+
+  /* ---------- En-tête ---------- */
+  .hdr{position:sticky;top:0;z-index:50;background:rgba(244,240,230,.82);backdrop-filter:saturate(1.4) blur(12px);
+    -webkit-backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid transparent;transition:border-color .2s}
+  .hdr.scrolled{border-bottom-color:var(--line)}
+  .hdr .wrap{display:flex;align-items:center;gap:28px;height:72px}
+  .logo{display:flex;align-items:center;text-decoration:none;flex:none}
+  .logo img{height:38px;width:auto}
+  .menu{display:flex;gap:26px;margin-left:auto}
+  .menu a{font-size:15px;font-weight:500;color:var(--ink-soft);text-decoration:none;transition:color .15s}
+  .menu a:hover{color:var(--ink)}
+  .hdr-cta{display:flex;align-items:center;gap:14px}
+  .hdr-cta .login{font-size:15px;font-weight:600;color:var(--green-deep);text-decoration:none}
+  .hdr-cta .login:hover{text-decoration:underline;text-underline-offset:4px}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:72px 0 96px;position:relative}
+  .hero .wrap{display:grid;grid-template-columns:1.02fr 1fr;gap:56px;align-items:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:13px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--clay-deep)}
+  .eyebrow::before{content:"";width:22px;height:2px;border-radius:2px;background:var(--clay)}
+  h1,h2,h3{font-family:var(--serif);font-weight:700;letter-spacing:-.035em;line-height:1.04;color:var(--ink);text-wrap:balance}
+  h3{letter-spacing:-.02em}
+  h1{font-size:clamp(42px,6.2vw,76px);margin:18px 0 22px}
+  h1 em,h2 em{font-style:normal;color:var(--green)}
+  .lead{font-size:clamp(17px,1.6vw,20px);color:var(--ink-soft);max-width:34em;line-height:1.6}
+  .hero-cta{display:flex;gap:12px;flex-wrap:wrap;margin:34px 0 26px}
+  .assure{list-style:none;display:flex;flex-direction:column;gap:9px;font-size:15px;color:var(--ink-soft)}
+  .assure li{display:flex;gap:10px;align-items:flex-start}
+  .tick{flex:none;width:20px;height:20px;border-radius:50%;background:var(--green-soft);color:var(--green-deep);display:grid;place-items:center;margin-top:1px}
+  .tick svg{width:12px;height:12px}
+
+  /* maquette du produit (décorative) */
+  .mock{position:relative;padding:18px 10px 34px 0}
+  .mock-win{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-lg);overflow:hidden;
+    transform:perspective(1600px) rotateY(-5deg) rotateX(2deg);transform-origin:left center}
+  .mock-bar{display:flex;align-items:center;gap:6px;padding:11px 14px;background:var(--card-2);border-bottom:1px solid var(--line)}
+  .mock-bar i{width:9px;height:9px;border-radius:50%;background:#DCD3C1}
+  .mock-bar span{margin-left:10px;font-size:11.5px;color:var(--ink-faint)}
+  .mock-body{display:grid;grid-template-columns:118px 1fr;min-height:400px}
+  .mock-side{background:var(--green-deep);padding:16px 12px;display:flex;flex-direction:column;gap:9px}
+  .mock-side .m{display:flex;align-items:center;gap:7px;margin-bottom:10px}
+  .mock-side .m img{width:22px;height:22px}
+  .mock-side .m b{font-size:12.5px;color:#fff;font-weight:750;letter-spacing:-.02em}
+  .mock-side .m b span{color:#B9CDBF;font-weight:520}
+  .mock-side .n{height:9px;border-radius:5px;background:rgba(255,255,255,.12)}
+  .mock-side .n.on{background:var(--clay)}
+  .mock-main{padding:18px 18px 20px;display:flex;flex-direction:column;gap:12px;min-width:0}
+  .mock-h small{display:block;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint)}
+  .mock-h b{font-family:var(--serif);font-size:19px;font-weight:600}
+  .mock-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .k{background:#fff;border:1px solid var(--line-2);border-radius:13px;padding:11px 12px}
+  .k small{display:block;font-size:10.5px;color:var(--ink-faint)}
+  .k b{display:block;font-family:var(--serif);font-size:20px;font-weight:600;margin:2px 0 4px;font-variant-numeric:tabular-nums}
+  .k em{font-style:normal;font-size:10.5px;color:var(--green);font-weight:600}
+  .k.res em{color:var(--ink-faint);font-weight:500}
+  .meter{height:6px;border-radius:4px;background:var(--line-2);overflow:hidden;margin:4px 0 5px}
+  .meter span{display:block;height:100%;width:81%;border-radius:4px;background:linear-gradient(90deg,#5B4B86,#7A69A8)}
+  .mc{background:#fff;border:1px solid var(--line-2);border-radius:13px;padding:11px 12px}
+  .mc-h{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:700;margin-bottom:7px}
+  .mc-h span{font-weight:500;color:var(--ink-faint);font-size:10.5px}
+  .row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;font-size:11.5px;padding:6px 0;border-top:1px solid var(--line-2)}
+  .row:first-of-type{border-top:0}
+  .row .q{color:var(--ink-faint);font-variant-numeric:tabular-nums}
+  .pill{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap}
+  .pill.ok{background:var(--green-soft);color:var(--green-deep)}
+  .pill.late{background:var(--coral-soft);color:#9B3B30}
+  .donut-row{display:flex;align-items:center;gap:14px}
+  .donut-row svg{width:62px;height:62px;flex:none}
+  .legend{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:10.5px;color:var(--ink-soft)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .legend i{width:8px;height:8px;border-radius:2px;flex:none}
+  .toast{position:absolute;display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:14px;
+    padding:11px 14px;box-shadow:var(--shadow-lg);font-size:13px;line-height:1.3;white-space:nowrap}
+  .toast b{display:block;font-weight:700;font-size:13px}
+  .toast small{color:var(--ink-faint);font-size:11.5px}
+  .toast .ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none}
+  .toast .ic svg{width:16px;height:16px}
+  .t1{left:-40px;bottom:-4px}
+  .t1 .ic{background:var(--green-soft);color:var(--green-deep)}
+  .t2{right:-14px;top:-2px}
+  .t2 .ic{background:var(--clay-soft);color:var(--clay-deep)}
+  .js .toast{opacity:0;transform:translateY(10px);animation:pop .6s cubic-bezier(.2,.8,.2,1) forwards}
+  .js .t2{animation-delay:.5s}.js .t1{animation-delay:1s}
+  @keyframes pop{to{opacity:1;transform:none}}
+
+  /* ---------- Sections ---------- */
+  section{padding:104px 0}
+  .sec-h{max-width:720px;margin-bottom:54px}
+  .sec-h.c{margin-left:auto;margin-right:auto;text-align:center}
+  h2{font-size:clamp(32px,4.3vw,52px);margin:14px 0 18px}
+  .sec-h p{font-size:18px;color:var(--ink-soft);max-width:36em}
+  .sec-h.c p{margin:0 auto}
+
+  /* constat */
+  .pains{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .pain{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:28px 26px;box-shadow:var(--shadow)}
+  .pain .num{font-size:13px;font-weight:700;letter-spacing:.08em;color:var(--clay-deep)}
+  .pain h3{font-size:24px;margin:10px 0 10px;line-height:1.15}
+  .pain p{color:var(--ink-soft);font-size:16px}
+
+  /* fonctionnalités */
+  .feat-sec{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-left:1px solid var(--line)}
+  .feat{padding:34px 30px 36px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--card);transition:background .2s}
+  .feat:hover{background:#fff}
+  .feat .fi{width:46px;height:46px;border-radius:13px;background:var(--green-soft);color:var(--green-deep);display:grid;place-items:center;margin-bottom:20px}
+  .feat .fi svg{width:23px;height:23px}
+  .feat h3{font-size:23px;margin-bottom:10px;line-height:1.15}
+  .feat p{color:var(--ink-soft);font-size:16px}
+  .feat .soon{display:inline-block;margin-left:4px;font:700 10.5px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--clay-deep);background:var(--clay-soft);padding:4px 7px;border-radius:6px;vertical-align:2px}
+
+  /* comment ça marche */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;position:relative;counter-reset:s}
+  .steps::before{content:"";position:absolute;top:27px;left:12%;right:12%;height:2px;
+    background:repeating-linear-gradient(90deg,var(--clay) 0 8px,transparent 8px 16px);opacity:.55}
+  .step{position:relative;text-align:center;padding:0 10px}
+  .step .b{width:56px;height:56px;border-radius:50%;margin:0 auto 22px;background:var(--green-deep);color:#fff;display:grid;place-items:center;
+    font:600 22px/1 var(--serif);box-shadow:0 0 0 8px var(--paper);position:relative}
+  .step h3{font-size:24px;margin-bottom:10px}
+  .step p{color:var(--ink-soft);font-size:16px;max-width:22em;margin:0 auto}
+
+  /* sécurité */
+  .trust{background:var(--green-deep);color:#E7EFE8;border-radius:28px;padding:72px 64px;display:grid;grid-template-columns:1fr 1.15fr;gap:56px;position:relative;overflow:hidden}
+  .trust::after{content:"";position:absolute;right:-120px;top:-120px;width:420px;height:420px;border-radius:50%;
+    background:radial-gradient(circle,rgba(201,133,74,.22),transparent 65%);pointer-events:none}
+  .trust .eyebrow{color:#E5B98F}.trust .eyebrow::before{background:#E5B98F}
+  .trust h2{color:#fff}
+  .trust h2 em{color:#E5B98F}
+  .trust .intro{color:#B9CDBF;font-size:18px}
+  .tlist{list-style:none;display:grid;gap:14px;position:relative;z-index:1}
+  .tlist li{display:flex;gap:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:16px 18px}
+  .tlist .ic{flex:none;width:34px;height:34px;border-radius:10px;background:rgba(229,185,143,.16);color:#E5B98F;display:grid;place-items:center}
+  .tlist .ic svg{width:18px;height:18px}
+  .tlist b{display:block;color:#fff;font-weight:600;font-size:16px;margin-bottom:2px}
+  .tlist span{color:#B9CDBF;font-size:15px;line-height:1.5}
+
+  /* terrain */
+  .field{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:center}
+  .quote{font-family:var(--serif);font-size:clamp(24px,2.6vw,32px);line-height:1.3;font-weight:600;letter-spacing:-.025em}
+  .quote em{font-style:normal;color:var(--green)}
+  .field p.sub{margin-top:22px;color:var(--ink-soft);font-size:17px}
+  .facts{display:grid;gap:14px}
+  .fact{display:flex;align-items:baseline;gap:18px;padding:20px 24px;background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+  .fact b{font-family:var(--serif);font-size:30px;font-weight:600;color:var(--green-deep);min-width:4.3em;letter-spacing:-.02em;line-height:1}
+  .fact span{color:var(--ink-soft);font-size:15.5px}
+
+  /* FAQ */
+  .faq{max-width:820px;margin:0 auto}
+  .faq details{border-top:1px solid var(--line)}
+  .faq details:last-child{border-bottom:1px solid var(--line)}
+  .faq summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:20px;padding:24px 4px;
+    font-family:var(--serif);font-size:19px;font-weight:700;letter-spacing:-.015em}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"+";flex:none;width:34px;height:34px;border-radius:50%;border:1px solid #CFC6B3;display:grid;place-items:center;
+    font:400 20px/1 var(--sans);color:var(--green-deep);transition:transform .2s,background .2s}
+  .faq details[open] summary::after{transform:rotate(45deg);background:var(--card)}
+  .faq details p{padding:0 54px 26px 4px;color:var(--ink-soft);font-size:16.5px}
+
+  /* appel final */
+  .final{padding:0 0 104px}
+  .final .box{background:var(--clay-soft);border:1px solid #E8CFB0;border-radius:28px;padding:72px 40px;text-align:center;position:relative;overflow:hidden}
+  .final .box img.mk{width:64px;height:64px;margin:0 auto 22px;border-radius:16px;box-shadow:0 10px 30px rgba(33,80,61,.25)}
+  .final h2{margin:0 0 14px}
+  .final p{color:#6A5640;font-size:18px;max-width:30em;margin:0 auto 30px}
+  .final .mail{display:block;margin-top:18px;font-size:14.5px;color:#7A6249}
+  .final .mail a{font-weight:600;color:var(--green-deep)}
+
+  /* pied */
+  .ftr{background:var(--green-ink);color:#A9C0B1;padding:56px 0 36px;font-size:14.5px}
+  .ftr .top{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;padding-bottom:36px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .ftr .top img{height:36px;width:auto;margin-bottom:12px}
+  .ftr nav{display:flex;gap:44px;flex-wrap:wrap}
+  .ftr nav div{display:flex;flex-direction:column;gap:9px}
+  .ftr nav b{color:#fff;font-size:13px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+  .ftr a{text-decoration:none;color:#C8D6CC}
+  .ftr a:hover{color:#fff}
+  .ftr .bot{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;padding-top:26px;font-size:13px}
+  .credit{display:inline-flex;align-items:center;gap:7px}
+  .credit svg{width:16px;height:15px}
+  .credit b{color:#fff;font-weight:600}
+
+  /* apparition au défilement (le contenu reste visible sans JS) */
+  .js .rv{opacity:0;transform:translateY(16px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1)}
+  .js .rv.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .js .rv,.js .toast{opacity:1;transform:none;transition:none;animation:none}
+    .btn,.btn:hover{transform:none}
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:1060px){
+    .hero .wrap{grid-template-columns:1fr;gap:48px}
+    .hero-copy{max-width:680px}
+    .mock{max-width:640px;margin:0 auto;width:100%}
+    .trust{grid-template-columns:1fr;padding:56px 40px;gap:36px}
+    .field{grid-template-columns:1fr;gap:40px}
+  }
+  @media (max-width:900px){
+    .menu{display:none}
+    .hdr-cta{margin-left:auto}
+    .pains,.feats{grid-template-columns:1fr 1fr}
+    .steps{grid-template-columns:1fr;gap:40px}
+    .steps::before{display:none}
+  }
+  @media (max-width:640px){
+    body{font-size:16px}
+    .wrap{padding:0 16px}
+    .hdr .wrap{height:62px;gap:12px}
+    .logo img{height:31px}
+    .hdr-cta .btn{display:none}
+    section{padding:72px 0}
+    .hero{padding:40px 0 64px}
+    .hero-cta .btn{flex:1 1 100%}
+    .pains,.feats{grid-template-columns:1fr}
+    .feat{padding:28px 22px}
+    .mock{padding:12px 0 28px}
+    .mock-win{transform:none}
+    .mock-body{grid-template-columns:1fr;min-height:0}
+    .mock-side{display:none}
+    .mock-main{padding:14px}
+    .t1{left:8px;bottom:4px}.t2{right:8px;top:-8px}
+    .toast{padding:9px 11px}
+    .trust{padding:44px 22px;border-radius:22px}
+    .final .box{padding:52px 22px;border-radius:22px}
+    .faq summary{font-size:18px;padding:20px 2px}
+    .faq details p{padding:0 8px 22px 2px}
+    .fact{flex-direction:column;gap:6px;padding:18px 20px}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+
+<header class="hdr" id="hdr">
+  <div class="wrap">
+    <a class="logo" href="./" aria-label="LazySyndic — accueil"><img src="../brand/logo.svg" alt="LazySyndic" width="156" height="38"></a>
+    <nav class="menu" aria-label="Sections">
+      <a href="#fonctionnalites">Fonctionnalités</a>
+      <a href="#comment">Comment ça marche</a>
+      <a href="#securite">Sécurité</a>
+      <a href="#faq">Questions</a>
+    </nav>
+    <div class="hdr-cta">
+      <a class="login" href="../?connexion">Se connecter</a>
+      <a class="btn btn-primary btn-sm" href="mailto:info@lagoffinerie.be?subject=D%C3%A9mo%20LazySyndic">Demander une démo</a>
+    </div>
+  </div>
+</header>
+
+<main id="contenu">
+
+<!-- ================= HERO ================= -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-copy">
+      <span class="eyebrow">Pour les syndics bénévoles</span>
+      <h1>Votre copropriété, <em>en pilote automatique.</em></h1>
+      <p class="lead">Déposez le relevé bancaire : LazySyndic classe chaque mouvement, tient le compte de chaque copropriétaire et prépare l'assemblée générale. Vous gardez la main — sans tableur.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="mailto:info@lagoffinerie.be?subject=D%C3%A9mo%20LazySyndic&amp;body=Bonjour%2C%0A%0AJe%20suis%20syndic%20d%27une%20copropri%C3%A9t%C3%A9%20de%20%E2%80%A6%20lots%20et%20j%27aimerais%20voir%20LazySyndic.%0A">Demander une démo <span class="arr" aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="#comment">Voir comment ça marche</a>
+      </div>
+      <ul class="assure">
+        <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.3 2.2 2.2 4.8-5"/></svg></span>Rien n'entre dans les comptes sans votre validation</li>
+        <li><span class="tick" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.3 2.2 2.2 4.8-5"/></svg></span>Chaque copropriétaire consulte les comptes en ligne</li>
+      </ul>
+    </div>
+
+    <div class="mock" aria-hidden="true">
+      <div class="mock-win">
+        <div class="mock-bar"><i></i><i></i><i></i><span>LazySyndic · Résidence Les Tilleuls</span></div>
+        <div class="mock-body">
+          <div class="mock-side">
+            <div class="m"><img src="../brand/mark.svg" alt=""><b>Lazy<span>Syndic</span></b></div>
+            <div class="n on"></div><div class="n" style="width:80%"></div><div class="n" style="width:88%"></div>
+            <div class="n" style="width:70%"></div><div class="n" style="width:84%"></div><div class="n" style="width:62%"></div>
+          </div>
+          <div class="mock-main">
+            <div class="mock-h"><small>Accueil · exercice 2026</small><b>Résidence Les Tilleuls</b></div>
+            <div class="mock-kpis">
+              <div class="k"><small>Compte de paiement</small><b>1 236,40 €</b><em>+128,60 € ce mois</em></div>
+              <div class="k res"><small>Fonds de réserve</small><b>4 860,00 €</b><div class="meter"><span></span></div><em>81 % de l'objectif</em></div>
+            </div>
+            <div class="mc">
+              <div class="mc-h">Qui paie quoi <span>quotités · solde</span></div>
+              <div class="row"><span>Lot 1 · Claire Martin</span><span class="q">412 ‰</span><span class="pill ok">À jour</span></div>
+              <div class="row"><span>Lot 2 · Jonas Peeters</span><span class="q">331 ‰</span><span class="pill ok">À jour</span></div>
+              <div class="row"><span>Lot 3 · Inès Dubois</span><span class="q">257 ‰</span><span class="pill late">− 45,00 €</span></div>
+            </div>
+            <div class="mc donut-row">
+              <svg viewBox="0 0 42 42"><circle cx="21" cy="21" r="15.9" fill="none" stroke="#EFE9DB" stroke-width="6"/>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="#2F6B53" stroke-width="6" stroke-dasharray="38 62" stroke-dashoffset="25"/>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="#7BA98E" stroke-width="6" stroke-dasharray="27 73" stroke-dashoffset="-13"/>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="#C9854A" stroke-width="6" stroke-dasharray="22 78" stroke-dashoffset="-40"/>
+                <circle cx="21" cy="21" r="15.9" fill="none" stroke="#C2564A" stroke-width="6" stroke-dasharray="13 87" stroke-dashoffset="-62"/></svg>
+              <div class="legend"><span><i style="background:#2F6B53"></i>Énergie 38 %</span><span><i style="background:#7BA98E"></i>Entretien 27 %</span><span><i style="background:#C9854A"></i>Assurance 22 %</span><span><i style="background:#C2564A"></i>Frais 13 %</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="toast t1"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.4 2.9 2.9 6.1-6.6"/></svg></span><span><b>Relevé de septembre importé</b><small>12 mouvements classés automatiquement</small></span></div>
+      <div class="toast t2"><span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M5.5 2v3M10.5 2v3M2.5 7h11"/></svg></span><span><b>AG 2027</b><small>convocations prêtes</small></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CONSTAT ================= -->
+<section id="constat" style="padding-top:24px">
+  <div class="wrap">
+    <div class="sec-h rv">
+      <span class="eyebrow">Le constat</span>
+      <h2>Être syndic bénévole, c'est <em>un deuxième métier.</em></h2>
+      <p>On accepte le rôle pour rendre service. Puis viennent les relevés, les relances et l'assemblée générale — le soir, après le travail.</p>
+    </div>
+    <div class="pains">
+      <article class="pain rv"><span class="num">01</span><h3>Le relevé à recopier</h3><p>Chaque mois, des dizaines de lignes à reporter à la main dans un tableur qui finit toujours par casser.</p></article>
+      <article class="pain rv"><span class="num">02</span><h3>« Qui a payé quoi ? »</h3><p>La question qui revient à chaque réunion — et une réponse qui dépend du dernier fichier à jour.</p></article>
+      <article class="pain rv"><span class="num">03</span><h3>L'AG à reconstruire</h3><p>Comptes de l'exercice, budget, convocations, procès-verbal : tout se refait une fois par an, de mémoire.</p></article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FONCTIONNALITÉS ================= -->
+<section id="fonctionnalites" class="feat-sec">
+  <div class="wrap">
+    <div class="sec-h rv">
+      <span class="eyebrow">Fonctionnalités</span>
+      <h2>Tout le métier de syndic, <em>au même endroit.</em></h2>
+      <p>Une seule source de vérité : les mouvements du compte bancaire. Soldes, budget, rapports et AG en découlent, et restent cohérents entre eux.</p>
+    </div>
+    <div class="feats">
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v10.5m0 0-4-4m4 4 4-4"/><path d="M4 14.5v3.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.5"/></svg></div>
+        <h3>Relevés importés d'un geste</h3>
+        <p>Déposez le PDF ou le CSV de la banque, ou collez la liste des transactions. Chaque ligne est classée selon vos règles, les doublons sont écartés, et le relevé est rapproché au centime de son solde.</p>
+      </article>
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3.1 3.1 0 0 1 0 5.6M17.6 14a5.2 5.2 0 0 1 3 5.5"/></svg></div>
+        <h3>Qui paie quoi, en clair</h3>
+        <p>Le solde de chaque copropriétaire selon ses quotités, à jour à chaque relevé. Un retard ? La relance est rédigée, prête à partir.</p>
+      </article>
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6"/><path d="M5 10v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-4"/><path d="M5 14v4c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-4"/></svg></div>
+        <h3>Fonds de réserve et budget</h3>
+        <p>Suivi du fonds de réserve, budget prévisionnel et clés de répartition par poste : chacun sait ce qu'il paie, et pourquoi.</p>
+      </article>
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m9 15 2 2 4-4"/></svg></div>
+        <h3>L'assemblée générale, pas à pas</h3>
+        <p>Ordre du jour, convocations, présences et votes, procès-verbal : l'AG se prépare étape par étape. Signature en ligne du PV <span class="soon">bientôt</span></p>
+      </article>
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 17.5v-3M12 17.5v-6M15 17.5v-2"/></svg></div>
+        <h3>Rapports en un clic</h3>
+        <p>Rapport d'AG complet, compte de résultats, situation des comptes et annexes, en PDF, sur la période de votre choix.</p>
+      </article>
+      <article class="feat rv">
+        <div class="fi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1.2"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg></div>
+        <h3>La mémoire de l'immeuble</h3>
+        <p>Chronologie des décisions et des travaux, registre des contrats, pense-bête. Le jour où vous passez la main, tout est là.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COMMENT ================= -->
+<section id="comment">
+  <div class="wrap">
+    <div class="sec-h c rv">
+      <span class="eyebrow">Comment ça marche</span>
+      <h2>Trois étapes, <em>puis plus rien à recopier.</em></h2>
+    </div>
+    <div class="steps">
+      <div class="step rv"><div class="b">1</div><h3>On installe votre immeuble</h3><p>Lots, quotités, comptes, fournisseurs : tout est configuré avec vous, en une séance.</p></div>
+      <div class="step rv"><div class="b">2</div><h3>Vous déposez le relevé</h3><p>Une fois par mois. LazySyndic classe chaque mouvement ; vous vérifiez, puis vous validez.</p></div>
+      <div class="step rv"><div class="b">3</div><h3>L'AG est prête</h3><p>Comptes, budget, rapports et convocations sortent de ce que vous avez déjà validé.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SÉCURITÉ ================= -->
+<section id="securite" style="padding-top:0">
+  <div class="wrap">
+    <div class="trust">
+      <div class="rv">
+        <span class="eyebrow">Transparence &amp; sécurité</span>
+        <h2>Des comptes que chacun voit. <em>Que seul le syndic touche.</em></h2>
+        <p class="intro">La confiance entre copropriétaires commence par des chiffres partagés. LazySyndic les met sous les yeux de tous, sans jamais toucher à l'argent.</p>
+      </div>
+      <ul class="tlist">
+        <li class="rv"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7S2.5 12 2.5 12z"/></svg></span><span><b>Lecture pour tous, écriture pour le syndic</b>Les droits sont vérifiés par la base de données elle-même, pas seulement par l'écran.</span></li>
+        <li class="rv"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11.5 11 13.5 15.5 9"/><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/></svg></span><span><b>Rien sans votre validation</b>Chaque relevé arrive en brouillon ; il n'entre dans les comptes qu'une fois vérifié.</span></li>
+        <li class="rv"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></svg></span><span><b>L'argent reste à la banque</b>LazySyndic lit les relevés. Il n'a aucun accès au compte et n'effectue aucun paiement.</span></li>
+        <li class="rv"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3.5m0 11.5 4-4m-4 4-4-4"/><path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5"/></svg></span><span><b>Vos données, exportables</b>Export CSV des transactions et sauvegarde complète à tout moment. Les fichiers bancaires déposés ne sont pas conservés.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TERRAIN ================= -->
+<section id="terrain">
+  <div class="wrap field">
+    <div class="rv">
+      <span class="eyebrow">Né sur le terrain</span>
+      <p class="quote" style="margin-top:18px">LazySyndic n'a pas été imaginé dans un bureau : il a été construit <em>avec un vrai syndic bénévole</em>, pour une vraie copropriété bruxelloise.</p>
+      <p class="sub">Chaque relevé et chaque assemblée générale de l'immeuble y passent depuis juin 2026. Ce qui ne servait pas a été retiré ; ce qui manquait a été ajouté.</p>
+    </div>
+    <div class="facts">
+      <div class="fact rv"><b>2026</b><span>En production sur une copropriété réelle depuis juin.</span></div>
+      <div class="fact rv"><b>0,00 €</b><span>d'écart toléré : chaque relevé est rapproché de son solde de clôture.</span></div>
+      <div class="fact rv"><b>0</b><span>tableur à tenir : un navigateur suffit, sur ordinateur comme sur téléphone.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section id="faq" style="padding-top:24px">
+  <div class="wrap">
+    <div class="sec-h c rv"><span class="eyebrow">Questions</span><h2>Les bonnes questions, <em>avant de commencer.</em></h2></div>
+    <div class="faq rv">
+      <details><summary>Dois-je changer de banque ?</summary><p>Non. LazySyndic lit aujourd'hui les relevés Swan / Syndic4you — en PDF, en CSV ou par simple copier-coller. Votre banque est différente ? Envoyez-nous un relevé d'exemple : nous étudions son format.</p></details>
+      <details><summary>Les copropriétaires doivent-ils installer quelque chose ?</summary><p>Non, un navigateur suffit. Chacun reçoit un lien de connexion par e-mail et consulte les comptes en lecture seule, sur ordinateur ou sur téléphone.</p></details>
+      <details><summary>LazySyndic remplace-t-il un syndic professionnel ?</summary><p>Non : c'est l'outil du syndic bénévole. Il automatise la tenue des comptes et la préparation de l'assemblée générale ; les décisions — et la responsabilité du syndic — restent les vôtres.</p></details>
+      <details><summary>Puis-je récupérer mes données ?</summary><p>À tout moment : export CSV des transactions et sauvegarde complète en un clic. Vos données vous appartiennent.</p></details>
+      <details><summary>Combien ça coûte ?</summary><p>Le tarif dépend de la taille de l'immeuble. Écrivez-nous : après une démo sur vos propres chiffres, vous recevez une proposition claire.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ================= APPEL FINAL ================= -->
+<div class="final">
+  <div class="wrap">
+    <div class="box rv">
+      <img class="mk" src="../brand/mark.svg" alt="" width="64" height="64">
+      <h2>Reprenez <em>vos soirées.</em></h2>
+      <p>Montrez-nous un relevé : on vous fait voir votre copropriété dans LazySyndic.</p>
+      <a class="btn btn-primary" href="mailto:info@lagoffinerie.be?subject=D%C3%A9mo%20LazySyndic&amp;body=Bonjour%2C%0A%0AJe%20suis%20syndic%20d%27une%20copropri%C3%A9t%C3%A9%20de%20%E2%80%A6%20lots%20et%20j%27aimerais%20voir%20LazySyndic.%0A">Demander une démo <span class="arr" aria-hidden="true">→</span></a>
+      <span class="mail">ou écrivez à <a href="mailto:info@lagoffinerie.be">info@lagoffinerie.be</a></span>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<footer class="ftr">
+  <div class="wrap">
+    <div class="top">
+      <div><img src="../brand/logo-white.svg" alt="LazySyndic" width="148" height="36"><div>La copropriété en pilote automatique.</div></div>
+      <nav aria-label="Pied de page">
+        <div><b>Produit</b><a href="#fonctionnalites">Fonctionnalités</a><a href="#comment">Comment ça marche</a><a href="#securite">Sécurité</a></div>
+        <div><b>Accès</b><a href="../?connexion">Se connecter</a><a href="mailto:info@lagoffinerie.be?subject=D%C3%A9mo%20LazySyndic">Demander une démo</a><a href="#faq">Questions</a></div>
+      </nav>
+    </div>
+    <div class="bot">
+      <span>© 2026 LazySyndic</span>
+      <a class="credit" href="https://lagoffinerie.be" target="_blank" rel="noopener">Conçu et développé par
+        <svg viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" style="isolation:isolate" aria-hidden="true"><path d="M62 6 L102 80 L22 80 Z" fill="#EDAF2F" style="mix-blend-mode:multiply"/><rect x="12" y="48" width="58" height="58" rx="15" fill="#2823EE" style="mix-blend-mode:multiply"/><circle cx="90" cy="78" r="27" fill="#E2452C" style="mix-blend-mode:multiply"/></svg>
+        <b>La Goffinerie</b></a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// En-tête : un filet apparaît dès qu'on a défilé.
+(function(){
+  var h=document.getElementById('hdr');
+  var f=function(){ h.classList.toggle('scrolled', window.scrollY>8); };
+  f(); window.addEventListener('scroll', f, {passive:true});
+})();
+// Apparition au défilement — tout est visible d'emblée si l'API manque.
+(function(){
+  var els=document.querySelectorAll('.rv');
+  if(!('IntersectionObserver' in window)){ els.forEach(function(e){e.classList.add('in')}); return; }
+  var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } }); },{rootMargin:'0px 0px -8% 0px'});
+  els.forEach(function(e){ io.observe(e); });
+})();
+</script>
+</body>
+</html>
