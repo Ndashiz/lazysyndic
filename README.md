@@ -9,6 +9,9 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
 ## Architecture
 
 - **Front statique** (HTML/CSS/JS, sans build) — `index.html`, `app.js`, `db.js`.
+- **Présentation** : `decouvrir/` — page marketing autonome (aucune dépendance au
+  backend). Un visiteur sans session qui ouvre `index.html` y est renvoyé ; le
+  bouton « Se connecter » revient sur `?connexion`. Identité visuelle : `brand/`.
 - **Backend partagé** : [Supabase](https://supabase.com) (Postgres + Auth + RLS).
   Les données sont partagées entre les copropriétaires ; l'écriture est réservée
   au syndic (rôle `admin`), la lecture aux membres invités.
