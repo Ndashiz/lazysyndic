@@ -8,7 +8,10 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
 
 ## Architecture
 
-- **Front statique** (HTML/CSS/JS, sans build) — `index.html`, `app.js`, `db.js`.
+- **Front statique** (HTML/CSS/JS, sans build) — `index.html`, `app.js`, `db.js`,
+  `ui.js` (barre du haut, notifications, blocs de la page de garde).
+- **Design system** : repris de `Ndashiz/lazysyndic-refined` (maquette Lovable) —
+  jetons, composants et correspondance écran par écran dans [`DESIGN.md`](DESIGN.md).
 - **Présentation** : `decouvrir/` — page marketing autonome (aucune dépendance au
   backend). Un visiteur sans session qui ouvre `index.html` y est renvoyé ; le
   bouton « Se connecter » revient sur `?connexion`. Identité visuelle : `brand/`.

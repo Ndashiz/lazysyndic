@@ -20,329 +20,558 @@
 <title>LazySyndic — La copropriété en pilote automatique</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400..800;1,400..600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400..800&display=swap" rel="stylesheet">
 <style>
+  /* =====================================================================
+     Design system LazySyndic — repris de Ndashiz/lazysyndic-refined
+     (src/styles.css, bloc « calm, precise property management »).
+     Les jetons du design sont la source ; les anciens noms (--paper, --ink,
+     --green, --clay, --coral…) restent en alias parce qu'app.js les utilise
+     dans ses gabarits. Correspondance complète : DESIGN.md.
+     ===================================================================== */
   :root{
-    --paper:#F4F0E6; --card:#FBF8F1; --card-2:#F7F2E7;
-    --ink:#20251F; --ink-soft:#5C6153; --ink-faint:#8A8F80;
-    --green:#2F6B53; --green-deep:#21503D; --green-soft:#E2ECE3;
-    --clay:#C9854A; --clay-soft:#F2E2CE;
-    --coral:#C2564A; --coral-soft:#F4DCD6;
-    --line:#E6DECE; --line-2:#EFE9DB;
-    --shadow:0 1px 2px rgba(33,40,30,.04),0 8px 24px rgba(33,40,30,.06);
-    --radius:18px;
-    /* une seule famille pour tout le site, celle du logo */
+    --radius:8px;
+    --background:oklch(.979 .003 150);
+    --foreground:oklch(.27 .021 165);
+    --card:oklch(1 0 0);
+    --primary:oklch(.43 .09 167);
+    --primary-hover:oklch(.38 .085 167);
+    --primary-foreground:oklch(1 0 0);
+    --secondary:oklch(.951 .017 160);
+    --muted:oklch(.956 .005 150);
+    --muted-foreground:oklch(.55 .012 160);
+    --accent:oklch(.942 .024 160);
+    --border:oklch(.918 .007 160);
+    --input:var(--border);
+    --ring:var(--primary);
+    --sidebar:oklch(1 0 0);
+    --sidebar-muted:oklch(.6 .012 160);
+    --success:oklch(.47 .1 160);       --success-soft:oklch(.946 .031 158);
+    --warning:oklch(.62 .125 72);      --warning-soft:oklch(.964 .035 80);
+    --warning-ink:oklch(.52 .11 70);   /* texte sur warning-soft : le --warning du design n'atteint pas 4,5:1 */
+    --info:oklch(.55 .1 247);          --info-soft:oklch(.95 .023 244);
+    --danger:oklch(.53 .15 30);        --danger-soft:oklch(.955 .025 30);
+    --shade:oklch(.19 .024 166);       /* voile du bandeau photo, fonds des fenêtres */
+    /* graphiques : paire entrées / sorties validée daltonisme (2026-10-09) */
+    --chart-in:#1F7A55; --chart-out:#D9822B; --chart-bal:var(--info);
+    --shadow-sm:0 1px 2px oklch(.27 .021 165 / .06);
+    --shadow-md:0 1px 3px oklch(.27 .021 165 / .06),0 6px 18px oklch(.27 .021 165 / .08);
+    --shadow-lg:0 2px 6px oklch(.27 .021 165 / .08),0 24px 60px oklch(.27 .021 165 / .18);
+    /* une seule famille, celle du logo */
     --display:'Hanken Grotesk',system-ui,sans-serif;
+
+    /* ---- anciens noms → jetons (gabarits d'app.js) ---- */
+    --paper:var(--background); --card-2:var(--muted);
+    --ink:var(--foreground); --ink-soft:var(--muted-foreground); --ink-faint:var(--muted-foreground);
+    --green:var(--primary); --green-deep:var(--primary-hover); --green-soft:var(--secondary);
+    --clay:var(--warning-ink); --clay-soft:var(--warning-soft);
+    --coral:var(--danger); --coral-soft:var(--danger-soft);
+    --line:var(--border); --line-2:var(--border);
+    --shadow:var(--shadow-sm);
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Hanken Grotesk',sans-serif;background:var(--paper);color:var(--ink);
-    -webkit-font-smoothing:antialiased;line-height:1.5;
-    background-image:radial-gradient(circle at 1px 1px, rgba(33,40,30,.025) 1px, transparent 0);
-    background-size:22px 22px;}
-  .app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:var(--display);font-size:14px;background:var(--background);color:var(--foreground);
+    -webkit-font-smoothing:antialiased;line-height:1.5;letter-spacing:0}
+  button,a,input,select,textarea{-webkit-tap-highlight-color:transparent}
+  a{color:inherit}
+  :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+  svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  [hidden]{display:none!important}
 
-  /* ---- Sidebar ---- */
-  .side{background:var(--green-deep);color:#EAF1E8;padding:26px 18px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh;overflow-y:auto;scrollbar-width:thin}
-  .brand{padding:0 6px 6px;display:flex;align-items:center}
-  .brand img{height:34px;width:auto}
-  .brand-sub{font-size:11.5px;color:#9DB6A6;padding:0 8px 22px;letter-spacing:.02em}
-  .nav{display:flex;flex-direction:column;gap:3px}
-  .nav button{all:unset;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;font-size:14.5px;font-weight:500;color:#C8D6CC;cursor:pointer;transition:.18s}
-  .nav button .ic{width:18px;height:18px;flex:none;opacity:.8}
-  .nav button .ic svg{width:18px;height:18px;display:block}
-  .nav button:hover{background:rgba(255,255,255,.06);color:#fff}
-  .nav button.on{background:var(--clay);color:#2A1B0C;font-weight:600}
-  .nav button.on .ic{opacity:1}
-  .side-foot{margin-top:auto;padding:14px 10px 2px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;color:#9DB6A6}
-  .side-foot b{color:#EAF1E8;font-weight:600}
-  .side-foot .credit{display:flex;align-items:center;gap:5px;margin-top:12px;padding:0 2px;font-size:10.5px;white-space:nowrap;color:#7F9A89;text-decoration:none;transition:color .18s}
+  /* ---- Coque : barre latérale + barre du haut ---- */
+  .app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+  .side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;background:var(--sidebar);
+    border-right:1px solid var(--border);padding:28px 20px 18px;overflow-y:auto;scrollbar-width:thin}
+  .brand{display:flex;align-items:center;padding:0 4px}
+  .brand img{height:32px;width:auto;display:block}
+  .workspace{margin:28px 0 24px;padding:12px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:10px}
+  .ws-ic,.tile{width:32px;height:32px;border-radius:5px;background:var(--secondary);color:var(--primary);display:grid;place-items:center;flex:none}
+  .ws-ic svg,.tile svg{width:17px;height:17px}
+  .workspace b{display:block;font-size:12px;font-weight:600;line-height:1.3}
+  .workspace span{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:3px}
+  .nav-label{color:var(--sidebar-muted);font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;margin:0 12px 10px}
+  .nav{display:flex;flex-direction:column}
+  .nav button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:12px;min-height:42px;padding:0 12px;margin:2px 0;
+    border-radius:6px;color:var(--muted-foreground);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,color .15s}
+  .nav button:hover{background:var(--muted);color:var(--foreground)}
+  .nav button.on{background:var(--secondary);color:var(--primary);font-weight:600}
+  .nav button:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
+  .nav .ic{width:18px;height:18px;flex:none}
+  .nav .ic svg{width:18px;height:18px;display:block}
+  .nav .nav-gap{height:20px}
+  .nav-badge{margin-left:auto;font-size:10px;font-weight:600;line-height:1.5;border-radius:4px;padding:0 6px;background:var(--warning-soft);color:var(--warning-ink)}
+  .side-foot{margin-top:auto;padding-top:18px}
+  .side-link{display:flex;align-items:center;gap:10px;min-height:38px;padding:0 12px;border-radius:6px;font-size:13px;color:var(--muted-foreground);text-decoration:none;transition:background .15s,color .15s}
+  .side-link:hover{background:var(--muted);color:var(--foreground)}
+  .side-link .ext{margin-left:auto;width:14px;height:14px}
+  .user{display:flex;gap:10px;align-items:center;margin-top:14px;padding:14px 6px 4px;border-top:1px solid var(--border);border-radius:0 0 6px 6px}
+  .av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--secondary);color:var(--primary);font-size:12px;font-weight:600;flex:none}
+  .u-n{display:block;font-size:12px;font-weight:600;line-height:1.3}
+  .u-r{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:2px}
+  .side-foot .credit{display:flex;align-items:center;gap:5px;margin-top:14px;padding:0 6px;font-size:10.5px;white-space:nowrap;color:var(--muted-foreground);text-decoration:none;transition:color .18s}
   .side-foot .credit svg{width:14px;height:13px;flex:none}
-  .side-foot .credit b{color:#C8D6CC;font-weight:600;transition:color .18s}
-  .side-foot .credit:hover,.side-foot .credit:hover b{color:#fff}
-  .user{display:flex;align-items:center;gap:10px;margin-top:14px;padding:8px 10px;background:rgba(255,255,255,.06);border-radius:12px}
-  .av{width:30px;height:30px;border-radius:50%;background:var(--clay);color:#2A1B0C;display:grid;place-items:center;font-weight:700;font-size:13px}
+  .side-foot .credit b{color:var(--foreground);font-weight:600}
+  .side-foot .credit:hover{color:var(--foreground)}
 
-  /* ---- Main ---- */
-  .main{padding:30px 40px 60px;max-width:1180px}
-  .top{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:26px;flex-wrap:wrap;gap:12px}
-  .top h1{font-family:var(--display);font-size:30px;font-weight:700;letter-spacing:-.03em}
-  .top .crumb{font-size:12.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
-  .updated{font-size:12.5px;color:var(--ink-soft);background:var(--card);border:1px solid var(--line);padding:7px 13px;border-radius:30px;display:flex;align-items:center;gap:7px}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+  .app-main{min-width:0;display:flex;flex-direction:column}
+  .topbar{height:76px;padding:0 38px;display:flex;align-items:center;justify-content:space-between;gap:18px;background:var(--card);border-bottom:1px solid var(--border)}
+  .tb-left{display:flex;align-items:center;gap:12px;min-width:0}
+  .crumbs{display:flex;align-items:center;gap:9px;color:var(--muted-foreground);font-size:12px;min-width:0;white-space:nowrap}
+  .crumbs svg{width:15px;height:15px}
+  .crumbs .chev{width:12px;height:12px}
+  .crumbs b{color:var(--foreground);font-weight:500;overflow:hidden;text-overflow:ellipsis}
+  .tb-actions{display:flex;align-items:center;gap:14px}
+  .tb-ro{font-size:11px}
+  .search{position:relative}
+  .search label{display:flex;align-items:center;gap:8px;height:35px;padding:0 12px;background:var(--background);border:1px solid var(--border);border-radius:6px;color:var(--muted-foreground);cursor:text}
+  .search label:focus-within{border-color:var(--ring)}
+  .search input{all:unset;width:155px;font-size:12px;color:var(--foreground)}
+  .search input::placeholder{color:var(--muted-foreground)}
+  .icon-btn{all:unset;box-sizing:border-box;position:relative;width:36px;height:36px;display:grid;place-items:center;border-radius:6px;cursor:pointer;color:var(--foreground);transition:background .15s}
+  .icon-btn:hover,.icon-btn[aria-expanded="true"]{background:var(--accent)}
+  .icon-btn:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+  .icon-btn .av{width:30px;height:30px;font-size:11px}
+  .icon-btn .bell-dot{position:absolute;top:7px;right:8px;width:8px;height:8px;border-radius:50%;background:var(--warning);box-shadow:0 0 0 2px var(--card)}
+  .tb-sep{height:24px;border-left:1px solid var(--border)}
+  .menu-btn{display:none}
+  .pop{position:absolute;right:0;top:calc(100% + 8px);z-index:60;width:320px;max-width:calc(100vw - 24px);background:var(--card);
+    border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);padding:6px;text-align:left}
+  .pop-h{padding:10px 12px 8px;font-size:13px;font-weight:600}
+  .pop-h span{display:block;font-size:11.5px;font-weight:400;color:var(--muted-foreground);margin-top:2px}
+  .pop-item{all:unset;box-sizing:border-box;display:flex;align-items:flex-start;gap:11px;width:100%;padding:9px 10px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--foreground)}
+  .pop-item:hover,.pop-item.sel,.pop-item:focus-visible{background:var(--muted);outline:none}
+  .pop-item .act-ic{width:28px;height:28px}
+  .pop-item b{display:block;font-weight:500}
+  .pop-item small{display:block;font-size:11px;color:var(--muted-foreground);margin-top:2px}
+  .pop-empty{padding:16px 12px;font-size:12.5px;color:var(--muted-foreground)}
+  .pop-sep{height:1px;background:var(--border);margin:6px 0}
+  .pop .detail{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:6px 12px 10px;font-size:12.5px}
+  .pop .detail dt{font-size:11px;color:var(--muted-foreground);margin-bottom:2px}
 
-  .screen{display:none;animation:fade .5s ease both}
+  /* ---- Page ---- */
+  .main{width:100%;max-width:1450px;margin:0 auto;padding:34px 38px 36px}
+  .top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:27px;flex-wrap:wrap}
+  .top h1{font-size:29px;font-weight:600;line-height:1.3;letter-spacing:-.01em}
+  .top .desc{font-size:13px;color:var(--muted-foreground);margin-top:6px;max-width:640px}
+  .heading-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .updated{display:flex;align-items:center;gap:8px;color:var(--muted-foreground);font-size:12px}
+  .updated svg{width:15px;height:15px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--success);flex:none}
+  #agStatus{border:1px solid var(--border);border-radius:4px;padding:4px 9px;font-size:11px;font-weight:500;gap:6px}
+  #agStatus .dot{box-shadow:none!important;width:5px;height:5px}
+
+  .screen{display:none}
   .screen.on{display:block}
-  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:no-preference){ .screen.on{animation:enter .35s ease-out both} }
+  @keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-  .grid{display:grid;gap:18px}
-  .g2{grid-template-columns:1.3fr 1fr}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow)}
-  .card h2{font-family:var(--display);font-size:17px;font-weight:700;letter-spacing:-.015em;margin-bottom:2px}
-  .card .h-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}
-  .card .sub{font-size:12.5px;color:var(--ink-faint)}
-  .pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:30px;background:var(--green-soft);color:var(--green-deep)}
+  .grid{display:grid;gap:22px}
+  .g2{grid-template-columns:1.65fr 1fr}
+  .row{margin-bottom:22px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
+  .card h2{font-size:15px;font-weight:600;line-height:1.35}
+  .card .h-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .sub{font-size:11.5px;color:var(--muted-foreground)}
+  .card .sub{margin-top:3px}
+  .data-panel{padding:0;overflow:hidden}
+  .data-panel>.h-row{padding:20px 22px 16px;margin:0}
+  .panel-link{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--primary);white-space:nowrap;border-radius:4px}
+  .panel-link:hover{text-decoration:underline;text-underline-offset:3px}
+  .panel-link svg{width:13px;height:13px}
+  .panel-link.icon svg{width:16px;height:16px}
+  .table-wrap{overflow-x:auto}
+  .empty{padding:44px 20px;text-align:center;color:var(--muted-foreground);font-size:13px}
 
-  /* reserve target */
-  .reserve-banner{background:linear-gradient(105deg,var(--green-deep),var(--green));color:#EAF1E8;border:none}
-  .reserve-banner h2{color:#fff}
-  .rb-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
-  .rb-amt{font-family:var(--display);font-size:30px;font-weight:700;letter-spacing:-.03em;color:#fff}
-  .rb-amt span{font-size:15px;color:#A9C6B5;font-weight:400}
-  .rb-goal{text-align:right;font-size:13px;color:#BFD6C7}
-  .track{height:12px;border-radius:30px;background:rgba(255,255,255,.16);overflow:hidden}
-  .fill{height:100%;border-radius:30px;background:var(--clay);width:0;transition:width 1.2s cubic-bezier(.2,.7,.2,1)}
-  .rb-meta{display:flex;justify-content:space-between;font-size:12px;color:#BFD6C7;margin-top:9px}
+  /* statuts (pastille + point) — .badge garde ses glyphes posés par app.js, sans point */
+  .status,.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;padding:3px 8px;border-radius:4px;white-space:nowrap;
+    background:var(--secondary);color:var(--primary)}
+  .status::before,.pill::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+  .status.success{background:var(--success-soft);color:var(--success)}
+  .status.warning{background:var(--warning-soft);color:var(--warning-ink)}
+  .status.info{background:var(--info-soft);color:var(--info)}
+  .status.danger{background:var(--danger-soft);color:var(--danger)}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:500;padding:3px 8px;border-radius:4px;white-space:nowrap}
+  .b-ok{background:var(--success-soft);color:var(--success)}
+  .b-late{background:var(--danger-soft);color:var(--danger)}
 
-  /* KPI row */
+  /* chiffres clés */
   .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-  .kpi{background:var(--card-2);border:1px solid var(--line-2);border-radius:14px;padding:13px 15px}
-  .kpi .l{font-size:12px;color:var(--ink-faint)}
-  .kpi .v{font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+  .stats.kpis{grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:22px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:7px;padding:16px 18px;min-width:0}
+  .card .kpi{background:var(--background)}
+  .stats .kpi{padding:19px 20px}
+  .kpi .l,.stat-l{font-size:11.5px;color:var(--muted-foreground)}
+  .stat-l{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .stat-ic{padding:7px;border-radius:6px;background:var(--secondary);color:var(--primary);display:grid;place-items:center}
+  .stat-ic svg{width:15px;height:15px}
+  .kpi .v{font-size:22px;font-weight:600;line-height:1.25;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .stats .kpi .v{font-size:26px;margin-top:8px}
+  .stat-c{font-size:11px;color:var(--muted-foreground);margin-top:8px}
+  .track{height:6px;border-radius:30px;background:var(--muted);overflow:hidden;margin-top:12px}
+  .fill{height:100%;border-radius:30px;background:var(--primary);width:0;transition:width 1.2s cubic-bezier(.2,.7,.2,1)}
 
-  /* AG widget */
-  .ag{display:flex;gap:14px;align-items:center;padding:13px;border:1px dashed var(--line);border-radius:13px;background:var(--card-2)}
-  .ag .cal{width:50px;height:54px;border-radius:11px;background:var(--coral-soft);color:var(--coral);display:grid;place-items:center;text-align:center;flex:0 0 auto}
-  .ag .cal b{font-family:var(--display);font-size:21px;display:block;line-height:1}
-  .ag .cal span{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
-  .ag .info b{font-size:14.5px}
-  .ag .info div{font-size:12.5px;color:var(--ink-soft)}
-  .countdown{margin-left:auto;text-align:right}
-  .countdown b{font-family:var(--display);font-size:20px;color:var(--clay)}
-  .countdown span{font-size:11px;color:var(--ink-faint);display:block}
+  /* bandeau « votre copropriété » + raccourcis */
+  .residence{position:relative;overflow:hidden;min-height:207px;border-radius:var(--radius);background:var(--primary)}
+  .residence img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 54%}
+  .residence::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,oklch(.19 .024 166 / .82),oklch(.19 .024 166 / .36) 65%,transparent)}
+  .res-c{position:relative;z-index:1;min-height:207px;padding:25px 27px;color:var(--primary-foreground);display:flex;flex-direction:column;align-items:flex-start}
+  .res-tag{font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;opacity:.85}
+  .res-c h2{font-size:25px;font-weight:500;line-height:1.25;margin-top:10px}
+  .res-c p{font-size:12px;opacity:.88;margin-top:6px;display:flex;gap:6px;align-items:center}
+  .res-c p svg{width:13px;height:13px}
+  .res-b{display:flex;align-items:center;flex-wrap:wrap;gap:8px 20px;margin-top:auto;padding-top:18px;font-size:11.5px}
+  .res-b span{display:flex;gap:7px;align-items:center}
+  .res-b svg{width:14px;height:14px}
+  .quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  .qa{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:62px;padding:12px;border:1px solid var(--input);border-radius:6px;
+    background:var(--card);box-shadow:var(--shadow-sm);font-size:12px;font-weight:500;line-height:1.3;cursor:pointer;transition:background .15s}
+  .qa:hover{background:var(--accent)}
+  .qa:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+  .qa svg{width:20px;height:20px;color:var(--primary)}
 
-  /* owners table */
-  table{width:100%;border-collapse:collapse}
-  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
-  td{padding:11px 10px;font-size:13.5px;border-bottom:1px solid var(--line-2)}
-  tr:last-child td{border-bottom:none}
+  /* listes : mouvements, fil d'activité */
+  .tx-cell{display:flex;align-items:center;gap:11px;min-width:0}
+  .file-ic{width:32px;height:36px;border-radius:5px;background:var(--muted);color:var(--muted-foreground);display:grid;place-items:center;flex:none}
+  .file-ic svg{width:17px;height:17px}
+  .file-ic.in{background:var(--success-soft);color:var(--success)}
+  .tx-cell b{display:block;font-weight:500;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+  .tx-cell small{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:2px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+  .activity{padding:0 22px 6px}
+  .act{display:flex;align-items:flex-start;gap:12px;padding:15px 0;border-bottom:1px solid var(--border)}
+  .act:last-child{border-bottom:0}
+  .act-ic{width:30px;height:30px;border-radius:50%;background:var(--secondary);color:var(--primary);display:grid;place-items:center;flex:none}
+  .act-ic svg{width:14px;height:14px}
+  .act h3{font-size:12.5px;font-weight:500;line-height:1.35}
+  .act p{font-size:11px;color:var(--muted-foreground);margin-top:3px}
+  .act time{display:block;font-size:10px;color:var(--muted-foreground);margin-top:6px}
+  .owners-progress{padding:0 22px 18px}
+  .owners-progress .op-row{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin-bottom:10px}
+  .owners-progress .op-row span{color:var(--muted-foreground)}
+  .owners-progress .track{margin-top:0}
+
+  /* prochaine assemblée */
+  .agnext{display:flex;align-items:flex-start;align-content:flex-start;gap:16px;flex-wrap:wrap}
+  .agnext .agn-ic{flex:none;min-width:52px;height:56px;padding:0 12px;border-radius:6px;background:var(--secondary);color:var(--primary);display:grid;place-items:center;text-align:center}
+  .agnext .agn-ic svg{width:22px;height:22px}
+  .agnext .agn-ic small{display:block;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  .agnext .agn-ic strong{display:block;font-size:22px;font-weight:600;line-height:1.05}
+  .agnext.todo .agn-ic{background:var(--warning-soft);color:var(--warning-ink)}
+  .agnext .agn-b{flex:1;min-width:190px}
+  .agnext .agn-l{font-size:15px;font-weight:600;color:var(--foreground)}
+  .agnext .agn-v{font-size:13px;font-weight:500;margin-top:8px}
+  .agnext .agn-s{font-size:11.5px;color:var(--muted-foreground);margin-top:2px}
+
+  /* tableaux */
+  .app table{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
+  .app th{text-align:left;font-size:10.5px;font-weight:500;color:var(--muted-foreground);padding:10px 14px;background:var(--background);white-space:nowrap}
+  .app th:first-child{border-radius:6px 0 0 6px}
+  .app th:last-child{border-radius:0 6px 6px 0}
+  .app td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .app tr:last-child td{border-bottom:none}
+  .data-panel th{border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:0!important;padding:11px 20px}
+  .data-panel td{padding:14px 20px}
   .num{font-variant-numeric:tabular-nums;text-align:right}
-  .badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:30px}
-  .b-ok{background:var(--green-soft);color:var(--green-deep)}
-  .b-late{background:var(--coral-soft);color:var(--coral)}
-  .who{display:flex;align-items:center;gap:9px}
-  .who .a{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff}
+  .who{display:flex;align-items:center;gap:9px;white-space:nowrap}
+  .who .a{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;flex:none}
 
   /* donut */
-  .donut-wrap{display:flex;gap:22px;align-items:center}
-  .donut{width:120px;height:120px;border-radius:50%;flex:0 0 auto;
-    background:conic-gradient(var(--green) 0 56%,var(--clay) 56% 78%,#7BA98E 78% 90%,var(--coral) 90% 100%);
-    position:relative;mask:radial-gradient(circle 34px at 50% 50%,transparent 98%,#000 100%)}
-  .legend{display:flex;flex-direction:column;gap:9px;font-size:13px}
+  .donut-wrap{display:flex;gap:26px;align-items:center}
+  .donut{width:124px;height:124px;border-radius:50%;flex:none;background:var(--muted);
+    mask:radial-gradient(circle 38px at 50% 50%,transparent 98%,#000 100%);-webkit-mask:radial-gradient(circle 38px at 50% 50%,transparent 98%,#000 100%)}
+  .legend{display:flex;flex-direction:column;gap:10px;font-size:12.5px}
   .legend div{display:flex;align-items:center;gap:9px}
-  .sw{width:11px;height:11px;border-radius:3px}
-  .legend .pct{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+  .sw{width:10px;height:10px;border-radius:3px;flex:none}
+  .legend .pct{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted-foreground)}
 
-  /* reminders */
-  .rem{display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--line-2);cursor:pointer}
+  /* pense-bête */
+  .rem{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid var(--border);cursor:pointer}
   .rem:last-child{border-bottom:none}
-  .chk{width:20px;height:20px;border-radius:6px;border:2px solid var(--ink-faint);flex:0 0 auto;display:grid;place-items:center;transition:.15s;color:#fff;font-size:12px}
-  .rem.done .chk{background:var(--green);border-color:var(--green)}
-  .rem.done .tx{text-decoration:line-through;color:var(--ink-faint)}
-  .rem .tx{font-size:13.5px}
-  .rem .due{margin-left:auto;font-size:11.5px;color:var(--ink-faint)}
-  .add-rem{margin-top:12px;font-size:13px;color:var(--green);font-weight:600;cursor:pointer;background:none;border:none;padding:4px}
+  .chk{width:18px;height:18px;border-radius:4px;border:1.5px solid var(--input);box-shadow:var(--shadow-sm);flex:none;display:grid;place-items:center;transition:.15s;color:#fff;font-size:11px}
+  .rem:hover .chk{border-color:var(--primary)}
+  .rem.done .chk{background:var(--primary);border-color:var(--primary)}
+  .rem.done .tx{text-decoration:line-through;color:var(--muted-foreground)}
+  .rem .tx{font-size:13px}
+  .rem .due{margin-left:auto;font-size:11px;color:var(--muted-foreground);white-space:nowrap}
+  .add-rem{all:unset;cursor:pointer;margin-top:12px;font-size:12.5px;font-weight:500;color:var(--primary);display:inline-block}
+  .add-rem:hover{text-decoration:underline;text-underline-offset:3px}
 
-  /* filters / controls */
-  .controls{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
-  .seg{display:flex;background:var(--card-2);border:1px solid var(--line);border-radius:11px;padding:3px}
-  .seg button{all:unset;padding:7px 15px;font-size:13px;font-weight:600;color:var(--ink-soft);border-radius:8px;cursor:pointer}
-  .seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
-  select,.fld{font-family:inherit;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
-  .toggle{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none}
-  .tg{width:38px;height:22px;border-radius:30px;background:var(--line);position:relative;transition:.2s}
-  .tg::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
-  .toggle.on .tg{background:var(--coral)}
-  .toggle.on .tg::after{left:19px}
+  /* commandes */
+  .controls{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+  .seg{display:inline-flex;gap:4px;flex-wrap:wrap}
+  .seg+.seg{padding-left:12px;border-left:1px solid var(--border)}
+  .seg button{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:6px;font-size:12px;font-weight:500;
+    color:var(--muted-foreground);cursor:pointer;transition:background .15s,color .15s;white-space:nowrap}
+  .seg button:hover{background:var(--accent);color:var(--foreground)}
+  .seg button.on{background:var(--secondary);color:var(--primary);font-weight:600}
+  .seg button:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+  select,.fld{font-family:inherit;font-size:13px;min-height:36px;padding:7px 12px;border:1px solid var(--input);border-radius:6px;background:var(--card);color:var(--foreground);
+    box-shadow:var(--shadow-sm);transition:border-color .15s,box-shadow .15s}
+  select,select.fld{cursor:pointer;-webkit-appearance:none;appearance:none;padding-right:32px;
+    background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236C746F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center/14px}
+  select[multiple]{background-image:none;padding-right:12px}
+  td select,td select.fld{padding-right:26px;background-position:right 7px center}
+  /* liens d'action (« modifier », « splitter »…) : app.js ne pose ce style qu'à la première
+     ouverture d'un aperçu d'import ; sans lui ce sont des boutons natifs */
+  .lk{all:unset;cursor:pointer;font-size:12px;font-weight:600;color:var(--primary)}
+  .lk.del{color:var(--danger)}
+  .lk:hover{text-decoration:underline;text-underline-offset:3px}
+  .lk:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:2px}
+  .fld:focus,select:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px oklch(.43 .09 167 / .14)}
+  .fld:disabled,select:disabled{background:var(--muted);color:var(--muted-foreground);cursor:not-allowed}
+  .fld::placeholder{color:var(--muted-foreground)}
+  textarea.fld{line-height:1.55}
+  td select,td .fld{min-height:30px;padding:4px 8px;font-size:12px}
+  .toggle{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted-foreground);cursor:pointer;user-select:none}
+  .tg{width:36px;height:20px;border-radius:30px;background:var(--input);position:relative;transition:.2s;flex:none}
+  .tg::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.2s;box-shadow:0 1px 3px oklch(0 0 0 / .2)}
+  .toggle.on .tg{background:var(--primary)}
+  .toggle.on .tg::after{left:18px}
+  .toggle.on{color:var(--foreground)}
+
+  /* boutons (button.tsx : default / outline / secondary) */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 16px;border-radius:6px;border:1px solid transparent;
+    font-family:inherit;font-size:13px;font-weight:500;line-height:1.25;cursor:pointer;white-space:nowrap;text-decoration:none;transition:background .15s,border-color .15s,color .15s}
+  .btn svg{width:16px;height:16px;flex:none}
+  .btn-primary{background:var(--primary);color:var(--primary-foreground);box-shadow:var(--shadow-sm)}
+  .btn-primary:hover{background:var(--primary-hover)}
+  .btn-ghost{background:var(--card);border-color:var(--input);color:var(--foreground);box-shadow:var(--shadow-sm)}
+  .btn-ghost:hover{background:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-sm{min-height:32px;padding:6px 12px;font-size:12px}
 
   /* transactions */
-  .cat{font-size:11px;font-weight:600;padding:3px 9px;border-radius:8px;background:var(--green-soft);color:var(--green-deep);white-space:nowrap}
-  .cat.ass{background:#E6E0F0;color:#5B4B86}
-  .cat.acp{background:var(--clay-soft);color:#8A551F}
-  .cat.ent{background:#DCEBEE;color:#36707C}
-  .cat.in{background:#DDEBDD;color:#2F6B53}
+  .cat{display:inline-block;font-size:11px;font-weight:500;padding:3px 8px;border-radius:4px;background:var(--secondary);color:var(--primary);white-space:nowrap}
+  .cat.ass{background:var(--info-soft);color:var(--info)}
+  .cat.acp{background:var(--warning-soft);color:var(--warning-ink)}
+  .cat.ent{background:var(--muted);color:var(--foreground)}
+  .cat.in{background:var(--success-soft);color:var(--success)}
   .tx-row td{transition:background .2s}
-  .tx-row.flag td{background:var(--clay-soft)}
-  .tx-row.flag td:first-child{box-shadow:inset 3px 0 0 var(--clay)}
-  .flagbtn{all:unset;cursor:pointer;font-size:15px;opacity:.3;transition:.15s}
+  .tx-row.flag td{background:var(--warning-soft)}
+  .tx-row.flag td:first-child{box-shadow:inset 3px 0 0 var(--warning)}
+  .flagbtn{all:unset;cursor:pointer;font-size:14px;opacity:.3;transition:.15s}
   .flagbtn:hover{opacity:.7}
   .tx-row.flag .flagbtn{opacity:1}
-  .neg{color:var(--coral);font-weight:600}
-  .pos{color:var(--green);font-weight:600}
-  .cmt{font-size:12px;color:var(--clay);font-style:italic;margin-top:3px;display:flex;align-items:center;gap:5px}
-  .cmt-add{font-size:11.5px;color:var(--ink-faint);cursor:pointer;margin-top:3px}
+  .neg{color:var(--foreground);font-weight:600}
+  .pos{color:var(--success);font-weight:600}
+  .cmt{font-size:12px;color:var(--warning-ink);margin-top:3px;display:flex;align-items:center;gap:5px}
+  .cmt-add{font-size:11.5px;color:var(--muted-foreground);cursor:pointer;margin-top:3px}
 
   /* import */
-  .drop{border:2px dashed var(--line);border-radius:var(--radius);background:var(--card-2);padding:46px;text-align:center;transition:.2s;cursor:pointer}
-  .drop:hover,.drop.hot{border-color:var(--green);background:var(--green-soft)}
-  .drop .big{font-size:34px;margin-bottom:8px}
-  .drop b{font-family:var(--display);font-size:18px}
-  .drop p{font-size:13px;color:var(--ink-soft);margin-top:4px}
-  .alert{display:flex;gap:11px;align-items:center;background:var(--coral-soft);border:1px solid #E8BDB4;color:#8C342A;padding:12px 16px;border-radius:13px;font-size:13.5px;margin:18px 0}
-  .alert .ic{font-size:18px}
-  .dupe td{opacity:.45;font-style:italic}
-  .dupe .cat{background:var(--line-2);color:var(--ink-faint)}
-  .btn{font-family:inherit;font-weight:600;font-size:14px;padding:11px 22px;border-radius:11px;border:none;cursor:pointer;transition:.18s}
-  .btn-primary{background:var(--green);color:#fff}
-  .btn-primary:hover{background:var(--green-deep)}
-  .btn-ghost{background:var(--card);border:1px solid var(--line);color:var(--ink)}
-  .save-bar{display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding:16px 20px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius)}
-  .save-bar .n{font-size:13.5px;color:var(--ink-soft)}
-  .save-bar .n b{color:var(--ink)}
+  .drop{border:2px dashed var(--border);border-radius:var(--radius);background:var(--card);padding:48px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s}
+  .drop:hover,.drop.hot{border-color:var(--primary);background:var(--secondary)}
+  .drop .drop-ic{margin:0 auto 18px;width:48px;height:48px;border-radius:8px;background:var(--secondary);color:var(--primary);display:grid;place-items:center}
+  .drop .drop-ic svg{width:24px;height:24px}
+  .drop b{display:block;font-size:17px;font-weight:600}
+  .drop p{font-size:12px;color:var(--muted-foreground);margin:8px auto 0;max-width:600px}
+  .drop .btn{margin-top:20px;pointer-events:none}
+  .drop.compact{display:flex;align-items:center;gap:14px;text-align:left;padding:16px 18px}
+  .drop.compact .drop-ic{margin:0;width:40px;height:40px;flex:none}
+  .drop.compact .drop-ic svg{width:20px;height:20px}
+  .drop.compact b{font-size:14px}
+  .drop.compact p{margin:3px 0 0}
+  .alert{display:flex;gap:10px;align-items:center;background:var(--danger-soft);border:1px solid oklch(.88 .05 30);color:var(--danger);padding:12px 14px;border-radius:6px;font-size:13px;margin:16px 0}
+  .alert .ic{font-size:16px}
+  .dupe td{opacity:.45}
+  .dupe .cat{background:var(--muted);color:var(--muted-foreground)}
+  .save-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding:14px 18px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
+  .save-bar .n{font-size:13px;color:var(--muted-foreground)}
+  .save-bar .n b{color:var(--foreground)}
+  details>summary{list-style:none}
+  details>summary::-webkit-details-marker{display:none}
+  .summary-btn{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--primary);padding:6px 2px}
+  .summary-btn svg{width:16px;height:16px}
 
-  .hist{display:flex;align-items:center;gap:14px;padding:13px 4px;border-bottom:1px solid var(--line-2);font-size:13.5px}
+  .hist{display:flex;align-items:center;gap:14px;padding:13px 2px;border-bottom:1px solid var(--border);font-size:13px}
   .hist:last-child{border-bottom:none}
-  .hist .v{font-family:var(--display);font-weight:600;width:46px}
-  .hist .meta{color:var(--ink-soft);font-size:12.5px}
-  .hist .rb{margin-left:auto;font-size:12.5px;color:var(--green);font-weight:600;background:var(--green-soft);border:none;padding:6px 13px;border-radius:9px;cursor:pointer}
-  .hist.cur .v{color:var(--green)}
-  .hist.cur .now{margin-left:auto;font-size:11px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.05em}
+  .hist .v{font-weight:600;width:42px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .hist .meta{color:var(--muted-foreground);font-size:11.5px}
+  .hist .rb,.rb{margin-left:auto;font-family:inherit;font-size:12px;font-weight:500;color:var(--primary);background:var(--secondary);border:none;padding:6px 12px;border-radius:6px;cursor:pointer}
+  .rb:hover{background:var(--accent)}
+  .hist.cur .v{color:var(--primary)}
+  .hist.cur .now{margin-left:auto;font-size:10.5px;font-weight:500;color:var(--success);background:var(--success-soft);padding:3px 8px;border-radius:4px}
 
-  .note{font-size:12px;color:var(--ink-faint);margin-top:18px;text-align:center;font-style:italic}
-  .mini-h{font-family:var(--display);font-size:12px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.08em;margin:26px 0 10px}
-  /* ---- Prochaine AG (page de garde) ---- */
-  .agnext{display:flex;align-items:center;gap:18px;padding:16px 20px;flex-wrap:wrap}
-  .agnext .agn-ic{flex:none;width:46px;height:46px;border-radius:13px;background:var(--green-soft);color:var(--green-deep);display:grid;place-items:center}
-  .agnext .agn-ic svg{width:22px;height:22px}
-  .agnext.todo .agn-ic{background:var(--clay-soft);color:#8A551F}
-  .agnext .agn-b{flex:1;min-width:200px}
-  .agnext .agn-l{font-size:12px;color:var(--ink-faint);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-  .agnext .agn-v{font-family:var(--display);font-size:20px;font-weight:700;letter-spacing:-.02em;margin-top:1px}
-  .agnext .agn-s{font-size:13px;color:var(--ink-soft);margin-top:1px}
-  .agnext .btn{padding:10px 16px;font-size:13.5px}
+  .note{font-size:12px;color:var(--muted-foreground);margin-top:14px;text-align:center}
+  .mini-h{font-size:15px;font-weight:600;color:var(--foreground);margin:30px 0 12px}
 
-  /* ---- Mobile : barre + tiroir de navigation ---- */
-  #mobileBar{display:none;position:fixed;top:0;left:0;right:0;height:52px;z-index:80;align-items:center;gap:10px;padding:0 12px;background:var(--green-deep);color:#EAF1E8;box-shadow:0 2px 10px rgba(0,0,0,.15)}
-  #mobileBar .burger{font-size:22px;background:none;border:none;color:#EAF1E8;cursor:pointer;padding:4px 8px;line-height:1}
-  #mobileBar .mbrand{display:flex;align-items:center}
-  #mobileBar .mbrand img{height:27px;width:auto}
-  #mobileBar .mout{margin-left:auto;background:rgba(255,255,255,.12);border:none;color:#EAF1E8;font-size:13px;font-weight:600;border-radius:20px;padding:6px 13px;cursor:pointer}
-  #navBackdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90}
+  .page-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:32px;padding-top:18px;border-top:1px solid var(--border);font-size:10.5px;color:var(--muted-foreground)}
+  .page-footer span{display:flex;align-items:center;gap:6px}
+  .page-footer svg{width:12px;height:12px}
+  .page-footer b{color:var(--primary);font-weight:500}
+
+  /* ---- Mobile : la barre du haut porte le menu, la barre latérale devient un tiroir ---- */
+  #mobileBar{display:none!important}
+  #navBackdrop{display:none;position:fixed;inset:0;background:oklch(.19 .024 166 / .45);z-index:90}
+  @media(max-width:1100px){
+    .app{grid-template-columns:216px minmax(0,1fr)}
+    .side{padding-left:14px;padding-right:14px}
+    .main{padding:28px 24px}
+    .topbar{padding:0 24px}
+    .stats.kpis{gap:12px}
+    .stats .kpi{padding:16px 14px}
+    .g2{grid-template-columns:1.4fr 1fr}
+    .top .updated{display:none}
+  }
   @media(max-width:860px){
-    #mobileBar{display:flex}
     #navBackdrop.on{display:block}
-    .app{grid-template-columns:1fr}
-    .side{position:fixed;top:0;left:0;bottom:0;width:240px;height:100dvh;z-index:95;transform:translateX(-105%);transition:transform .25s ease}
-    body.nav-open .side{transform:none;box-shadow:0 0 50px rgba(0,0,0,.4)}
-    .main{padding:66px 16px 56px}
-    .g2{grid-template-columns:1fr}
-    .kpis{grid-template-columns:1fr 1fr}
+    .app{grid-template-columns:minmax(0,1fr)}
+    .side{position:fixed;top:0;left:0;bottom:0;width:260px;height:100dvh;z-index:95;transform:translateX(-105%);transition:transform .25s ease;padding:24px 18px 16px}
+    body.nav-open .side{transform:none;box-shadow:var(--shadow-lg)}
+    .menu-btn{display:grid}
+    .topbar{position:sticky;top:0;z-index:50;height:62px;padding:0 12px 0 8px}
+    .main{padding:24px 16px 48px}
+    .g2,.stats.kpis{grid-template-columns:1fr 1fr}
     .top h1{font-size:24px}
     .save-bar{flex-direction:column;align-items:stretch;gap:10px}
-    .save-bar > div:last-child{display:flex;gap:8px;justify-content:flex-end}
+    .save-bar > div:last-child{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
     .donut-wrap{flex-direction:column;align-items:flex-start;gap:14px}
-    #sessionBar{display:none!important}
     #acctInfo .grid{grid-template-columns:1fr!important}
     #statRow{grid-template-columns:1fr!important}
 
-    /* --- anti-débordement horizontal global --- */
-    html,body{overflow-x:hidden;max-width:100%}
-    .main{max-width:100%;overflow-x:hidden}
-    /* toute grille passe en 1 colonne (résumés, BFR, formulaires, KPIs…) */
+    /* --- anti-débordement horizontal global (clip, pas hidden : hidden ferait de body un
+       conteneur de défilement et la barre du haut ne resterait plus collée) --- */
+    html,body{overflow-x:clip;max-width:100%}
+    .main{max-width:100%;overflow-x:clip}
     .main .grid{grid-template-columns:1fr!important}
+    .main .stats.kpis{grid-template-columns:1fr 1fr!important}
     .grid>*{min-width:0}
     .cf-pie-block{min-width:0}
-    /* les rangées flex en ligne s'enroulent au lieu de déborder */
     .main [style*="display:flex"]{flex-wrap:wrap}
-    /* cartes : le contenu large (tableaux) défile DANS la carte, pas la page */
     .card{overflow-x:auto;min-width:0}
-    /* segments : s'enroulent et se compactent */
     .controls{gap:8px}
-    .seg{flex-wrap:wrap}
-    .seg button{padding:7px 11px;font-size:12.5px}
-    /* tableaux : plus compacts ; restent défilables dans leur carte */
-    table th,table td{padding:8px 8px;font-size:12.5px}
+    .app th,.app td{padding:9px 10px;font-size:12px}
+    .data-panel th,.data-panel td{padding:10px 14px}
     #txtable select{font-size:11px;padding:3px 5px}
-    .top{margin-bottom:18px}
-    .btn{padding:10px 16px;font-size:13.5px}
+    .top{margin-bottom:20px}
   }
-  @media(max-width:560px){
+  @media(max-width:600px){
+    .search,.tb-sep{display:none}
+    .tb-actions{gap:6px}
+    .main .stats.kpis{grid-template-columns:1fr 1fr!important;gap:10px}
+    .stats .kpi{padding:14px 13px}
+    .stats .kpi .v{font-size:19px}
+    .stats .stat-ic{display:none}
     .kpis{grid-template-columns:1fr}
-    .top h1{font-size:21px}
-    .main{padding:62px 12px 48px}
-    table th,table td{padding:7px 6px;font-size:12px}
+    .quick-actions{grid-template-columns:1fr 1fr}
+    .top{flex-direction:column;align-items:flex-start;gap:14px}
+    .top h1{font-size:22px}
+    .main{padding:20px 12px 44px}
+    .app th,.app td{padding:8px 8px;font-size:12px}
     .card{padding:16px 14px}
+    .data-panel{padding:0}
+    .data-panel>.h-row{padding:16px 14px 12px}
+    .activity{padding:0 14px 4px}
+    .owners-progress{padding:0 14px 14px}
+    .res-c h2{font-size:21px}
+    .crumbs .crumb-copro,.crumbs .chev{display:none}
   }
 </style>
 
 <div class="app">
-  <!-- SIDEBAR -->
+  <!-- BARRE LATÉRALE -->
   <aside class="side">
-    <div class="brand"><img src="brand/logo-white.svg" alt="LazySyndic" width="140" height="34"></div>
-    <div class="brand-sub">La copropriété en pilote automatique</div>
-    <nav class="nav">
-      <button class="on" data-s="dash"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="8" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.5"/></svg></span> Accueil</button>
-      <button data-s="acc"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 9.5 12 4.5l8.5 5"/><path d="M5.5 10.5v6.5M10 10.5v6.5M14 10.5v6.5M18.5 10.5v6.5"/><path d="M3.5 20h17"/></svg></span> Comptes</button>
-      <button data-s="cpta"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="3.5" width="15" height="17" rx="2"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg></span> Comptabilité</button>
-      <button data-s="imp"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5v11m0 0-4-4m4 4 4-4"/><path d="M4 15v3.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V15"/></svg></span> Import</button>
-      <button data-s="ag"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3.1 3.1 0 0 1 0 5.6M17.6 14a5.2 5.2 0 0 1 3 5.5"/></svg></span> Assemblées</button>
-      <button data-s="timeline"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span> Chronologie</button>
-      <button data-s="ct"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-10z"/><path d="M14 3.5v5h5"/><path d="M8.5 13h7M8.5 16.5h4"/></svg></span> Contrats</button>
-      <button data-s="budget"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5H12z"/><path d="M15 3.9A8.5 8.5 0 0 1 20.1 9H15z"/></svg></span> Budget &amp; copro</button>
-      <button data-s="rules"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span> Règles &amp; alias</button>
+    <a class="brand" href="./" data-go="dash" aria-label="LazySyndic — vue d’ensemble"><img src="brand/logo.svg" alt="LazySyndic" width="132" height="32"></a>
+    <div class="workspace"><span class="ws-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></span><div><b id="sideCopro">Ma copropriété</b><span id="sideMeta">— propriétaires</span></div></div>
+    <p class="nav-label">Votre copropriété</p>
+    <nav class="nav" aria-label="Navigation principale">
+      <button class="on" data-s="dash"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="lbl">Vue d’ensemble</span></button>
+      <button data-s="acc"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/></svg></span><span class="lbl">Comptes bancaires</span><span class="nav-badge" id="badgeAcc" hidden></span></button>
+      <button data-s="cpta"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></svg></span><span class="lbl">Comptabilité</span></button>
+      <button data-s="imp"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg></span><span class="lbl">Importer des relevés</span><span class="nav-badge" id="badgeImp" hidden></span></button>
+      <div class="nav-gap" aria-hidden="true"></div>
+      <button data-s="ag"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="lbl">Assemblées générales</span></button>
+      <button data-s="budget"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg></span><span class="lbl">Budget &amp; copropriétaires</span></button>
+      <button data-s="ct"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></span><span class="lbl">Contrats &amp; prestataires</span></button>
+      <button data-s="timeline"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4.5"/></svg></span><span class="lbl">Vie de l’immeuble</span></button>
+      <button data-s="rules"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></span><span class="lbl">Règles de catégorisation</span></button>
     </nav>
     <div class="side-foot">
-      <b id="sideCopro">Ma copropriété</b><br><span id="sideMeta">— propriétaires</span>
-      <div class="user"><div class="av" id="sideAv">·</div><div style="font-size:13px;color:#EAF1E8;font-weight:600"><span id="sideUser">—</span><br><span id="sideRole" style="font-size:11px;color:#9DB6A6;font-weight:400">—</span></div></div>
+      <a class="side-link" href="mailto:info@lagoffinerie.be?subject=LazySyndic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg> Un coup de main ?<svg class="i ext" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></a>
+      <div class="user"><div class="av" id="sideAv">·</div><div><span class="u-n" id="sideUser">—</span><span class="u-r" id="sideRole">—</span></div></div>
       <a class="credit" href="https://lagoffinerie.be" target="_blank" rel="noopener">Site développé par
         <svg viewBox="0 0 120 112" xmlns="http://www.w3.org/2000/svg" style="isolation:isolate" aria-hidden="true"><path d="M62 6 L102 80 L22 80 Z" fill="#EDAF2F" style="mix-blend-mode:multiply"/><rect x="12" y="48" width="58" height="58" rx="15" fill="#2823EE" style="mix-blend-mode:multiply"/><circle cx="90" cy="78" r="27" fill="#E2452C" style="mix-blend-mode:multiply"/></svg>
         <b>La Goffinerie</b></a>
     </div>
   </aside>
 
+  <div class="app-main">
+  <!-- BARRE DU HAUT : fil d'Ariane, recherche, notifications, profil (pilotée par ui.js) -->
+  <header class="topbar">
+    <div class="tb-left">
+      <button class="icon-btn menu-btn" id="tbMenu" type="button" aria-label="Ouvrir le menu" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+      <div class="crumbs"><span class="crumb-copro" style="display:flex;align-items:center;gap:9px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg><span id="tbCopro">Ma copropriété</span></span><svg class="i chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg><b id="tbPage">Vue d’ensemble</b></div>
+    </div>
+    <div class="tb-actions">
+      <span class="status warning tb-ro" id="tbRo" hidden>Lecture seule</span>
+      <div class="search"><label><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="tbSearch" type="search" placeholder="Rechercher…" aria-label="Rechercher une page" autocomplete="off"></label><div class="pop" id="tbSearchPop" hidden></div></div>
+      <div style="position:relative"><button class="icon-btn" id="tbBell" type="button" aria-label="Notifications" aria-haspopup="true" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="bell-dot" id="tbBellDot" hidden></span></button><div class="pop" id="tbBellPop" hidden></div></div>
+      <span class="tb-sep" aria-hidden="true"></span>
+      <div style="position:relative"><button class="icon-btn" id="tbMe" type="button" aria-label="Mon profil" aria-haspopup="true" aria-expanded="false"><span class="av" id="tbAv">·</span></button><div class="pop" id="tbMePop" hidden></div></div>
+    </div>
+  </header>
+
   <main class="main">
 
     <!-- ============ DASHBOARD ============ -->
     <section class="screen on" id="dash">
       <div class="top">
-        <div><div class="crumb">Page de garde</div><h1 id="greet">Bonjour</h1></div>
-        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedDate" style="margin-left:3px">—</b></div>
+        <div><h1 id="greet">Bonjour</h1><p class="desc">Tout ce qu’il faut savoir sur votre copropriété, aujourd’hui.</p></div>
+        <div class="heading-actions"><span class="updated"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg><span id="updatedDate">—</span></span><button class="btn btn-primary" type="button" data-go="imp"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg> Importer un relevé</button></div>
       </div>
 
-      <div class="grid g2" style="margin-bottom:18px">
-        <!-- reserve target -->
-        <div class="card reserve-banner">
-          <div class="h-row"><h2>Fonds de réserve</h2><span class="pill" style="background:rgba(255,255,255,.18);color:#fff">Objectif global</span></div>
-          <div class="rb-top">
-            <div class="rb-amt"><span id="resAmt">0,00 €</span> <span id="resTarget2">/ 0 €</span></div>
-            <div class="rb-goal">Reste à constituer<br><b id="resRemain" style="color:#fff;font-size:15px">0,00 €</b></div>
+      <!-- votre copropriété + raccourcis -->
+      <div class="grid g2 row">
+        <div class="residence">
+          <img src="img/residence.jpg" alt="" width="1280" height="768" decoding="async">
+          <div class="res-c">
+            <span class="res-tag">Votre copropriété</span>
+            <h2>Un immeuble. Un collectif.</h2>
+            <p><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg><span id="bnCopro">—</span></p>
+            <div class="res-b"><span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg><span id="bnLots">—</span></span><span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span id="bnOwners">—</span></span><span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>Syndic bénévole</span></div>
           </div>
+        </div>
+        <div class="card">
+          <h2>Un peu de temps gagné</h2><div class="sub">Vos actions du quotidien, à portée de main.</div>
+          <div class="quick-actions">
+            <button class="qa" type="button" data-go="imp" data-write><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>Importer un relevé</button>
+            <button class="qa" type="button" data-go="ag"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Préparer l’assemblée</button>
+            <button class="qa" type="button" data-go="acc"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>Sortir un rapport</button>
+            <button class="qa" type="button" data-go="budget"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>Suivre le budget</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- chiffres clés (app.js remplit .kpi .v dans cet ordre) -->
+      <div class="stats kpis">
+        <div class="kpi"><div class="stat-l"><span class="l">Compte de paiement</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/></svg></span></div><div class="v">—</div><div class="stat-c">Solde <span id="soldesAsOf">—</span></div></div>
+        <div class="kpi"><div class="stat-l"><span class="l">Fonds de réserve</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span></div><div class="v">—</div>
           <div class="track"><div class="fill" id="resFill" data-w="0"></div></div>
-          <div class="rb-meta"><span id="resPct">0 % de l'objectif atteint</span><span>Cible fixée en AG</span></div>
-        </div>
-        <!-- kpis -->
-        <div class="card">
-          <div class="h-row"><h2>Soldes</h2><span class="sub" id="soldesAsOf">—</span></div>
-          <div class="kpis">
-            <div class="kpi"><div class="l">Compte de paiement</div><div class="v">895,25 €</div></div>
-            <div class="kpi"><div class="l">Compte de réserve</div><div class="v">496,43 €</div></div>
-            <div class="kpi"><div class="l">À recevoir</div><div class="v" style="color:var(--green)">+154,10 €</div></div>
-            <div class="kpi"><div class="l">À payer</div><div class="v" style="color:var(--coral)">−0,00 €</div></div>
-          </div>
-        </div>
+          <div class="stat-c"><span id="resPct">—</span> · reste <span id="resRemain">—</span></div></div>
+        <div class="kpi"><div class="stat-l"><span class="l">À recevoir</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg></span></div><div class="v">—</div><div class="stat-c">Soldes débiteurs des copropriétaires</div></div>
+        <div class="kpi"><div class="stat-l"><span class="l">À payer</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></span></div><div class="v">—</div><div class="stat-c">Aucune facture fournisseur suivie</div></div>
       </div>
 
-      <!-- prochaine assemblée générale (rendu par renderNextAG) -->
-      <div class="card agnext" id="agNext" style="margin-bottom:18px"></div>
+      <div class="grid g2 row">
+        <section class="card data-panel">
+          <div class="h-row"><div><h2>Derniers mouvements</h2><div class="sub">L’activité récente de vos comptes</div></div><button class="panel-link" type="button" data-go="acc">Tout voir<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button></div>
+          <div class="table-wrap" id="recentTx"></div>
+        </section>
+        <section class="card data-panel">
+          <div class="h-row"><div><h2>Le fil de votre copropriété</h2><div class="sub">Les dernières nouvelles de l’immeuble</div></div><button class="panel-link icon" type="button" data-go="timeline" aria-label="Voir toute la vie de l’immeuble"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg></button></div>
+          <div class="activity" id="activity"></div>
+        </section>
+      </div>
 
-      <div class="grid g2" style="margin-bottom:18px">
-        <!-- owners -->
-        <div class="card">
-          <div class="h-row"><div><h2>Qui paie quoi</h2><div class="sub">Exercice 2025 · par propriétaire</div></div></div>
-          <table>
-            <tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû</th><th class="num">Versé</th><th class="num">Solde</th><th></th></tr>
-            <tr><td><div class="who"><span class="a" style="background:#2F6B53">S</span> Alex Martin</div></td><td class="num">500</td><td class="num">1 002 €</td><td class="num">1 002 €</td><td class="num">0 €</td><td><span class="badge b-ok">À jour</span></td></tr>
-            <tr><td><div class="who"><span class="a" style="background:#5B4B86">P</span> Sam Bernard</div></td><td class="num">251</td><td class="num">503 €</td><td class="num">503 €</td><td class="num">0 €</td><td><span class="badge b-ok">À jour</span></td></tr>
-            <tr><td><div class="who"><span class="a" style="background:#C9854A">A</span> Lou Petit</div></td><td class="num">249</td><td class="num">499 €</td><td class="num">345 €</td><td class="num" style="color:var(--coral)">−154 €</td><td><span class="badge b-late">En retard</span></td></tr>
-          </table>
-        </div>
-        <!-- reminders -->
+      <div class="grid g2 row">
+        <!-- prochaine assemblée générale (rendu par renderNextAG) -->
+        <div class="card agnext" id="agNext"></div>
         <div class="card">
           <div class="h-row"><h2>Pense-bête</h2><span class="sub" id="remCount">—</span></div>
           <div id="rems"></div>
           <div id="remAddRow" style="display:none;gap:8px;margin-top:10px;flex-wrap:wrap">
             <input class="fld" id="remAddInput" placeholder="Nouveau rappel…" style="flex:1;min-width:160px">
             <input class="fld" id="remAddDue" type="date" title="Échéance (optionnel) — choisir une date" style="width:150px">
-            <button class="btn btn-primary" id="remAddSave" style="padding:8px 16px">Ajouter</button>
+            <button class="btn btn-primary" id="remAddSave">Ajouter</button>
           </div>
           <button class="add-rem" id="remAddBtn">+ Ajouter un rappel</button>
           <div id="remHistoryWrap" style="display:none;margin-top:8px">
@@ -353,27 +582,27 @@
         </div>
       </div>
 
-      <!-- transactions / donut -->
-      <div class="card">
-        <div class="h-row"><div><h2>Répartition des dépenses</h2><div class="sub">Exercice 2025 · par catégorie</div></div>
-          <select class="fld"><option>Toutes catégories</option><option>Énergie</option><option>Assurance</option><option>Frais ACP</option></select></div>
-        <div class="donut-wrap">
-          <div class="donut"></div>
-          <div class="legend" style="flex:1">
-            <div><span class="sw" style="background:var(--green)"></span> Énergie (Eau + Électricité) <span class="pct">56 %</span></div>
-            <div><span class="sw" style="background:var(--clay)"></span> Assurance <span class="pct">22 %</span></div>
-            <div><span class="sw" style="background:#7BA98E"></span> Entretien (adoucisseur) <span class="pct">12 %</span></div>
-            <div><span class="sw" style="background:var(--coral)"></span> Frais ACP (banque, logiciel) <span class="pct">10 %</span></div>
+      <div class="grid g2">
+        <section class="card data-panel">
+          <div class="h-row"><div><h2>Qui paie quoi</h2><div class="sub">Exercice en cours · par propriétaire</div></div><button class="panel-link" type="button" data-go="budget">Voir le détail<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button></div>
+          <div class="owners-progress" id="ownersProgress"></div>
+          <div class="table-wrap"><table id="ownersTbl"></table></div>
+        </section>
+        <section class="card">
+          <div class="h-row"><div><h2>Répartition des dépenses</h2><div class="sub">Compte de paiement · par catégorie</div></div></div>
+          <div class="donut-wrap">
+            <div class="donut"></div>
+            <div class="legend" style="flex:1"></div>
           </div>
-        </div>
+        </section>
       </div>
     </section>
 
     <!-- ============ COMPTES ============ -->
     <section class="screen" id="acc">
       <div class="top">
-        <div><div class="crumb">Comptes</div><h1>Transactions</h1></div>
-        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedAcc" style="margin-left:3px">—</b></div>
+        <div><h1>Comptes bancaires</h1><p class="desc">Tous les mouvements de votre copropriété.</p></div>
+        <div class="heading-actions"><span class="updated"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg><span id="updatedAcc">—</span></span><button class="btn btn-ghost" type="button" data-click="exportCsv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Exporter</button></div>
       </div>
 
       <div class="controls">
@@ -396,40 +625,41 @@
             <input class="fld" id="repFrom" value="01/01/2025" style="width:120px"><span style="color:var(--ink-faint)">→</span><input class="fld" id="repTo" value="31/12/2025" style="width:120px">
           </div>
         </div>
-        <button class="btn btn-ghost" id="repPay">⬇ Rapport compte de paiement</button>
-        <button class="btn btn-ghost" id="repRes">⬇ Rapport compte de résultats</button>
-        <button class="btn btn-primary" id="repAG">📄 Rapport d'AG complet</button>
+        <button class="btn btn-ghost" id="repPay"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Rapport compte de paiement</button>
+        <button class="btn btn-ghost" id="repRes"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Rapport compte de résultats</button>
+        <button class="btn btn-primary" id="repAG"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg> Rapport d'AG complet</button>
       </div>
 
       <!-- per-account import dropzone -->
-      <div class="drop" id="acctDrop" style="padding:22px;margin-bottom:16px">
-        <div style="font-size:24px">↧</div>
-        <b style="font-size:15px">Mettre à jour <span id="dropAcct">le compte de paiement</span></b>
-        <p>Glissez-déposez le relevé (CSV ou PDF) de ce compte — doublons, trous et catégories sont vérifiés avant sauvegarde</p>
+      <div class="drop compact" id="acctDrop" style="margin-bottom:16px">
+        <span class="drop-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+        <div><b>Mettre à jour <span id="dropAcct">le compte de paiement</span></b>
+        <p>Glissez-déposez le relevé (CSV ou PDF) de ce compte, ou cliquez pour le choisir — doublons, trous et catégories sont vérifiés avant sauvegarde.</p></div>
       </div>
 
       <!-- reserve target shows only on reserve tab -->
-      <div class="card reserve-banner" id="resTarget" style="display:none;margin-bottom:16px">
-        <div class="h-row"><h2>Objectif du fonds de réserve</h2><span class="pill" style="background:rgba(255,255,255,.18);color:#fff">Global</span></div>
-        <div class="rb-top"><div class="rb-amt">496,43 € <span>/ 2 000 €</span></div></div>
-        <div class="track"><div class="fill" data-w="25" style="width:25%"></div></div>
-        <div class="rb-meta"><span>25 % atteint</span><span>Reste 1 503,57 €</span></div>
+      <!-- objectif du fonds de réserve (onglet réserve) — rempli par ui.js depuis le solde réel -->
+      <div class="card" id="resTarget" style="display:none;margin-bottom:16px">
+        <div class="h-row"><div><h2>Objectif du fonds de réserve</h2><div class="sub">Cible fixée en assemblée générale</div></div><span class="status success" id="rtPct">—</span></div>
+        <div class="kpi" style="border:0;padding:0;background:none"><div class="v"><span id="rtAmt">—</span> <span class="sub" id="rtTarget"></span></div></div>
+        <div class="track"><div class="fill" id="rtFill" data-w="0"></div></div>
+        <div class="stat-c" id="rtRemain">—</div>
       </div>
 
       <!-- key stats — dérivées des vraies transactions -->
       <div class="grid" id="statRow" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Dépense moyenne / mois</div><div id="statDep" style="font-family:var(--display);font-size:24px;font-weight:600;color:var(--coral);margin-top:3px">—</div><div class="sub" id="statDepSub" style="margin-top:2px"></div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Entrée moyenne / mois</div><div id="statEnt" style="font-family:var(--display);font-size:24px;font-weight:600;color:var(--green);margin-top:3px">—</div><div class="sub" id="statEntSub" style="margin-top:2px"></div></div>
-        <div class="card" style="padding:16px 18px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Creux de trésorerie <span title="Point le plus bas du solde sur la période : le matelas minimal à garder d'avance." style="cursor:help;color:var(--clay)">ⓘ</span></div><div id="statTrough" style="font-family:var(--display);font-size:24px;font-weight:600;color:var(--clay);margin-top:3px">—</div><div class="sub" id="statTroughSub" style="margin-top:2px"></div></div>
+        <div class="kpi"><div class="stat-l"><span>Dépense moyenne / mois</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 17-8.5-8.5-5 5L2 7"/><path d="M16 17h6v-6"/></svg></span></div><div class="v" id="statDep">—</div><div class="stat-c" id="statDepSub"></div></div>
+        <div class="kpi"><div class="stat-l"><span>Entrée moyenne / mois</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg></span></div><div class="v" id="statEnt" style="color:var(--success)">—</div><div class="stat-c" id="statEntSub"></div></div>
+        <div class="kpi"><div class="stat-l"><span title="Point le plus bas du solde sur la période : le matelas minimal à garder d'avance." style="cursor:help">Creux de trésorerie ⓘ</span><span class="stat-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span></div><div class="v" id="statTrough">—</div><div class="stat-c" id="statTroughSub"></div></div>
       </div>
 
       <!-- monthly evolution chart -->
       <div class="card" style="margin-bottom:16px">
         <div class="h-row"><div><h2>Évolution mensuelle</h2><div class="sub" id="chartSub">Compte de paiement · entrées, sorties &amp; solde</div></div>
           <div style="display:flex;gap:14px;font-size:12px;color:var(--ink-soft)">
-            <span><span class="sw" style="display:inline-block;background:var(--green)"></span> Entrées</span>
-            <span><span class="sw" style="display:inline-block;background:var(--coral)"></span> Sorties</span>
-            <span><span class="sw" style="display:inline-block;background:var(--clay);border-radius:50%"></span> Solde</span>
+            <span><span class="sw" style="display:inline-block;background:var(--chart-in)"></span> Entrées</span>
+            <span><span class="sw" style="display:inline-block;background:var(--chart-out)"></span> Sorties</span>
+            <span><span class="sw" style="display:inline-block;background:var(--chart-bal);border-radius:50%"></span> Solde</span>
           </div>
         </div>
         <div id="chart"></div>
@@ -443,7 +673,7 @@
       </div>
 
       <div id="txTools" style="display:none;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"></div>
-      <div class="card" style="padding:8px 14px">
+      <div class="card data-panel table-wrap">
         <table id="txtable">
           <tr><th id="txSelHead" style="width:30px"></th><th style="width:30px"></th><th>Date</th><th>Tiers</th><th>Catégorie</th><th class="num">Montant</th><th>Notes (banque)</th></tr>
           <tbody id="txbody"></tbody>
@@ -463,8 +693,7 @@
     <!-- ============ COMPTABILITÉ ============ -->
     <section class="screen" id="cpta">
       <div class="top">
-        <div><div class="crumb">Comptabilité</div><h1>Bilan des flux de trésorerie</h1></div>
-        <div class="updated"><span class="dot"></span> Vue dérivée des transactions</div>
+        <div><h1>Comptabilité</h1><p class="desc">Les flux de trésorerie de votre copropriété, dérivés des transactions.</p></div>
       </div>
 
       <div class="controls" style="gap:14px;flex-wrap:wrap;align-items:center">
@@ -479,7 +708,7 @@
           <button data-a="pay">Paiement</button>
           <button data-a="res">Réserve</button>
         </div>
-        <button class="btn btn-ghost" id="cfExport" style="margin-left:auto">⬇ Exporter (CSV)</button>
+        <button class="btn btn-ghost" id="cfExport" style="margin-left:auto"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Exporter le journal (CSV)</button>
       </div>
 
       <div id="cfSummary" class="grid" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px"></div>
@@ -500,14 +729,14 @@
       <div class="card" style="padding:10px">
         <div id="cfMatrix"></div>
       </div>
-      <div class="note">Lignes = catégories &amp; sous-catégories · colonnes = mois. Faites défiler horizontalement : la 1ʳᵉ colonne et l'en-tête restent gelés. Montants nets — <span style="color:var(--green)">entrées</span> / <span style="color:var(--coral)">sorties</span>.</div>
+      <div class="note">Lignes = catégories &amp; sous-catégories · colonnes = mois. Faites défiler horizontalement : la 1ʳᵉ colonne et l'en-tête restent gelés. Montants nets : entrées en <span style="color:var(--success)">vert</span>, sorties précédées d’un −.</div>
     </section>
 
     <!-- ============ IMPORT ============ -->
     <section class="screen" id="imp">
       <div class="top">
-        <div><div class="crumb">Import</div><h1>Importer un relevé</h1></div>
-        <div class="updated"><span class="dot"></span> Dernière mise à jour : <b id="updatedImp" style="margin-left:3px">—</b></div>
+        <div><h1>Importer des relevés</h1><p class="desc">Préparez vos mouvements bancaires avant leur validation.</p></div>
+        <div class="heading-actions"><span class="updated"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg><span id="updatedImp">—</span></span></div>
       </div>
 
       <!-- Relevés importés mais pas encore entrés dans les comptes -->
@@ -515,7 +744,7 @@
 
       <!-- Coller la liste copiée depuis l'app Swan → aperçu d'import (comme un fichier) -->
       <details id="pasteTool" style="margin-bottom:16px">
-        <summary style="cursor:pointer;font-weight:600;color:var(--green-deep);padding:6px 2px">📋 Coller la liste copiée depuis l'app Swan</summary>
+        <summary class="summary-btn"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> Coller la liste copiée depuis l’app Swan</summary>
         <div class="card" style="margin-top:8px">
           <div class="sub" style="margin-bottom:8px">Copie la liste des transactions depuis l'interface Swan (Description · Méthode · Date · Montant) et colle-la ici — ou fais ⌘V n'importe où sur cet écran. Les transactions passent directement à l'aperçu ; les doublons d'un relevé déjà importé sont écartés.</div>
           <textarea class="fld" id="pasteArea" style="width:100%;min-height:120px;resize:vertical;font-family:monospace;font-size:12px" placeholder="Colle ici tout le texte des transactions…"></textarea>
@@ -527,9 +756,10 @@
       </details>
 
       <div class="drop" id="drop">
-        <div class="big">↧</div>
-        <b>Glissez-déposez votre relevé (CSV ou PDF) ici</b>
-        <p>Relevé Swan / Syndic4you (CSV ou PDF, français ou anglais) · ou cliquez pour parcourir · ou collez (⌘V) la liste copiée depuis l’app Swan — seules les données interprétées sont sauvegardées, pas le fichier</p>
+        <span class="drop-ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+        <b>Déposez votre relevé bancaire</b>
+        <p>Relevé Swan / Syndic4you, en CSV ou PDF, en français ou en anglais — ou collez (⌘V) la liste copiée depuis l’app Swan. Seules les données interprétées sont sauvegardées, pas le fichier.</p>
+        <span class="btn btn-primary"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Choisir un fichier</span>
       </div>
 
       <div id="afterDrop" style="display:none">
@@ -564,7 +794,7 @@
     <!-- ============ ASSEMBLÉES ============ -->
     <section class="screen" id="ag">
       <div class="top">
-        <div><div class="crumb">Assemblées générales</div><h1 id="agTitle">AG ordinaire 2026</h1></div>
+        <div><h1 id="agTitle">Assemblées générales</h1><p class="desc">Les décisions qui font avancer votre copropriété.</p></div>
         <div class="updated" id="agStatus" style="background:var(--coral-soft);border-color:#E8BDB4;color:#8C342A"><span class="dot" style="background:var(--coral);box-shadow:0 0 0 3px var(--coral-soft)"></span> En cours de préparation</div>
       </div>
 
@@ -665,17 +895,16 @@
     <!-- ============ CHRONOLOGIE ============ -->
     <section class="screen" id="timeline">
       <div class="top">
-        <div><div class="crumb">Journal de bord</div><h1>Chronologie de l'exercice</h1></div>
+        <div><h1>Vie de l’immeuble</h1><p class="desc">Le fil des interventions et des événements : vos notes, plus le journal automatique des imports de relevés et des tâches du pense-bête. Repris dans le rapport d’AG.</p></div>
       </div>
-      <p class="sub" style="margin:-12px 0 18px;max-width:640px">Tout ce qui s'est passé sur l'année : vos notes, plus le journal automatique des imports de relevés et des tâches du pense-bête. Repris dans le rapport d'AG.</p>
       <div id="tlContent"></div>
     </section>
 
     <!-- ============ CONTRATS ============ -->
     <section class="screen" id="ct">
       <div class="top">
-        <div><div class="crumb">Contrats</div><h1>Registre des contrats</h1></div>
-        <button class="btn btn-ghost" id="genCtReport">⬇ Générer un rapport</button>
+        <div><h1>Contrats &amp; prestataires</h1><p class="desc">Vos partenaires au service de l’immeuble.</p></div>
+        <div class="heading-actions"><button class="btn btn-ghost" id="genCtReport"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Générer un rapport</button></div>
       </div>
 
       <!-- add form -->
@@ -690,22 +919,22 @@
         <div style="display:flex;gap:12px;margin-top:12px;align-items:end">
           <div style="flex:0 0 240px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Fournisseur (société / contact)</div><input class="fld" id="ctSupplier" style="width:100%;margin-top:4px" placeholder="Ex. Electrabel — 078 35 33 33"></div>
           <div style="flex:1"><div class="l" style="font-size:12px;color:var(--ink-faint)">Commentaire</div><input class="fld" id="ctNote" style="width:100%;margin-top:4px" placeholder="Ex. électricité communs"></div>
-          <button class="btn btn-primary" id="ctAdd">+ Ajouter</button>
+          <button class="btn btn-primary" id="ctAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter</button>
         </div>
       </div>
 
       <div class="mini-h">Contrats actifs (<span id="ctActiveN">0</span>)</div>
-      <div class="card" style="padding:8px 14px"><table><tbody id="ctActiveBody"></tbody></table></div>
+      <div class="card data-panel table-wrap"><table><tbody id="ctActiveBody"></tbody></table></div>
 
       <div class="mini-h" style="margin-top:22px">Contrats clôturés (<span id="ctClosedN">0</span>)</div>
-      <div class="card" style="padding:8px 14px"><table><tbody id="ctClosedBody"></tbody></table></div>
+      <div class="card data-panel table-wrap"><table><tbody id="ctClosedBody"></tbody></table></div>
     </section>
 
     <!-- ============ BUDGET & COPRO ============ -->
     <section class="screen" id="budget">
       <div class="top">
-        <div><div class="crumb">Budget &amp; copropriété</div><h1>Charges &amp; répartition</h1></div>
-        <button class="btn btn-ghost" id="genBudget">⬇ Générer le budget (Annexe 4)</button>
+        <div><h1>Budget &amp; copropriétaires</h1><p class="desc">Un budget partagé, une répartition transparente.</p></div>
+        <div class="heading-actions"><button class="btn btn-ghost" id="genBudget"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Générer le budget (Annexe 4)</button></div>
       </div>
 
       <div class="controls">
@@ -717,15 +946,15 @@
       </div>
 
       <div class="budpanel" data-bud="own">
-        <div class="card" style="margin-bottom:16px;padding:8px 14px">
+        <div class="card data-panel table-wrap" style="margin-bottom:16px">
           <table id="budLotsTable"></table>
         </div>
         <div class="mini-h">Propriétaires (unité de répartition)</div>
-        <div class="card" style="padding:8px 14px"><table id="budOwnersRefTable"></table></div>
+        <div class="card data-panel table-wrap"><table id="budOwnersRefTable"></table></div>
       </div>
 
       <div class="budpanel" data-bud="keys" style="display:none">
-        <div class="card" style="padding:8px 14px">
+        <div class="card data-panel table-wrap">
           <table id="budKeysTable"></table>
         </div>
         <div class="note" id="budKeysNote">La clé Individuelle compte chaque propriétaire une seule fois.</div>
@@ -733,13 +962,13 @@
 
       <div class="budpanel" data-bud="bud" style="display:none">
         <div class="mini-h">Provisions attendues par copropriétaire (le « dû »)</div>
-        <div class="card" style="margin-bottom:16px;padding:8px 14px"><table id="provTable"></table></div>
-        <div class="card" style="margin-bottom:16px;padding:8px 14px">
-          <div class="h-row" style="padding:10px 4px 0"><h2 style="font-size:15px">Postes — réalité 2025 → budget 2026</h2><span class="sub">marge +4 % · changez la clé pour recalculer</span></div>
+        <div class="card data-panel table-wrap" style="margin-bottom:16px"><table id="provTable"></table></div>
+        <div class="card data-panel table-wrap" style="margin-bottom:16px">
+          <div class="h-row"><h2>Postes — réalité 2025 → budget 2026</h2><span class="sub">marge +4 % · changez la clé pour recalculer</span></div>
           <table id="budTable"><tr><th>Poste</th><th>Clé</th><th class="num">Réalité 25</th><th class="num">Budget 26</th></tr></table>
         </div>
         <div class="mini-h">Charge annuelle par propriétaire (calculée en direct)</div>
-        <div class="card" style="padding:8px 14px"><table id="budOwners">
+        <div class="card data-panel table-wrap"><table id="budOwners">
           <tr><th>Propriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th><th class="num">Fonds de réserve</th></tr>
         </table></div>
       </div>
@@ -747,29 +976,36 @@
 
     <!-- ============ RÈGLES & ALIAS ============ -->
     <section class="screen" id="rules">
-      <div class="top"><div><div class="crumb">Paramètres</div><h1>Règles &amp; alias</h1></div></div>
-      <div class="mini-h">Règles de catégorisation — Tiers → Catégorie</div>
-      <div class="card" style="padding:8px 14px;margin-bottom:6px"><table id="ruleTable">
+      <div class="top">
+        <div><h1>Règles de catégorisation</h1><p class="desc">Organisez automatiquement vos mouvements bancaires : règles, alias de tiers et sauvegardes.</p></div>
+      </div>
+      <div class="mini-h">Règles — tiers → catégorie</div>
+      <div class="card data-panel table-wrap" style="margin-bottom:10px"><table id="ruleTable">
         <tr><th>Tiers (libellé)</th><th>Catégorie</th><th>Sous-catégorie</th><th></th></tr>
       </table></div>
-      <button class="btn btn-ghost" id="addRule" style="margin-bottom:24px">+ Ajouter une règle</button>
+      <button class="btn btn-ghost" id="addRule" style="margin-bottom:8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter une règle</button>
       <div class="mini-h">Alias de tiers — Libellé bancaire → Entité</div>
-      <div class="card" style="padding:8px 14px;margin-bottom:6px"><table id="aliasTable">
+      <div class="card data-panel table-wrap" style="margin-bottom:10px"><table id="aliasTable">
         <tr><th>Libellé tel qu'il apparaît à la banque</th><th>Rattaché à</th><th></th></tr>
       </table></div>
-      <button class="btn btn-ghost" id="addAlias">+ Ajouter un alias</button>
+      <button class="btn btn-ghost" id="addAlias"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un alias</button>
       <div class="note">Ces règles préremplissent automatiquement la catégorie et l'identité lors de chaque import.</div>
 
       <div class="mini-h" style="margin-top:28px">Sauvegarde &amp; restauration</div>
       <div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button class="btn btn-ghost" id="exportBackup">⬇ Sauvegarde complète (.json)</button>
-        <button class="btn btn-ghost" id="exportCsv">⬇ Transactions (.csv)</button>
-        <button class="btn btn-ghost" id="restoreBtn" style="color:var(--coral)">↥ Restaurer une sauvegarde</button>
+        <button class="btn btn-ghost" id="exportBackup"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Sauvegarde complète (.json)</button>
+        <button class="btn btn-ghost" id="exportCsv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Transactions (.csv)</button>
+        <button class="btn btn-ghost" id="restoreBtn" style="color:var(--coral)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg> Restaurer une sauvegarde</button>
         <span class="sub" style="flex:1;min-width:180px">La sauvegarde .json contient tout (comptes, transactions, règles, AG…). La restauration <b>remplace</b> les données actuelles.</span>
       </div>
     </section>
 
+    <footer class="page-footer">
+      <span><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>Un peu moins d’administratif. Un peu plus de sérénité.</span>
+      <span>LazySyndic · <b id="footEnv">—</b></span>
+    </footer>
   </main>
+  </div>
 </div>
 
 <!-- close-contract modal -->
@@ -803,17 +1039,75 @@
   /* stepper */
   .stepper{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;padding:22px 26px}
   .stepper .step{display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;flex:0 0 auto;width:90px}
-  .stepper .circ{width:34px;height:34px;border-radius:50%;background:var(--line);color:var(--ink-faint);display:grid;place-items:center;font-weight:700;font-size:14px;transition:.2s}
-  .stepper .lbl{font-size:12px;text-align:center;color:var(--ink-faint);line-height:1.25;font-weight:500}
-  .stepper .step.on .circ{background:var(--green);color:#fff;box-shadow:0 0 0 4px var(--green-soft)}
-  .stepper .step.on .lbl{color:var(--green-deep);font-weight:700}
-  .stepper .step.done .circ{background:var(--clay);color:#fff}
-  .stepper .step.done .lbl{color:var(--ink-soft)}
-  .stepper .bar{flex:1;height:2px;background:var(--line);margin-top:16px;min-width:18px}
+  .stepper .circ{width:32px;height:32px;border-radius:50%;background:var(--muted);color:var(--muted-foreground);border:1px solid var(--border);display:grid;place-items:center;font-weight:600;font-size:13px;transition:.2s}
+  .stepper .lbl{font-size:11.5px;text-align:center;color:var(--muted-foreground);line-height:1.3;font-weight:500}
+  .stepper .step.on .circ{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 0 0 4px var(--secondary)}
+  .stepper .step.on .lbl{color:var(--primary);font-weight:600}
+  .stepper .step.done .circ{background:var(--secondary);border-color:var(--secondary);color:var(--primary)}
+  .stepper .step.done .lbl{color:var(--foreground)}
+  .stepper .bar{flex:1;height:1px;background:var(--border);margin-top:16px;min-width:18px}
   .pres button{padding:6px 12px !important;font-size:12px !important}
   .pres .p-pre.on{background:var(--green) !important;color:#fff !important}
   .pres .p-rep.on{background:var(--clay) !important;color:#fff !important}
-  .pres .p-exc.on{background:#5B4B86 !important;color:#fff !important}
+  .pres .p-exc.on{background:var(--info) !important;color:#fff !important}
   .pres .p-abs.on{background:var(--coral) !important;color:#fff !important}
   @media(max-width:760px){.stepper{flex-wrap:wrap;gap:10px;justify-content:center}.stepper .bar{display:none}}
+
+  /* ---- Design « refined » : styles qu'app.js injecte dans <head>. Cette feuille vient après dans le
+     document, elle l'emporte à spécificité égale ; !important seulement contre un style en ligne. ---- */
+  #sessionBar{display:none!important}               /* remplacé par le menu profil de la barre du haut */
+  .side-foot .user.clickable{cursor:pointer}
+  .side-foot .user.clickable:hover{background:var(--muted)}
+  #agStatus{border-color:var(--border)!important}
+  #ctActiveBody td,#ctClosedBody td{font-style:normal!important}   /* pas d'italique (charte) */
+  .cmt-mark{color:var(--warning-ink);border-radius:4px}
+  .fdr-warn{border-color:oklch(.88 .05 30);border-radius:6px}
+  .tx-row.req>td{background:var(--danger-soft)}
+  #ctModal,#splitModal{background:oklch(.19 .024 166 / .55)!important}
+  #ctModal>.card,.sp-card{border-radius:var(--radius);padding:24px;box-shadow:var(--shadow-lg)}
+  #reportModal{background:oklch(.19 .024 166 / .62)}
+  .report-toolbar .rt-title{color:#fff}
+  /* chronologie */
+  .tl::before{width:1px;background:var(--border)}
+  .tl-dot{box-shadow:0 0 0 3px var(--background)}
+  .tl-card{border-radius:var(--radius);padding:12px 14px}
+  .tl-date{text-transform:none;letter-spacing:0;font-size:11px}
+  .tl-title{font-weight:500;font-size:13.5px}
+  .tl-desc{font-size:12.5px}
+  .tl-subs{border-top-style:solid}
+  /* comptabilité */
+  .cf-wrap{border-radius:var(--radius)}
+  .app table.cf th{border-radius:0;background:var(--background)}
+  table.cf td.cf-neg,table.cf td.cf-avg-col.cf-neg{color:var(--foreground)}
+  table.cf td.cf-pos,table.cf td.cf-avg-col.cf-pos{color:var(--success)}
+  table.cf td.cf-avg-col,table.cf th.cf-avg-col{font-style:normal}
+  .cf-tip{border-radius:6px;background:var(--foreground)}
+  .cfb-row{border-radius:6px}
+  .cfb-track{background:var(--muted)}
+  /* notification (façon sonner) */
+  .ls-toast{background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-md);font-weight:500;font-size:13px;padding:11px 16px 11px 12px}
+  .ls-toast .ic{background:var(--success-soft);color:var(--success)}
+  .ls-toast.err{background:var(--card);color:var(--danger)}
+  .ls-toast.err .ic{background:var(--danger-soft);color:var(--danger)}
+  /* mode démo */
+  #demoBanner{background:repeating-linear-gradient(45deg,var(--warning-soft),var(--warning-soft) 14px,oklch(.93 .06 80) 14px,oklch(.93 .06 80) 28px);color:var(--warning-ink);border-bottom:1px solid oklch(.88 .07 80)}
+  #demoBanner button{background:var(--warning-ink);color:#fff}
+  body.demo .app{outline-color:var(--warning)}
+  /* connexion : même bandeau photo que la page de garde */
+  #loginOverlay{background:var(--background);background-image:none}
+  .login-shell{border-radius:12px;border-color:var(--border);box-shadow:var(--shadow-lg)}
+  .login-aside{background:var(--shade) url(img/residence.jpg) center 54%/cover;color:oklch(1 0 0 / .86)}
+  .login-aside::after{inset:0;right:0;bottom:0;width:auto;height:auto;border-radius:0;background:linear-gradient(180deg,oklch(.19 .024 166 / .5),oklch(.19 .024 166 / .9) 70%)}
+  .login-aside>*{position:relative;z-index:1}
+  .login-aside h2{font-weight:600;letter-spacing:-.01em}
+  .login-aside li::before{background:oklch(1 0 0 / .7);border-radius:50%;width:5px;height:5px;margin-top:8px}
+  .login-aside a{color:#fff}
+  .login-card h1{font-weight:600;letter-spacing:-.01em}
+  .login-card label{font-weight:500;color:var(--foreground)}
+  .login-card input{border-radius:6px;font-size:14px;padding:9px 12px;border-color:var(--input);box-shadow:var(--shadow-sm)}
+  .login-card input:focus{border-color:var(--ring);box-shadow:0 0 0 3px oklch(.43 .09 167 / .14)}
+  .login-card .btn{min-height:40px;padding:10px 16px;font-size:14px}
 </style>
+
+<!-- Coque du design (barre du haut, page de garde, notifications) : après app.js, dont elle lit l'état. -->
+<script src="ui.js"></script>

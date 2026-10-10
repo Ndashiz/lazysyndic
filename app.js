@@ -50,12 +50,13 @@ const norm = s => String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
 /* ---------- Taxonomie ---------- */
 // Catégorie haut niveau → classe CSS (couleur) + couleur donut
 const CAT_META = {
-  'Énergie':         {cls:'',    color:'#2F6B53'},
-  'Assurance':       {cls:'ass', color:'#C9854A'},
-  'Frais ACP':       {cls:'acp', color:'#C2564A'},
-  'Entretien':       {cls:'ent', color:'#7BA98E'},
-  'Charges':         {cls:'in',  color:'#2F6B53'},
-  'Fonds de réserve':{cls:'in',  color:'#5B4B86'},
+  // couleurs = jetons du design (primary, info, warning, sage, success, violet) — DESIGN.md
+  'Énergie':         {cls:'',    color:'#005F45'},
+  'Assurance':       {cls:'ass', color:'#3C76A9'},
+  'Frais ACP':       {cls:'acp', color:'#B47819'},
+  'Entretien':       {cls:'ent', color:'#72A689'},
+  'Charges':         {cls:'in',  color:'#126B47'},
+  'Fonds de réserve':{cls:'in',  color:'#6C5594'},
 };
 const CATS = Object.keys(CAT_META);
 function catClass(high){ return (CAT_META[high]||{}).cls || ''; }
@@ -426,7 +427,7 @@ function renderDashboard(){
     kpis[3].style.color = 'var(--ink-soft)';
   }
   // qui paie quoi
-  const tbl = document.querySelector('#dash .card table');
+  const tbl = document.getElementById('ownersTbl');
   if (tbl){
     const ledger = ownerLedger();
     tbl.innerHTML = '<tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû</th><th class="num">Versé</th><th class="num">Solde</th><th></th></tr>' +
@@ -487,7 +488,7 @@ function renderReminders(){
   box.innerHTML = active.length
     ? active.map(r=>{ const i=state.reminders.indexOf(r);
         return `<div class="rem" data-i="${i}"><div class="chk"></div><div class="tx">${r.tx}</div><div class="due">${fmtDue(r.due)}</div></div>`; }).join('')
-    : '<div class="sub" style="padding:8px 4px">Rien à faire 🎉</div>';
+    : '<div class="sub" style="padding:10px 2px">Rien à faire pour l’instant.</div>';
   const hist = document.getElementById('remsHistory');
   if (hist) hist.innerHTML = doneList.map(r=>{ const i=state.reminders.indexOf(r);
     return `<div class="rem done" data-i="${i}"><div class="chk">✓</div><div class="tx">${r.tx}</div><div class="due">fait · cliquer pour rouvrir</div></div>`; }).join('');
@@ -803,15 +804,15 @@ function buildChart(acct){
   let bars='';
   for(let i=0;i<n;i++){
     const bi=yV(d.in[i]), bo=yV(d.out[i]), base=H-26;
-    bars+=`<rect x="${x(i)-bw-2}" y="${bi}" width="${bw}" height="${base-bi}" rx="3" fill="var(--green)"/>`;
-    bars+=`<rect x="${x(i)+2}" y="${bo}" width="${bw}" height="${base-bo}" rx="3" fill="var(--coral)"/>`;
+    bars+=`<rect x="${x(i)-bw-2}" y="${bi}" width="${bw}" height="${base-bi}" rx="3" fill="var(--chart-in)"/>`;
+    bars+=`<rect x="${x(i)+2}" y="${bo}" width="${bw}" height="${base-bo}" rx="3" fill="var(--chart-out)"/>`;
     bars+=`<text x="${x(i)}" y="${H-9}" text-anchor="middle" font-size="11" fill="var(--ink-faint)">${d.labels[i]}</text>`;
   }
   const line = d.bal.map((v,i)=>`${i?'L':'M'}${x(i)},${yB(v)}`).join(' ');
-  const dots = d.bal.map((v,i)=>`<circle cx="${x(i)}" cy="${yB(v)}" r="3.5" fill="var(--clay)" stroke="#fff" stroke-width="1.5"/>`).join('');
+  const dots = d.bal.map((v,i)=>`<circle cx="${x(i)}" cy="${yB(v)}" r="3.5" fill="var(--chart-bal)" stroke="#fff" stroke-width="1.5"/>`).join('');
   let grid=''; for(let g=0;g<=3;g++){ const gy=26+g*((H-60)/3); grid+=`<line x1="${pad}" y1="${gy}" x2="${W-pad}" y2="${gy}" stroke="var(--line-2)"/>`; }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${grid}${bars}
-    <path d="${line}" fill="none" stroke="var(--clay)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
+    <path d="${line}" fill="none" stroke="var(--chart-bal)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>${dots}</svg>`;
 }
 function renderChart(acct){
   const c=document.getElementById('chart'); if(c) c.innerHTML = buildChart(acct);
@@ -3629,12 +3630,12 @@ function renderComptabilite(){
   box.innerHTML=h;
   // cartes de synthèse
   const sIn=rowSum(D.totIn), sOut=rowSum(D.totOut), net=sIn+sOut;
-  const card=(l,v,c,extra)=>`<div class="card" style="padding:14px 16px"><div class="l" style="font-size:12px;color:var(--ink-faint)">${l}</div><div style="font-family:var(--display);font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:3px${c?';color:'+c:''}">${v}</div>${extra||''}</div>`;
+  const card=(l,v,c,extra)=>`<div class="kpi"><div class="l">${l}</div><div class="v"${c?` style="color:${c}"`:''}>${v}</div>${extra||''}</div>`;
   const sm=document.getElementById('cfSummary');
   if(sm) sm.innerHTML =
-    card('Entrées sur la période','+'+eur(sIn),'var(--green)')+
-    card('Sorties sur la période','−'+eur(Math.abs(sOut)),'var(--coral)')+
-    card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--green)':'var(--coral)')+
+    card('Entrées sur la période','+'+eur(sIn),'var(--success)')+
+    card('Sorties sur la période','−'+eur(Math.abs(sOut)),'')+
+    card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--success)':'')+
     card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]),'',cfSparkline(mkeys.map(k=>D.treso[k])));
   renderCfFlow(D);
   renderExpensePies();
