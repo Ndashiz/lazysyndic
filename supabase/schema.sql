@@ -155,7 +155,7 @@ create table if not exists public.ls_timeline (
   event_date date not null,
   title       text not null,
   description text,
-  kind        text default 'manual' check (kind in ('manual','import','task')),
+  kind        text default 'manual' check (kind in ('manual','import','task','sign')),  -- 'sign' : voir ag.sql
   subs        jsonb default '[]'::jsonb,   -- sous-étapes [{title, done}]
   created_by  uuid references auth.users(id) default auth.uid(),
   created_at  timestamptz not null default now()

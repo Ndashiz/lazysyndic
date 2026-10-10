@@ -578,6 +578,7 @@ let curAcct = 'pay';
 let flagOnly = false;
 let catFilter='', dirFilter='', ownerFilter='';
 let txEditing = new Set();   // ids des transactions en mode édition (sinon figées)
+let catPicking = null;       // transaction (l'objet : en démo les ids sont null) dont on change la catégorie depuis son badge
 const ownerDisp = sh => { const o=ownersOf().find(x=>(x.short||x.n)===sh); return o?o.n:(sh||''); };
 function populateTxFilters(){
   const cf=document.getElementById('catFilter');
@@ -594,7 +595,7 @@ function ensureTxCss(){
   if(txCssDone) return; txCssDone=true;
   const s=document.createElement('style');
   s.textContent=`
-    .cmt-mark{display:inline-flex;align-items:center;gap:5px;margin-top:3px;font-size:11.5px;color:#8A551F;
+    .cmt-mark{display:inline-flex;align-items:center;gap:5px;margin-top:3px;font-size:11.5px;color:var(--warning-ink);
       background:var(--clay-soft);border-radius:8px;padding:2px 8px;max-width:100%;cursor:help;line-height:1.4}
     .tx-row.editing>td{background:var(--card-2)}
     .tx-row.editing>td:first-child{box-shadow:inset 3px 0 0 var(--green)}
@@ -603,7 +604,7 @@ function ensureTxCss(){
     .cmt-req-lbl{font-size:11.5px;color:var(--coral);font-weight:600;margin-top:4px}
     .fld.tx-comment.req{border-color:var(--coral);background:var(--coral-soft)}
     .fdr-warn{display:flex;align-items:center;gap:9px;background:var(--coral-soft);color:var(--coral);
-      border:1px solid #E7B7AE;border-radius:11px;padding:9px 14px;font-size:13px;font-weight:600;margin-bottom:10px}
+      border:1px solid oklch(.88 .05 30);border-radius:11px;padding:9px 14px;font-size:13px;font-weight:600;margin-bottom:10px}
     .fdr-warn .lk{color:var(--coral);text-decoration:underline;font-weight:700;margin-left:auto;cursor:pointer}
     .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}
     .cat-pick{border:0;font-family:inherit;cursor:pointer;line-height:inherit}
@@ -1326,7 +1327,7 @@ function showMapping(){
   const m = importMeta||{};
   const acctLabel = importTargetAcct==='res'?'compte de réserve':'compte de paiement';
   const metaBanner = (!isNaN(m.opening)||m.iban||m.holder) ? `
-    <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)">
+    <div class="alert" style="background:var(--green-soft);border-color:oklch(.88 .05 160);color:var(--green-deep)">
       <span class="ic">✓</span><div>Relevé détecté${m.holder?` — <b>${m.holder}</b>`:''}${m.iban?` · ${m.iban}`:''}.
       ${!isNaN(m.opening)?`Solde d'ouverture <b>${eur(m.opening)}</b>`:''}${!isNaN(m.closing)?` → clôture <b>${eur(m.closing)}</b>`:''}.
       ${(m.from||m.to)?` Période ${importPeriod(m)}.`:''}
@@ -1408,7 +1409,7 @@ function renderPreviewRow(t,i){
   } else {
     status = t.high==='?'
       ? '<span class="badge b-late">À catégoriser</span>'
-      : (t._force?'<span class="badge" style="background:var(--clay-soft);color:#8A551F">Doublon forcé</span>':'<span class="badge b-ok">Nouvelle</span>');
+      : (t._force?'<span class="badge" style="background:var(--clay-soft);color:var(--warning-ink)">Doublon forcé</span>':'<span class="badge b-ok">Nouvelle</span>');
     actions=`<button class="lk del" data-act="skip" data-i="${i}">supprimer</button>`;
   }
   const orig = isDupe && t._match
@@ -1452,7 +1453,7 @@ function paintPreview(){
   const pasted = m.source==='paste';
   // En-tête « relevé reconnu » + choix du compte (au lieu des 8 menus)
   const header = `
-    <div class="card" style="margin-bottom:14px;background:var(--green-soft);border-color:#BcD6c2">
+    <div class="card" style="margin-bottom:14px;background:var(--green-soft);border-color:oklch(.88 .05 160)">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
         <div style="font-size:26px;line-height:1">✓</div>
         <div style="flex:1;min-width:220px">
@@ -1825,7 +1826,7 @@ function renderPendingImports(){
         <div>
           <h2 style="margin:0">Relevé v${g.v} — à valider</h2>
           <div class="sub">${g.rows.length} mouvement(s) · ${accts} · net ${signed(net)}${
-            g.uncat ? ` · <b style="color:#8A551F">${g.uncat} sans catégorie</b>` : ' · tout est catégorisé'}</div>
+            g.uncat ? ` · <b style="color:var(--warning-ink)">${g.uncat} sans catégorie</b>` : ' · tout est catégorisé'}</div>
           <div class="sub" style="margin-top:4px">Ces lignes ne comptent dans aucun solde tant qu'elles ne sont pas validées.</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1903,12 +1904,6 @@ const MAJ={simple:'Majorité simple',absolue:'Majorité absolue',deuxtiers:'Doub
 const MAJPCT={simple:50,absolue:51,deuxtiers:67,quatrecinq:80,unanime:100};
 const AG_STATUS={prep:'En cours de préparation',convoquee:'Convocations envoyées',tenue:'Séance tenue',finalisee:'AG finalisée'};
 function agTotalQuot(){ return sum(ownersOf().map(o=>o.q))||1000; }
-function majNeed(maj){ const tot=agTotalQuot();
-  if(maj==='unanime') return tot;
-  if(maj==='quatrecinq') return Math.ceil(tot*4/5);
-  if(maj==='deuxtiers') return Math.ceil(tot*2/3);
-  return Math.floor(tot/2)+1; // simple / absolue : > moitié
-}
 function agOwnerList(){ return ownersOf().map(o=>({n:o.n, short:o.short||o.n, q:o.q, c:o.c})); }
 function majOptions(sel){return Object.entries(MAJ).map(([k,v])=>`<option value="${k}" ${k===sel?'selected':''}>${v}</option>`).join('');}
 
@@ -1918,10 +1913,11 @@ function pickCurrentAG(){ currentAG=(state.ags||[]).find(a=>a.status!=='finalise
 
 function setAgStatus(status){
   const st=document.getElementById('agStatus'); if(!st) return;
-  const map={prep:['var(--coral-soft)','#E8BDB4','#8C342A','var(--coral)'],
-             convoquee:['var(--clay-soft)','#E0C49B','#8A551F','var(--clay)'],
-             tenue:['var(--clay-soft)','#E0C49B','#8A551F','var(--clay)'],
-             finalisee:['var(--green-soft)','#BcD6c2','var(--green-deep)','var(--green)']};
+  // statuts du design : en préparation = warning, convoquée / tenue = info, finalisée = success
+  const map={prep:['var(--warning-soft)','var(--border)','var(--warning-ink)','var(--warning)'],
+             convoquee:['var(--info-soft)','var(--border)','var(--info)','var(--info)'],
+             tenue:['var(--info-soft)','var(--border)','var(--info)','var(--info)'],
+             finalisee:['var(--success-soft)','var(--border)','var(--success)','var(--success)']};
   const c=map[status]||map.prep;
   st.style.background=c[0]; st.style.borderColor=c[1]; st.style.color=c[2];
   const dot=st.querySelector('.dot'); if(dot) dot.style.background=c[3];
@@ -2045,50 +2041,106 @@ document.getElementById('addPoint')?.addEventListener('click',()=>{
   dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,kind:'decision',majorite:'simple',cle:'Acte de base'}); p.id=s.id; });
 });
 
-document.getElementById('genConv')?.addEventListener('click',()=>{
-  if(!currentAG){ alert('Aucune assemblée.'); return; }
-  const points=currentAG.points.map((p,i)=>`${i+1}. ${p.title}${p.kind==='decision'?' ('+MAJ[p.majorite]+')':' (information)'}`).join('\n');
+// --- Convocation : un seul texte (titres ET textes des points), envoyé depuis la messagerie
+//     du syndic (mailto, adresses des copropriétaires pré-remplies) ou en .eml ---
+function sansAccents(s){ return String(s||'').normalize('NFD').replace(/\p{M}/gu,''); }
+// « 22/06/2026 19h00 », « 2026-06-22 », « 22 juin 2026 · 19h00 » → Date (minuit local) ; null sinon
+function parseFrDate(s){
+  s=sansAccents(s).toLowerCase();
+  let m=s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=s.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if(m){ let y=+m[3]; if(y<100) y+=2000; return new Date(y,+m[2]-1,+m[1]); }
+  m=s.match(/(\d{1,2})(?:er)?\s+([a-z]+)\s+(\d{4})/);
+  if(m){ const k=['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'].indexOf(m[2]); if(k>=0) return new Date(+m[3],k,+m[1]); }
+  return null;
+}
+// Délai entre l'envoi (ou aujourd'hui) et la séance — 15 jours minimum (art. 3.87 §3 C. civ.)
+function convocationDelay(ag){
+  const d=parseFrDate(ag.ag_date); if(!d) return null;
+  const sent=parseFrDate(ag.convocation_date);
+  const from=sent||new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+  return {days:Math.round((d-from)/86400000), sent:!!sent};
+}
+function convocation(ag){
   const cn=(state.coproName||'').trim()||'la copropriété';
   const m=(window.LS&&window.LS.member)||{};
   const syndic=(m.full_name||'').trim()||'Le syndic';
-  const syndicEmail=m.userEmail||m.email||'syndic@exemple.be';
-  const dateHeure=currentAG.ag_date||'(date à préciser)';
-  const lieu=currentAG.lieu||'(lieu à préciser)';
-  const dest=ownersOf().map(o=>o.n).filter(n=>n!==m.full_name).join(', ');
-  const eml=`From: ${syndic} (Syndic) <${syndicEmail}>
-To: ${dest}
-Subject: Convocation - Assemblee generale ${currentAG.type||'ordinaire'} - ${cn} - ${dateHeure}
-MIME-Version: 1.0
-Content-Type: text/plain; charset="utf-8"
+  const me=String(m.userEmail||m.email||'').toLowerCase();
+  const type=String(ag.type||'ordinaire').toLowerCase();
+  const dateHeure=ag.ag_date||'(date à préciser)', lieu=ag.lieu||'(lieu à préciser)';
+  const points=ag.points.map((p,i)=>{
+    const head=`${i+1}. ${p.title}${p.kind==='decision'?` — décision (${MAJ[p.majorite]})`:' — information'}`;
+    const body=String(p.body||'').trim();
+    return body ? head+'\n'+body.split('\n').map(l=>'   '+l).join('\n') : head;
+  }).join('\n\n');
+  const subject=`Convocation — Assemblée générale ${type} — ${cn} — ${dateHeure}`;
+  const body=`Madame, Monsieur, cher copropriétaire,
 
-Madame, Monsieur, cher coproprietaire,
-
-En ma qualite de syndic de ${cn}, j'ai l'honneur de vous convoquer a
-l'assemblee generale qui se tiendra :
+En ma qualité de syndic de ${cn}, j'ai l'honneur de vous convoquer à l'assemblée générale ${type} qui se tiendra :
 
     Date : ${dateHeure}
     Lieu : ${lieu}
 
-Conformement au reglement d'ordre interieur, cette convocation vous est adressee
-au moins 15 jours avant l'assemblee.
-
 ORDRE DU JOUR
--------------
+
 ${points}
 
-Tout coproprietaire empeche peut se faire representer par procuration ecrite.
+Tout copropriétaire empêché peut se faire représenter par procuration écrite.
 
-Salutations distinguees,
-${syndic} - Syndic, ${cn}
+Salutations distinguées,
+${syndic} — Syndic, ${cn}
 `;
+  // le syndic ne s'écrit pas à lui-même
+  const others=ownersOf().filter(o=>!(o.email && o.email.toLowerCase()===me) && o.n!==m.full_name);
+  return { subject, body, syndic, from:me,
+           to: others.filter(o=>o.email).map(o=>o.email),
+           missing: others.filter(o=>!o.email).map(o=>o.n) };
+}
+function markConvoked(){
+  if(!canWrite() || !currentAG || currentAG.status!=='prep') return;
+  currentAG.status='convoquee'; currentAG.convocation_date=new Date().toLocaleDateString('fr-BE');
+  setAgStatus('convoquee');
+  dbWrite(db=>db.agUpdate(currentAG.id,{status:'convoquee',convocation_date:currentAG.convocation_date}));
+  renderConvInfo();
+}
+function renderConvInfo(){
+  const el=document.getElementById('agConvInfo'); if(!el||!currentAG) return;
+  const c=convocation(currentAG), dl=convocationDelay(currentAG);
+  const who=ownersOf().filter(o=>o.n!==((window.LS&&window.LS.member)||{}).full_name)
+    .map(o=>`<div><b>${escH(o.n)}</b> ${o.email?`<span class="sub">${escH(o.email)}</span>`:'<span style="color:var(--coral)">— e-mail manquant</span>'}</div>`).join('');
+  let delay;
+  if(!dl) delay=`<div class="alert" style="background:var(--clay-soft);border-color:oklch(.88 .07 80);color:var(--warning-ink)"><span class="ic">i</span> Indiquez la date de l’AG à l’étape 1 (ex. 22/06/2026 19h00) pour vérifier le délai légal de 15 jours.</div>`;
+  else if(dl.days>=15) delay=`<div class="alert" style="background:var(--green-soft);border-color:oklch(.88 .05 160);color:var(--green-deep)"><span class="ic">✓</span> Délai légal respecté : ${dl.sent?'envoyée':'envoi'} ${dl.days} jours avant la séance (minimum 15).</div>`;
+  else delay=`<div class="alert"><span class="ic">!</span> ${dl.days<0?'La date de l’AG est passée.':`Seulement ${dl.days} jour${dl.days>1?'s':''} avant la séance : le minimum légal est de 15 jours (art. 3.87 §3), sauf urgence.`}</div>`;
+  el.innerHTML=`<div class="mini-h" style="margin-top:0">Destinataires</div>
+    <div class="sg-signers">${who||'<div class="sub">Aucun autre copropriétaire.</div>'}</div>
+    ${c.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Budget &amp; copro › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
+    ${delay}
+    ${currentAG.convocation_date?`<div class="sub" style="margin-bottom:10px">Convocation marquée envoyée le ${escH(currentAG.convocation_date)}.</div>`:''}`;
+}
+document.getElementById('mailConv')?.addEventListener('click',()=>{
+  if(!currentAG){ alert('Aucune assemblée.'); return; }
+  const c=convocation(currentAG);
+  const to=c.to.map(e=>encodeURIComponent(e).replace(/%40/g,'@')).join(',');
+  location.href=`mailto:${to}?subject=${encodeURIComponent(c.subject)}&body=${encodeURIComponent(c.body)}`;
+  markConvoked();
+});
+document.getElementById('genConv')?.addEventListener('click',()=>{
+  if(!currentAG){ alert('Aucune assemblée.'); return; }
+  const c=convocation(currentAG);
+  const b64=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+  const eml=`From: ${c.syndic} (Syndic) <${c.from||'syndic@exemple.be'}>
+To: ${c.to.join(', ')}
+Subject: =?UTF-8?B?${b64(c.subject)}?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+${c.body}`;
   const blob=new Blob([eml],{type:'message/rfc822'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG.eml';
   document.body.appendChild(a); a.click(); a.remove();
-  if(canWrite() && currentAG.status==='prep'){
-    currentAG.status='convoquee'; currentAG.convocation_date=new Date().toLocaleDateString('fr-BE');
-    setAgStatus('convoquee');
-    dbWrite(db=>db.agUpdate(currentAG.id,{status:'convoquee',convocation_date:currentAG.convocation_date}));
-  }
+  markConvoked();
 });
 
 function setPresence(short,patch){
@@ -2123,7 +2175,7 @@ function renderPresences(){
         seg.querySelectorAll('button').forEach(b=>b.classList.remove('on')); btn.classList.add('on');
         const short=seg.dataset.short, stt=btn.dataset.st;
         const rep=document.querySelector(`.repname[data-short="${short}"]`); if(rep) rep.style.display=stt==='rep'?'block':'none';
-        setPresence(short,{status:stt}); computeQuorum();
+        setPresence(short,{status:stt}); computeQuorum(); renderBureau(); renderSeance();
       });
     });
     wrap.querySelectorAll('.pres-mand').forEach(inp=>inp.onchange=()=>{
@@ -2131,6 +2183,7 @@ function renderPresences(){
     });
   }
   computeQuorum();
+  renderBureau();
 }
 function computeQuorum(){
   if(!currentAG) return;
@@ -2140,7 +2193,7 @@ function computeQuorum(){
   const qn=document.getElementById('quorumNum'); if(qn) qn.textContent=q;
   const card=document.getElementById('quorumCard'),ok=q>=Math.floor(tot/2)+1;
   const qt=document.getElementById('quorumTxt'); if(qt) qt.textContent=ok?'Quorum atteint — la séance peut délibérer':'Quorum non atteint';
-  if(card){card.style.background=ok?'var(--green-soft)':'var(--coral-soft)';card.style.borderColor=ok?'#BcD6c2':'#E8BDB4';}
+  if(card){card.style.background=ok?'var(--green-soft)':'var(--coral-soft)';card.style.borderColor=ok?'oklch(.88 .05 160)':'oklch(.88 .05 30)';}
 }
 
 function renderSeance(){
@@ -2152,22 +2205,26 @@ function renderSeance(){
     let votesHtml='';
     if(isDec){
       votesHtml=`<div style="margin-top:12px">${agOwnerList().map(o=>{
-        const v=(p.votes&&p.votes[o.short])||'pour';
+        const v=agVote(currentAG,p,o);
+        const who=`<span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${(o.n||'?')[0]}</span>
+          <span style="font-size:13.5px;flex:1">${o.n} <span style="color:var(--ink-faint)">· ${o.q}</span></span>`;
+        if(v===null) return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2);opacity:.6">${who}
+          <span class="sub">${agPresenceStatus(currentAG,o)==='exc'?'Excusé':'Absent'} — ne vote pas</span></div>`;
         return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line-2)">
-          <span class="a" style="width:24px;height:24px;background:${o.c};border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700">${(o.n||'?')[0]}</span>
-          <span style="font-size:13.5px;flex:1">${o.n} <span style="color:var(--ink-faint)">· ${o.q}</span></span>
+          ${who}
           <div class="seg vote" data-pt="${idx}" data-short="${o.short}" data-q="${o.q}">
             <button data-v="pour" class="${v==='pour'?'on':''} vp">Pour</button>
             <button data-v="contre" class="${v==='contre'?'on':''} vc">Contre</button>
             <button data-v="abst" class="${v==='abst'?'on':''} va">Abst.</button>
           </div></div>`;}).join('')}
         <div class="verdict" data-pt="${idx}" style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding:10px 14px;background:var(--green-soft);border-radius:11px">
-          <span style="font-size:13px;color:var(--ink-soft)">Pour : <b class="pourq">0</b>/${agTotalQuot()} · requis ${majNeed(p.majorite)} (${MAJ[p.majorite]})</span>
+          <span class="vtxt" style="font-size:13px;color:var(--ink-soft)"></span>
           <span class="vbadge badge b-ok">Adopté</span></div></div>`;
     } else votesHtml='<div class="sub" style="margin-top:8px">Point informatif — pas de vote</div>';
     card.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--display);font-weight:600;color:var(--ink-faint)">${idx+1}</span>
       <b style="flex:1;font-size:14.5px">${p.title}</b>${isDec?`<span class="cat acp">${MAJ[p.majorite]}</span>`:'<span class="cat ent">Information</span>'}</div>
-      <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:10px;min-height:38px;font-size:13px;color:var(--ink-soft)">${p.seance_notes||''}</div>${votesHtml}`;
+      <div class="sub" style="margin-top:10px">Notes de séance — reprises dans le PV</div>
+      <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:4px;min-height:38px;font-size:13px;color:var(--ink-soft);white-space:pre-wrap">${escH(p.seance_notes||'')}</div>${votesHtml}`;
     if(!ro){ const sn=card.querySelector('.pt-snotes'); if(sn) sn.onblur=e=>persistPoint(p,{seance_notes:e.target.innerText}); }
     wrap.appendChild(card);
   });
@@ -2186,11 +2243,10 @@ function renderSeance(){
 }
 function tally(idx){
   const p=currentAG.points[idx]; if(!p||p.kind!=='decision') return;
-  let pour=0; agOwnerList().forEach(o=>{ const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour') pour+=o.q; });
-  const need=majNeed(p.majorite);
+  const t=agTally(currentAG,p);
   const v=document.querySelector(`.verdict[data-pt="${idx}"]`); if(!v) return;
-  v.querySelector('.pourq').textContent=pour;
-  const ok=pour>=need; const badge=v.querySelector('.vbadge');
+  v.querySelector('.vtxt').innerHTML=`Pour <b>${t.pour}</b> · contre <b>${t.contre}</b> · abst. ${t.abst} — ${escH(t.rule)}`;
+  const ok=t.adopted; const badge=v.querySelector('.vbadge');
   badge.textContent=ok?'Adopté':'Rejeté'; badge.className='vbadge badge '+(ok?'b-ok':'b-late');
   v.style.background=ok?'var(--green-soft)':'var(--coral-soft)';
 }
@@ -2205,8 +2261,8 @@ document.getElementById('genPV')?.addEventListener('click',()=>{
     return `<tr><td>${o.n}</td><td>${o.q}</td><td>${presLbl[s]}${pres[o.short]&&pres[o.short].mandataire?(' ('+pres[o.short].mandataire+')'):''}</td></tr>`; }).join('');
   const ptRows=currentAG.points.map((p,i)=>{
     let dec='';
-    if(p.kind==='decision'){ let pour=0; owners.forEach(o=>{const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour')pour+=o.q;});
-      const ok=pour>=majNeed(p.majorite); dec=`<div><b>Décision :</b> ${ok?'ADOPTÉ':'REJETÉ'} (${pour}/${agTotalQuot()} pour · ${MAJ[p.majorite]})</div>`; }
+    if(p.kind==='decision'){ const t=agTally(currentAG,p);
+      dec=`<div><b>Décision :</b> ${t.adopted?'ADOPTÉ':'REJETÉ'} (pour ${t.pour} · contre ${t.contre} · abst. ${t.abst} — ${t.rule})</div>`; }
     return `<div style="margin:14px 0"><b>${i+1}. ${p.title}</b>${p.body?`<div style="color:#555">${p.body}</div>`:''}${p.seance_notes?`<div style="font-style:italic">Notes : ${p.seance_notes}</div>`:''}${dec}</div>`;
   }).join('');
   const html=`<html><head><meta charset="utf-8"></head><body style="font-family:Georgia,serif;max-width:720px;margin:auto">
@@ -2214,7 +2270,7 @@ document.getElementById('genPV')?.addEventListener('click',()=>{
     <p><b>Date :</b> ${currentAG.ag_date||''}<br><b>Lieu :</b> ${currentAG.lieu||''}</p>
     <h2>Présences</h2><table border="1" cellpadding="6" cellspacing="0"><tr><th>Copropriétaire</th><th>Quotité</th><th>Statut</th></tr>${presRows}</table>
     <h2>Ordre du jour & décisions</h2>${ptRows}
-    <br><br><table width="100%"><tr><td>Le président</td><td>Le secrétaire</td><td>Le commissaire</td></tr></table>
+    <br><br><table width="100%"><tr>${pvSigners(currentAG).map(s=>`<td>${s.name}<br><small>${s.roles.join(', ')}</small></td>`).join('')}</tr></table>
   </body></html>`;
   const blob=new Blob([html],{type:'application/msword'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='PV-AG.doc';
@@ -2230,6 +2286,8 @@ function goStep(n){
     const circ=s.querySelector('.circ'); if(circ) circ.textContent=sn<curStep?'✓':sn;
   });
   document.querySelectorAll('.agpanel').forEach(p=>{p.style.display=(+p.dataset.panel===curStep)?'block':'none';});
+  if(currentAG && curStep===2) renderConvInfo();
+  if(currentAG && curStep===5) renderSignBox(currentAG,document.getElementById('agSignBox'));
   window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('#ag .nextStep').forEach(b=>b.onclick=()=>goStep(curStep+1));
@@ -2241,25 +2299,340 @@ document.getElementById('completeAG')?.addEventListener('click',function(){
   if(!canWrite()){ alert('Lecture seule.'); return; }
   // fige les décisions à partir des votes
   currentAG.points.forEach(p=>{ if(p.kind==='decision'){
-    let pour=0; agOwnerList().forEach(o=>{const v=(p.votes&&p.votes[o.short])||'pour'; if(v==='pour')pour+=o.q;});
-    p.decision = pour>=majNeed(p.majorite)?'Adopté':'Rejeté';
+    p.decision = agTally(currentAG,p).adopted?'Adopté':'Rejeté';
     dbWrite(db=>db.agPointUpdate(p.id,{decision:p.decision, votes:p.votes||{}}));
   }});
   currentAG.status='finalisee';
   dbWrite(db=>db.agUpdate(currentAG.id,{status:'finalisee'}));
-  alert('✓ AG finalisée et archivée. Vous pouvez en créer une nouvelle.');
+  if((currentAG.signature||{}).status!=='signe') _sgOpen.add(String(currentAG.id));
+  alert('✓ AG finalisée et archivée. La signature du PV se poursuit dans l’historique, en bas de page.');
   curStep=1; renderAG();
 });
 
+const _sgOpen=new Set();   // AG archivées dont la carte « Signature » est dépliée
 function renderAGArchive(){
   const box=document.getElementById('agArchive'); if(!box) return;
   const done=(state.ags||[]).filter(a=>a.status==='finalisee');
   if(!done.length){ box.innerHTML='<div class="sub" style="padding:14px">Aucune assemblée archivée pour le moment.</div>'; return; }
+  ensureSignCss();
   box.innerHTML=done.map(a=>{
-    const pres=a.presence||{}; const n=Object.values(pres).filter(x=>x&&(x.status==='pre'||x.status==='rep')).length;
+    const n=agOwnerList().filter(o=>agAttends(a,o)).length;
     const adopted=a.points.filter(p=>p.decision==='Adopté').length, dec=a.points.filter(p=>p.kind==='decision').length;
-    return `<div class="hist"><span class="v" style="width:auto">${a.ag_date||a.type||'AG'}</span><div><b>${a.title||'Assemblée générale'}</b><div class="meta">${a.points.length} point(s) · ${n} présent(s)/représenté(s) · ${adopted}/${dec} décision(s) adoptée(s)</div></div></div>`;
+    const open=_sgOpen.has(String(a.id));
+    return `<div class="ag-arch" data-id="${escH(a.id)}">
+      <div class="hist"><span class="v" style="width:auto">${escH(a.ag_date||a.type||'AG')}</span><div><b>${escH(a.title||'Assemblée générale')}</b><div class="meta">${a.points.length} point(s) · ${n} présent(s)/représenté(s) · ${adopted}/${dec} décision(s) adoptée(s)</div></div>
+        <div class="sg-side">${signBadge(a)}<button class="rb sg-toggle">${open?'Fermer':'Signature du PV'}</button></div></div>
+      <div class="sg-box sg-arch" style="display:${open?'block':'none'}"></div></div>`;
   }).join('');
+  box.querySelectorAll('.ag-arch').forEach(row=>{
+    const a=agById(row.dataset.id); if(!a) return;
+    if(_sgOpen.has(String(a.id))) renderSignBox(a,row.querySelector('.sg-box'));
+    row.querySelector('.sg-toggle').onclick=()=>{ const id=String(a.id); if(_sgOpen.has(id)) _sgOpen.delete(id); else _sgOpen.add(id); renderAGArchive(); };
+  });
+}
+
+/* ============================================================
+   SIGNATURE DU PV — Dokobit, offre gratuite (pas d'API)
+   1. le PV part en PDF figé (empreinte SHA-256 gardée dans ls_ag.signature) ;
+   2. le syndic le dépose sur Dokobit, chacun signe (itsme / carte eID) ;
+   3. le PDF signé revient ici : LSSign (signature.js) lit les signatures,
+      vérifie l'intégrité et coche les signataires attendus (art. 3.87 §10).
+   Fichiers : bucket privé ls-docs (supabase/ag.sql), ag/<id>/pv-a-signer.pdf et pv-signe.pdf.
+   ============================================================ */
+const DOKOBIT={url:'https://app.dokobit.com/', free:3};   // offre gratuite : 3 signatures / mois, chaque signataire compte
+const PDFLIB_CDN={src:'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+                  sri:'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI'};
+let _pdfLibP=null;
+const _pvLocal={};          // démo / hors-ligne : les PDF restent en mémoire, jamais dans Supabase
+function loadPdfLib(){
+  if(window.PDFLib) return Promise.resolve(window.PDFLib);
+  return _pdfLibP = _pdfLibP || new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src=PDFLIB_CDN.src; s.integrity=PDFLIB_CDN.sri; s.crossOrigin='anonymous';
+    s.onload=()=>res(window.PDFLib);
+    s.onerror=()=>{ _pdfLibP=null; rej(new Error('pdf-lib n’a pas pu être chargé (hors-ligne ?)')); };
+    document.head.appendChild(s);
+  });
+}
+function escH(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function saveBytes(bytes,name){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'})); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+}
+// Les erreurs « colonne / bucket inconnus » = le SQL n'a pas été lancé : on le dit.
+function sqlHint(msg){ return /ls-docs|bucket|signature|bureau|email|schema cache|column/i.test(msg) ? msg+' — lancez supabase/ag.sql dans Supabase (SQL Editor).' : msg; }
+const agById=id=>(state.ags||[]).find(a=>String(a.id)===String(id));
+const pvPath=(ag,kind)=>`ag/${ag.id}/${kind}.pdf`;
+function pvFileName(ag,suffix){
+  const d=String(ag.ag_date||'').normalize('NFD').replace(/\p{M}/gu,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+  return `PV-AG${d?'-'+d:''}${suffix?'-'+suffix:''}.pdf`;
+}
+
+// --- présences & votes (partagés séance / PV / décisions) ---
+function agPresenceStatus(ag,o){ const p=(ag.presence||{})[o.short]; return (p&&p.status)||'pre'; }
+function agAttends(ag,o){ const s=agPresenceStatus(ag,o); return s==='pre'||s==='rep'; }
+function agMandataire(ag,o){ const p=(ag.presence||{})[o.short]; return String((p&&p.mandataire)||'').trim(); }
+// Vote d'un copropriétaire ; null s'il n'est ni présent ni représenté (il ne vote pas).
+function agVote(ag,p,o){ return agAttends(ag,o) ? ((p.votes&&p.votes[o.short])||'pour') : null; }
+// Décompte d'un point (art. 3.88 C. civ.) : majorité des voix exprimées par les présents et
+// représentés — abstentions, votes blancs et nuls ne comptent pas. L'unanimité, elle, se compte
+// sur TOUS les copropriétaires, absents compris.
+function agTally(ag,p){
+  const att=agOwnerList().filter(o=>agAttends(ag,o)), tot=agTotalQuot();
+  const q=v=>sum(att.filter(o=>agVote(ag,p,o)===v).map(o=>o.q));
+  const pour=q('pour'), contre=q('contre'), abst=q('abst'), cast=pour+contre;
+  const FR={deuxtiers:[2,3,'deux tiers'], quatrecinq:[4,5,'quatre cinquièmes']}[p.majorite];
+  let adopted, rule;
+  if(p.majorite==='unanime'){ adopted=pour===tot; rule=`unanimité de tous les copropriétaires (${tot} quotités)`; }
+  else if(FR){ adopted=cast>0 && pour*FR[1]>=cast*FR[0]; rule=`${FR[2]} des ${cast} quotités exprimées`; }
+  else { adopted=pour*2>cast; rule=`plus de la moitié des ${cast} quotités exprimées`; }
+  return {pour, contre, abst, cast, tot, adopted, rule};
+}
+// Le secrétaire désigné, ou à défaut le syndic connecté.
+function agSecretaire(ag){ return String(((ag.bureau||{}).secretaire)||((window.LS&&window.LS.member&&window.LS.member.full_name)||'')).trim(); }
+
+// --- bureau de séance (étape 3) ---
+function renderBureau(){
+  const el=document.getElementById('agBureau'); if(!el||!currentAG) return;
+  const b=currentAG.bureau||{}, ro=!canWrite();
+  const att=agOwnerList().filter(o=>agAttends(currentAG,o));
+  const syndic=((window.LS&&window.LS.member&&window.LS.member.full_name)||'').trim();
+  el.innerHTML=`<h2>Bureau de séance</h2>
+    <div class="sub" style="margin:2px 0 12px">Ils signent le PV avec les copropriétaires présents ou leurs mandataires (art. 3.87 §10).</div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Président de séance (un copropriétaire)</div>
+        <select class="fld" id="agPres" ${ro?'disabled':''} style="width:100%;margin-top:4px"><option value="">— choisir —</option>${
+          att.map(o=>`<option value="${escH(o.short)}" ${o.short===b.president?'selected':''}>${escH(o.n)}</option>`).join('')}</select></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Secrétaire${syndic?' — par défaut, le syndic':''}</div>
+        <input class="fld" id="agSec" ${ro?'disabled':''} style="width:100%;margin-top:4px" value="${escH(b.secretaire||'')}" placeholder="${escH(syndic||'Nom du secrétaire')}"></div>
+    </div>`;
+  if(!ro){
+    el.querySelector('#agPres').onchange=e=>agSave(currentAG,{bureau:{...(currentAG.bureau||{}),president:e.target.value}});
+    el.querySelector('#agSec').onchange=e=>agSave(currentAG,{bureau:{...(currentAG.bureau||{}),secretaire:e.target.value.trim()}});
+  }
+}
+async function agSave(ag,patch){
+  Object.assign(ag,patch);
+  if(!writeToDb()){ saveState(); toastSaved(); return true; }
+  try{ await window.LS.db.agUpdate(ag.id,patch); toastSaved(); return true; }
+  catch(e){ console.error(e); showToast(sqlHint('Échec de l’enregistrement : '+(e.message||e)),'err'); return false; }
+}
+
+// --- qui signe le PV : président, secrétaire, présents, mandataires (dédoublonnés) ---
+function pvSigners(ag){
+  const out=[], owners=agOwnerList(), byShort={};
+  ownersOf().forEach(o=>{ byShort[o.short||o.n]=o; });
+  const add=(name,role,email)=>{
+    name=String(name||'').trim(); if(!name) return;
+    const ex=out.find(x=>LSSign.sameName(x.name,name));
+    if(ex){ if(!ex.roles.includes(role)) ex.roles.push(role); if(!ex.email&&email) ex.email=email; }
+    else out.push({name, roles:[role], email:email||''});
+  };
+  const pres=owners.find(o=>o.short===(ag.bureau||{}).president);
+  add(pres&&pres.n,'Président de séance',pres&&(byShort[pres.short]||{}).email);
+  add(agSecretaire(ag),'Secrétaire');
+  owners.forEach(o=>{
+    const s=agPresenceStatus(ag,o);
+    if(s==='pre') add(o.n,'Copropriétaire présent',(byShort[o.short]||{}).email);
+    else if(s==='rep') add(agMandataire(ag,o),`Mandataire de ${o.n}`);
+  });
+  return out;
+}
+function pvMissing(ag){
+  const miss=[], owners=agOwnerList();
+  if(!String(ag.ag_date||'').trim()) miss.push('la date de l’AG (étape 1)');
+  if(!owners.some(o=>agAttends(ag,o))) miss.push('au moins un copropriétaire présent (étape 3)');
+  if(!owners.some(o=>o.short===(ag.bureau||{}).president && agAttends(ag,o))) miss.push('le président de séance (étape 3)');
+  if(!agSecretaire(ag)) miss.push('le secrétaire (étape 3)');
+  owners.forEach(o=>{ if(agPresenceStatus(ag,o)==='rep' && !agMandataire(ag,o)) miss.push(`le mandataire de ${o.n} (étape 3)`); });
+  return miss;
+}
+function pvData(ag){
+  const owners=agOwnerList(), tot=agTotalQuot();
+  const att=owners.filter(o=>agAttends(ag,o));
+  const pres=owners.find(o=>o.short===(ag.bureau||{}).president);
+  const LBL={pre:'Présent',rep:'Représenté',exc:'Excusé',abs:'Absent'};
+  const voter=o=>agPresenceStatus(ag,o)==='rep'&&agMandataire(ag,o) ? `${o.n} (par ${agMandataire(ag,o)})` : o.n;
+  return {
+    copro:(state.coproName||'').trim()||'la copropriété', type:ag.type||'Ordinaire',
+    dateLabel:ag.ag_date||'', lieu:ag.lieu||'', convocation:ag.convocation_date||'',
+    president:pres?pres.n:'', secretaire:agSecretaire(ag),
+    presences:owners.map(o=>{ const s=agPresenceStatus(ag,o), m=agMandataire(ag,o);
+      return {name:o.n, quot:o.q, status: s==='rep' ? (m?`Représenté par ${m}`:'Représenté') : (LBL[s]||s)}; }),
+    attendance:{n:att.length, of:owners.length, q:sum(att.map(o=>o.q)), tot},
+    points:ag.points.map((p,i)=>{
+      const base={n:i+1, title:p.title||'', body:p.body||'', notes:p.seance_notes||''};
+      if(p.kind!=='decision') return {...base, info:true};
+      const grp=v=>{ const os=att.filter(o=>agVote(ag,p,o)===v); return {names:os.map(voter), q:sum(os.map(o=>o.q))}; };
+      const t=agTally(ag,p);
+      return {...base, maj:MAJ[p.majorite]||p.majorite, rule:t.rule, pour:grp('pour'), contre:grp('contre'), abst:grp('abst'), adopted:t.adopted};
+    }),
+    signers:pvSigners(ag), generatedAt:new Date().toISOString(),
+  };
+}
+
+// --- 1. figer le PV ---
+async function pvPrepare(ag){
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const miss=pvMissing(ag);
+  if(miss.length){ alert('Avant de figer le PV, complétez :\n• '+miss.join('\n• ')); return; }
+  const sg=ag.signature||{};
+  if(sg.signed && !confirm('Ce PV est déjà signé. Le régénérer remet le suivi de signature à zéro. Continuer ?')) return;
+  if(!sg.signed && sg.pv && !confirm('Un PV à signer existe déjà. Si des signatures ont commencé sur Dokobit avec l’ancien fichier, il faudra recommencer avec le nouveau. Continuer ?')) return;
+  let bytes;
+  try{ bytes=await LSSign.buildPvPdf(await loadPdfLib(), pvData(ag)); }
+  catch(e){ console.error(e); showToast('PV impossible à générer : '+(e.message||e),'err'); return; }
+  const pv={path:pvPath(ag,'pv-a-signer'), sha256:await LSSign.sha256Hex(bytes), size:bytes.length,
+            at:new Date().toISOString(), signers:pvSigners(ag)};
+  if(writeToDb()){
+    try{ await window.LS.db.docUpload(pv.path,bytes); }
+    catch(e){ console.error(e); showToast(sqlHint('Envoi du PV impossible : '+(e.message||e)),'err'); return; }
+  } else { pv.path=null; _pvLocal[ag.id+':pv']=bytes; delete _pvLocal[ag.id+':signed']; }
+  await agSave(ag,{signature:{status:'a_signer', pv, signed:null}});
+  saveBytes(bytes,pvFileName(ag));
+  rerenderSign(ag);
+}
+async function pvDownload(ag,which){
+  const sg=ag.signature||{}, rec=which==='signed'?sg.signed:sg.pv; if(!rec) return;
+  try{
+    let bytes=_pvLocal[ag.id+':'+which];
+    if(!bytes && rec.path && writeToDb()) bytes=await window.LS.db.docDownload(rec.path);
+    if(!bytes){ showToast('Fichier non conservé en mode démo / hors-ligne','err'); return; }
+    saveBytes(bytes, which==='signed' ? pvFileName(ag,'signe') : pvFileName(ag));
+  }catch(e){ console.error(e); showToast(sqlHint('Téléchargement impossible : '+(e.message||e)),'err'); }
+}
+// --- 3. le PDF signé revient de Dokobit ---
+async function pvImportSigned(ag,file){
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  if(/\.(asice|asics|sce|bdoc|edoc|adoc|zip)$/i.test(file.name)){
+    alert('Dokobit a rendu un conteneur ('+file.name.split('.').pop()+'), pas un PDF. Sur Dokobit, faites signer le document au format PDF, puis réimportez-le.'); return; }
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  let res;
+  try{ res=await LSSign.readSignatures(bytes); }
+  catch(e){ alert('Lecture impossible : '+(e.message||e)); return; }
+  if(!res.signatures.length){ alert('Aucune signature électronique dans ce PDF. Sur Dokobit, téléchargez le document signé (pas l’original).'); return; }
+  const sg=ag.signature||{};
+  const expected=(sg.pv&&sg.pv.signers)||pvSigners(ag);
+  // une signature PAdES s'ajoute à la fin du fichier : le PV figé doit en être le début, octet pour octet
+  let prefixOk=null;
+  if(sg.pv) prefixOk = bytes.length>sg.pv.size && (await LSSign.sha256Hex(bytes.subarray(0,sg.pv.size)))===sg.pv.sha256;
+  const m=LSSign.matchSigners(expected,res.signatures);
+  const sigs=res.signatures.map(s=>({name:s.name, method:s.method, issuer:s.issuer, at:s.at, atSource:s.atSource, error:s.error||null,
+    ok: s.digestOk===false||s.sigOk===false ? false : (s.digestOk&&s.sigOk ? true : null)}));
+  const intact=sigs.every(s=>s.ok!==false) && res.tail!=='autre' && prefixOk!==false;
+  const complete=m.rows.every(r=>r.sig>=0);
+  const signed={path:pvPath(ag,'pv-signe'), sha256:await LSSign.sha256Hex(bytes), size:bytes.length, at:new Date().toISOString(),
+    file:file.name, prefixOk, tail:res.tail, timestamps:res.timestamps.length, sigs,
+    rows:m.rows.map(r=>({name:r.name, roles:r.roles, sig:r.sig})), extras:m.extras};
+  if(writeToDb()){
+    try{ await window.LS.db.docUpload(signed.path,bytes); }
+    catch(e){ console.error(e); showToast(sqlHint('Envoi du PV signé impossible : '+(e.message||e)),'err'); return; }
+  } else { signed.path=null; _pvLocal[ag.id+':signed']=bytes; }
+  const was=sg.status, status=!intact ? 'a_verifier' : (complete ? 'signe' : 'partiel');
+  await agSave(ag,{signature:{...sg, status, signed}});
+  if(status==='signe' && was!=='signe')
+    logTimeline({title:`PV de l’AG${ag.ag_date?' du '+ag.ag_date:''} signé`,
+      description:`${m.rows.length} signature(s) électronique(s) via Dokobit : ${m.rows.map(r=>r.name).join(', ')}.`, kind:'sign'});
+  showToast({signe:'PV signé par tous les signataires', partiel:'PV importé — il manque des signatures', a_verifier:'Attention : signature invalide ou document modifié'}[status], status==='signe'?undefined:'err');
+  rerenderSign(ag);
+}
+
+// --- rendu ---
+function signBadge(ag){
+  const st=(ag.signature||{}).status;
+  if(st==='signe')    return '<span class="badge b-ok">✍ PV signé</span>';
+  if(st==='a_verifier') return '<span class="badge b-late">✍ PV à vérifier</span>';
+  if(st==='partiel')  return '<span class="badge sg-b-part">✍ Signatures incomplètes</span>';
+  if(st==='a_signer') return '<span class="badge sg-b-wait">✍ En signature</span>';
+  return '<span class="badge sg-b-none">PV non signé</span>';
+}
+function sgFmt(iso){ return iso ? new Date(iso).toLocaleString('fr-BE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
+function signedReport(sd){
+  const METH={itsme:'itsme', eID:'carte eID'};
+  const rows=(sd.rows||[]).map(r=>{
+    const s=r.sig>=0 ? sd.sigs[r.sig] : null;
+    const who=`<b>${escH(r.name)}</b> <span class="sub">${escH((r.roles||[]).join(' · '))}</span>`;
+    if(!s) return `<div class="sg-row wait"><span class="ic">…</span><div>${who}<div class="sub">pas encore signé</div></div></div>`;
+    const okTxt = s.ok===true ? 'signature valide, document intact' : s.ok===false ? 'signature invalide ou document modifié' : 'document intact (signature non vérifiable ici)';
+    const meta=[METH[s.method]||escH(s.issuer), s.at?'le '+sgFmt(s.at)+(s.atSource==='tsa'?' (horodatage certifié)':''):'', okTxt].filter(Boolean).join(' · ');
+    return `<div class="sg-row ${s.ok===false?'bad':'ok'}"><span class="ic">${s.ok===false?'!':'✓'}</span><div>${who}<div class="sub">${meta}</div></div></div>`;
+  }).join('');
+  const extras=(sd.extras||[]).map(k=>sd.sigs[k]).map(s=>`<div class="sg-row extra"><span class="ic">?</span><div><b>${escH(s.name||'Signataire inconnu')}</b> <span class="sub">signataire non attendu</span><div class="sub">${escH(s.issuer)}${s.at?' · le '+sgFmt(s.at):''}</div></div></div>`).join('');
+  const warns=[];
+  if(sd.prefixOk===false) warns.push('Ce PDF ne prolonge pas le PV figé à l’étape 1 : vérifiez que c’est bien le bon document.');
+  if(sd.tail==='autre') warns.push('Le fichier a été modifié après la dernière signature.');
+  return rows+extras+(warns.length?`<div class="sg-warn">${warns.map(escH).join('<br>')}</div>`:'')
+    +`<div class="sub" style="margin-top:6px">Importé le ${sgFmt(sd.at)} · ${escH(sd.file||'')}</div>`;
+}
+function renderSignBox(ag,el){
+  if(!el) return;
+  ensureSignCss();
+  const sg=ag.signature||{}, rw=canWrite(), pv=sg.pv, sd=sg.signed;
+  const expected=(pv&&pv.signers)||pvSigners(ag), n=expected.length;
+  const emails=expected.map(e=>e.email).filter(Boolean);
+  el.innerHTML=`<div class="sg-head"><div><b>Signature du PV</b> <span class="sub">— Dokobit, gratuit · itsme ou carte d’identité</span></div>${signBadge(ag)}</div>
+  <div class="sg-step ${pv?'done':''}"><span class="sg-n">1</span><div class="sg-body">
+    <div class="sg-t">Figer le PV en PDF</div>
+    ${pv ? `<div class="sub">Figé le ${sgFmt(pv.at)} · empreinte <code title="SHA-256 ${escH(pv.sha256)}">${escH(pv.sha256.slice(0,12))}…</code></div>`
+         : `<div class="sub">Présences, votes nominatifs, décisions, notes de séance et liste des signataires. C’est ce fichier-là qu’on signe : il ne bouge plus.</div>`}
+    <div class="sg-acts">${pv?'<button class="btn btn-ghost sg-btn" data-sg="dl-pv">⬇ PV à signer</button>':''}${rw?`<button class="btn ${pv?'btn-ghost':'btn-primary'} sg-btn" data-sg="prepare">${pv?'↻ Régénérer':'📄 Générer le PV à signer'}</button>`:''}</div>
+  </div></div>
+  <div class="sg-step ${sd?'done':''}"><span class="sg-n">2</span><div class="sg-body">
+    <div class="sg-t">Faire signer sur Dokobit</div>
+    <ol class="sg-ol"><li>Déposez le PDF sur Dokobit, au <b>format PDF</b> (pas ASiC-E).</li>
+      <li>Invitez les signataires ci-dessous ; chacun signe avec <b>itsme</b> ou sa <b>carte d’identité</b> (compte Dokobit gratuit).</li>
+      <li>Quand tout le monde a signé, téléchargez le PDF signé.</li></ol>
+    <div class="sg-signers">${expected.map(e=>`<div><b>${escH(e.name)}</b> <span class="sub">${escH(e.roles.join(' · '))}${e.email?' · '+escH(e.email):''}</span></div>`).join('')
+      || '<div class="sub">Complétez le bureau de séance et les présences (étape 3).</div>'}</div>
+    ${n>DOKOBIT.free ? `<div class="sg-warn">${n} signatures : l’offre gratuite en couvre ${DOKOBIT.free} par mois (chaque signataire compte). Étalez sur deux mois ou passez par une offre payante.</div>`
+                     : `<div class="sub">${n} signature${n>1?'s':''} sur les ${DOKOBIT.free} gratuites du mois.</div>`}
+    <div class="sg-acts"><a class="btn btn-ghost sg-btn" href="${DOKOBIT.url}" target="_blank" rel="noopener noreferrer">Ouvrir Dokobit ↗</a>${emails.length?'<button class="btn btn-ghost sg-btn" data-sg="copy">Copier les e-mails</button>':''}</div>
+  </div></div>
+  <div class="sg-step ${sg.status==='signe'?'done':''}"><span class="sg-n">3</span><div class="sg-body">
+    <div class="sg-t">Ramener le PV signé</div>
+    ${sd ? signedReport(sd) : '<div class="sub">LazySyndic lit les signatures du PDF : qui a signé, quand, et si le document est resté intact.</div>'}
+    <div class="sg-acts">${sd?'<button class="btn btn-ghost sg-btn" data-sg="dl-signed">⬇ PV signé</button>':''}${rw?`<button class="btn ${sd?'btn-ghost':'btn-primary'} sg-btn" data-sg="import">⇪ ${sd?'Réimporter':'Importer le PDF signé'}</button><input type="file" accept="application/pdf,.pdf" class="sg-file" hidden>`:''}</div>
+  </div></div>`;
+  el.onclick=ev=>{
+    const b=ev.target.closest('[data-sg]'); if(!b) return;
+    const act=b.dataset.sg;
+    if(act==='prepare') pvPrepare(ag);
+    else if(act==='dl-pv') pvDownload(ag,'pv');
+    else if(act==='dl-signed') pvDownload(ag,'signed');
+    else if(act==='import') el.querySelector('.sg-file').click();
+    else if(act==='copy') navigator.clipboard.writeText(emails.join(', ')).then(()=>showToast('E-mails copiés'),()=>prompt('E-mails des signataires :',emails.join(', ')));
+  };
+  const f=el.querySelector('.sg-file');
+  if(f) f.onchange=()=>{ const file=f.files[0]; f.value=''; if(file) pvImportSigned(ag,file); };
+}
+function rerenderSign(ag){
+  if(currentAG && String(currentAG.id)===String(ag.id)) renderSignBox(currentAG,document.getElementById('agSignBox'));
+  renderAGArchive();
+}
+function ensureSignCss(){
+  if(document.getElementById('signCss')) return;
+  const s=document.createElement('style'); s.id='signCss';
+  s.textContent=`
+   .sg-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+   .sg-step{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line-2)}
+   .sg-n{flex:0 0 26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12.5px;background:var(--line-2);color:var(--ink-soft)}
+   .sg-step.done .sg-n{background:var(--green);color:#fff}
+   .sg-body{flex:1;min-width:0}
+   .sg-t{font-weight:600;font-size:14px;margin-bottom:3px}
+   .sg-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+   .sg-btn{padding:7px 14px;font-size:13px;text-decoration:none;display:inline-block}
+   .sg-ol{margin:4px 0 8px 18px;padding:0;font-size:13px;color:var(--ink-soft)}
+   .sg-signers{display:grid;gap:4px;font-size:13.5px;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin:6px 0;overflow-wrap:anywhere}
+   .sg-warn{background:var(--clay-soft);color:var(--warning-ink);border-radius:10px;padding:8px 12px;font-size:12.5px;margin-top:8px}
+   .sg-row{display:flex;gap:10px;align-items:flex-start;padding:6px 0;font-size:13.5px}
+   .sg-row .ic{flex:0 0 20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;background:var(--ink-faint)}
+   .sg-row.ok .ic{background:var(--green)} .sg-row.bad .ic{background:var(--coral)} .sg-row.extra .ic{background:var(--clay)}
+   .sg-b-wait,.sg-b-part{background:var(--clay-soft);color:var(--warning-ink)} .sg-b-none{background:var(--line-2);color:var(--ink-faint)}
+   .sg-side{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+   .ag-arch .hist .sg-side .rb{margin-left:0}
+   .sg-arch{padding:4px 4px 14px;border-bottom:1px solid var(--line-2)}
+   @media(max-width:560px){ .ag-arch .hist{flex-wrap:wrap} .sg-side{margin-left:0;justify-content:flex-start} }`;
+  document.head.appendChild(s);
 }
 
 
@@ -2370,12 +2743,26 @@ function renderBudgetOwn(){
   if (ot){
     const ow=ownersOf();
     if (!ow.length){ ot.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
-    ot.innerHTML='<tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th></tr>'
+    const ed=canWrite();
+    ot.innerHTML='<tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th><th>E-mail (convocations, signatures)</th></tr>'
       + ow.map(o=>{
           const mine=lotsOf().filter(l=>l.owner_id===o.id).map(l=>l.designation||l.label).join(', ')||'—';
-          return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td><td>${mine}</td><td class="num">${o.q}</td></tr>`;
+          const mail=ed ? `<input class="fld own-mail" type="email" data-key="${escH(o.id||o.short||o.n)}" value="${escH(o.email||'')}" placeholder="nom@exemple.be" style="width:100%;min-width:180px;font-size:12.5px;padding:5px 8px">`
+                              : escH(o.email||'—');
+          return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td><td>${mine}</td><td class="num">${o.q}</td><td>${mail}</td></tr>`;
         }).join('');
+    ot.querySelectorAll('.own-mail').forEach(inp=>inp.onchange=()=>saveOwnerEmail(inp));
   }
+}
+
+async function saveOwnerEmail(inp){
+  const v=inp.value.trim();
+  if(v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){ showToast('Adresse e-mail invalide','err'); return; }
+  const o=ownersOf().find(x=>String(x.id||x.short||x.n)===inp.dataset.key); if(!o) return;
+  o.email=v;
+  if(!writeToDb() || !o.id){ saveState(); toastSaved(); return; }
+  try{ await window.LS.db.updateOwner(o.id,{email:v||null}); toastSaved(); }
+  catch(e){ console.error(e); showToast(sqlHint('Échec de l’enregistrement : '+(e.message||e)),'err'); }
 }
 
 // --- Onglet « Clés de répartition » (exemple calculé sur les vrais propriétaires) ---
@@ -2644,6 +3031,7 @@ const TL_KIND={
   manual:{ic:'✎',c:'var(--clay)',l:'Note'},
   import:{ic:'↧',c:'var(--green)',l:'Import'},
   task:  {ic:'✓',c:'#5B4B86',l:'Tâche'},
+  sign:  {ic:'✍',c:'#2F5E8C',l:'Signature'},
 };
 // Ajoute un événement (manuel ou audit) à la chronologie + persiste.
 function logTimeline(ev){
@@ -3443,7 +3831,7 @@ function renderPaymentTracking(){
     const cells=months.map(m=>{
       const paid=paidInMonth(short,m); let inner;
       if(exp>0){ inner = paid>=exp*0.95 ? '<span class="badge b-ok">✓</span>'
-        : paid>0 ? '<span class="badge" style="background:var(--clay-soft);color:#8A551F">partiel</span>'
+        : paid>0 ? '<span class="badge" style="background:var(--clay-soft);color:var(--warning-ink)">partiel</span>'
         : '<span class="badge b-late">✗</span>'; }
       else inner = paid>0 ? eur(paid) : '—';
       return `<td class="num" title="${eur(paid)} versé en ${MON[m.m-1]}">${inner}</td>`;

@@ -112,11 +112,12 @@
       subcats: settings.subcats || {},
       ownerRules: settings.owner_rules || {},
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
-        due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0)})),
+        due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||''})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
       ags: (res.ls_ag||[]).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).map(a=>({
         id:a.id, title:a.title, ag_date:a.ag_date, lieu:a.lieu, type:a.type||'Ordinaire',
         convocation_date:a.convocation_date, status:a.status||'prep', presence:a.presence||{},
+        bureau:a.bureau||{}, signature:a.signature||{},
         points: (res.ls_ag_points||[]).filter(p=>p.ag_id===a.id).sort((x,y)=>(x.pos||0)-(y.pos||0)).map(p=>({
           id:p.id, ag_id:p.ag_id, pos:p.pos||0, title:p.title||'', body:p.body||'',
           kind:p.kind||'decision', majorite:p.majorite||'simple', cle:p.cle||'Acte de base',
@@ -228,6 +229,17 @@
     async agPointAdd(row){ const {data,error}=await T('ls_ag_points').insert(row).select().single(); if(error)throw error; return data; },
     async agPointUpdate(id, patch){ const {error}=await T('ls_ag_points').update(patch).eq('id',id); if(error)throw error; },
     async agPointDelete(id){ const {error}=await T('ls_ag_points').delete().eq('id',id); if(error)throw error; },
+
+    // --- PV d'AG : bucket privé ls-docs (supabase/ag.sql) ---
+    async docUpload(path, bytes){
+      const {error}=await sb.storage.from('ls-docs').upload(path, new Blob([bytes],{type:'application/pdf'}), {upsert:true, contentType:'application/pdf'});
+      if(error) throw error;
+    },
+    async docDownload(path){
+      const {data,error}=await sb.storage.from('ls-docs').download(path);
+      if(error) throw error;
+      return new Uint8Array(await data.arrayBuffer());
+    },
   };
 
   window.LS = { configured, hasClient, sb, auth, db, member:null, canWrite:false };
