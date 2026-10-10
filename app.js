@@ -345,6 +345,46 @@ function learnSubcat(label, high, sub){
   if(r){ if(r[2]!==sub){ r[2]=sub; dbWrite(db=>db.updateRule(r[3],{sub})); } }
   else { const nr=[label,high,sub,null]; state.rules.push(nr); dbWrite(async db=>{ const s=await db.addRule({label,high,sub}); nr[3]=s.id; }); }
 }
+// Catégorie + sous-catégorie en une seule écriture de règle (learnCategory puis
+// learnSubcat sur une règle neuve écrirait la sous-catégorie avant que l'id existe).
+function learnRule(label, high, sub){
+  if(!canWrite()||!label||!high||high==='?') return;
+  const ln=norm(label); const r=state.rules.find(r=>norm(r[0])===ln);
+  if(r){ if(r[1]!==high||(r[2]||'')!==sub){ r[1]=high; r[2]=sub; dbWrite(db=>db.updateRule(r[3],{high,sub})); } }
+  else { const nr=[label,high,sub,null]; state.rules.push(nr); dbWrite(async db=>{ const s=await db.addRule({label,high,sub}); nr[3]=s.id; }); }
+}
+// Sélecteur unique catégorie › sous-catégorie (liste des transactions + détail).
+// Valeur d'une option : « catégorie<TAB>sous-catégorie ».
+const CAT_SEP='\t';
+function catPickOptions(high, sub){
+  high=high||'?'; sub=sub||'';
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const opt=(h,s,l)=>`<option value="${esc(h+CAT_SEP+s)}"${h===high&&s===sub?' selected':''}>${esc(l)}</option>`;
+  const cats=allCats(); if(high!=='?' && !cats.includes(high)) cats.push(high);   // catégorie hors liste : garder la valeur actuelle
+  const groups=cats.map(c=>{
+    const subs=subcatsOf(c); if(c===high && sub && !subs.includes(sub)) subs.push(sub);
+    return `<optgroup label="${esc(c)}">${opt(c,'',c)}${subs.map(s=>opt(c,s,c+' › '+s)).join('')}</optgroup>`;
+  }).join('');
+  return groups + opt('?','','À catégoriser')
+    + `<option value="__new__">➕ Nouvelle catégorie…</option>`
+    + (high!=='?' ? `<option value="__newsub__">➕ Nouvelle sous-catégorie de « ${esc(high)} »…</option>` : '');
+}
+// Applique un choix du sélecteur à une transaction : état, Supabase, règle
+// apprise, puis les vues qui lisent la catégorie. false = annulé ou inchangé.
+function setTxCategory(t, value){
+  if(!canWrite()||!t) return false;
+  let high, sub='';
+  if(value==='__new__'){ high=addCategory(prompt('Nouvelle catégorie :','')||''); if(!high) return false; }
+  else if(value==='__newsub__'){ high=t.high; sub=addSubcat(high, prompt('Nouvelle sous-catégorie pour « '+high+' » :','')||''); if(!sub) return false; }
+  else { [high, sub=''] = String(value).split(CAT_SEP); }
+  if(!high || (high===t.high && sub===(t.sub||''))) return false;
+  t.high=high; t.sub=sub;
+  dbWrite(db=>db.updateTransaction(t.id,{high, sub}));
+  learnRule(t.tiers, high, sub);
+  saveState();
+  renderTx(curAcct); renderDashboard(); renderComptabilite();
+  return true;
+}
 function learnOwner(label, short){
   if(!canWrite()||!label) return;
   state.ownerRules=state.ownerRules||{}; const ln=norm(label);
@@ -565,7 +605,11 @@ function ensureTxCss(){
     .fdr-warn{display:flex;align-items:center;gap:9px;background:var(--coral-soft);color:var(--coral);
       border:1px solid #E7B7AE;border-radius:11px;padding:9px 14px;font-size:13px;font-weight:600;margin-bottom:10px}
     .fdr-warn .lk{color:var(--coral);text-decoration:underline;font-weight:700;margin-left:auto;cursor:pointer}
-    .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}`;
+    .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}
+    .cat-pick{border:0;font-family:inherit;cursor:pointer;line-height:inherit}
+    .cat-pick .caret{margin-left:4px;font-size:9px;opacity:.45}
+    .cat-pick:hover{box-shadow:inset 0 0 0 1.5px currentColor}
+    .cat-pick:hover .caret{opacity:1}`;
   document.head.appendChild(s);
 }
 // Bannière « sorties > 10 € à justifier » (compte de réserve — dépenses exceptionnelles).
@@ -606,10 +650,14 @@ function renderTx(acct){
     const note = t.note||'';
     const hasC = !!(t.comment && t.comment.trim());
     const esc = s => String(s||'').replace(/"/g,'&quot;');
-    // colonne catégorie : figée (badge) ou éditable (selects)
-    const catCell = editing
-      ? `<select class="fld tx-cat" style="font-size:12px;padding:4px 6px">${categoryOptions(t.high)}</select>${(t.high&&t.high!=='?')?`<br><select class="fld tx-sub" style="font-size:11px;padding:3px 5px;margin-top:4px;color:var(--ink-soft)">${subcatOptions(t.high, t.sub||'')}</select>`:''}`
-      : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
+    // colonne catégorie : sélecteur (ligne en édition, ou badge cliqué), badge
+    // cliquable pour l'admin, badge simple en lecture seule
+    const picking = catPicking===t && !editing;
+    const catCell = (editing || picking)
+      ? `<select class="fld tx-catpick${picking?' quick':''}" style="font-size:12px;padding:4px 6px;max-width:240px">${catPickOptions(t.high, t.sub)}</select>`
+      : canWrite()
+        ? `<button class="cat cat-pick ${catClass(t.high)}" title="Changer la catégorie">${catLabel}<span class="caret">▾</span></button>`
+        : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
     // colonne notes + marqueur commentaire + actions
     let lastCell;
     if (editing){
@@ -659,25 +707,26 @@ function renderTx(acct){
       learnOwner(t.tiers, osel.value);
       renderDashboard(); renderProvisions();
     };
-    const csel = tr.querySelector('.tx-cat');
-    if (csel) csel.onchange = ()=>{
+    // changer la catégorie : clic sur le badge → sélecteur sur place
+    const pickBtn = tr.querySelector('.cat-pick');
+    if (pickBtn) pickBtn.onclick = ()=>{
       if(!canWrite()) return;
-      let val=csel.value;
-      if(val==='__new__'){ const name=addCategory(prompt('Nouvelle catégorie :','')||''); if(!name){ renderTx(acct); return; } val=name; }
-      t.high=val; t.sub='';
-      saveState(); dbWrite(db=>db.updateTransaction(t.id,{high:val, sub:''}));
-      learnCategory(t.tiers, val);
-      renderTx(acct);   // garde la ligne en édition
+      catPicking = t; renderTx(acct);
+      const s = document.querySelector('#txbody .tx-catpick.quick');
+      if (s){ s.focus(); try{ s.showPicker(); }catch(_){} }   // showPicker absent de certains navigateurs
     };
-    const ssel = tr.querySelector('.tx-sub');
-    if (ssel) ssel.onchange = ()=>{
-      if(!canWrite()) return;
-      let v=ssel.value;
-      if(v==='__new__'){ const n=addSubcat(t.high, prompt('Nouvelle sous-catégorie pour « '+t.high+' » :','')||''); if(!n){ renderTx(acct); return; } v=n; }
-      t.sub=v; saveState(); dbWrite(db=>db.updateTransaction(t.id,{sub:v}));
-      learnSubcat(t.tiers, t.high, v);
-      renderTx(acct);
-    };
+    const psel = tr.querySelector('.tx-catpick');
+    if (psel){
+      psel.onchange = ()=>{
+        if (picking) catPicking = null;   // avant un éventuel prompt : le blur qui suit ne doit rien refaire
+        if (!setTxCategory(t, psel.value)) renderTx(acct);   // annulé : remet la ligne d'aplomb (la ligne en édition le reste)
+      };
+      if (picking){
+        // différé : un clic sur un autre badge passe avant et prend la main
+        psel.onblur = ()=>setTimeout(()=>{ if(catPicking!==t) return; catPicking=null; renderTx(acct); }, 150);
+        psel.onkeydown = e=>{ if(e.key==='Escape'){ catPicking=null; renderTx(acct); } };
+      }
+    }
     const cin = tr.querySelector('.tx-comment');
     if (cin) cin.onchange = ()=>{
       if(!canWrite()) return;
@@ -1815,8 +1864,7 @@ function renderPendingImports(){
 function setDraftCat(t, high, sub){
   if(!canWrite()){ alert('Lecture seule : seul le syndic peut catégoriser un relevé.'); renderPendingImports(); return; }
   t.high = high; t.sub = sub || '';
-  learnCategory(t.tiers, high);
-  if (sub) learnSubcat(t.tiers, high, sub);
+  learnRule(t.tiers, high, t.sub);
   if (writeToDb()) dbWrite(db=>db.updateTransaction(t.id, {high:t.high, sub:t.sub}));
   else saveState();
   renderPendingImports();
@@ -3483,12 +3531,16 @@ function showTxDetail(t){
     ${line('Compte', t.account==='res'?'Compte de réserve':'Compte de paiement')}
     ${line('Tiers', t.tiers)}
     ${line('Montant', `<span class="${t.amount<0?'neg':'pos'}">${signed(t.amount)}</span>`)}
-    ${line('Catégorie', `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}${t.sub?(' · '+t.sub):''}</span>`)}
+    ${line('Catégorie', canWrite()
+      ? `<select class="fld txd-cat" style="font-size:12.5px;padding:5px 8px;max-width:250px">${catPickOptions(t.high, t.sub)}</select>`
+      : `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}${t.sub?(' · '+t.sub):''}</span>`)}
     ${t.amount>0 ? line('Versé par', ow?ow.n:(owner||'—')) : ''}
     <div style="padding:10px 0 4px"><div class="sub" style="margin-bottom:4px">Communication</div>
       <div style="font-family:monospace;font-size:12.5px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;word-break:break-word">${t.note||'—'}</div></div>
     ${t.comment ? `<div style="padding:6px 0"><div class="sub" style="margin-bottom:4px">Commentaire (revue AG)</div><div class="cmt" style="font-style:normal">✎ ${t.comment}</div></div>` : ''}`;
   card.querySelector('#txDetailClose').onclick=()=>m.style.display='none';
+  const dsel=card.querySelector('.txd-cat');
+  if(dsel) dsel.onchange=()=>{ setTxCategory(t, dsel.value); showTxDetail(t); };
   m.style.display='flex';
 }
 
