@@ -123,9 +123,10 @@ charges payées (inchangé).
   remplacer = écraser `img/residence.jpg` (1280 × 768).
 - Mode sombre (`.dark` du design) : jamais activé dans le design, non porté.
 
-## Fusion avec le travail AG / signature non commité
+## Assemblées générales et signature
 
-Les panneaux de l'assistant AG (étapes 1 à 5), `renderTx`, `TL_KIND` et
-`setAgStatus` n'ont pas été touchés : le restylage passe par les jetons et par
-la feuille de surcharges. Reste à faire à la fusion : remplacer les
-`font-family:'Fraunces'` du code AG par `var(--display)`.
+Le parcours AG (convocation, bureau de séance, PV signé via Dokobit) a été
+fusionné après la refonte : il suit les mêmes jetons. Les statuts de l'AG
+reprennent le code du design — en préparation = `warning`, convoquée / tenue =
+`info`, finalisée = `success`. Plus aucune couleur de l'ancienne palette ni
+police Fraunces dans `app.js`.

@@ -815,8 +815,8 @@
       <div class="agpanel" data-panel="1">
         <div class="card" style="margin-bottom:16px">
           <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:16px">
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date &amp; heure</div><input class="fld" id="agDate" style="width:100%;margin-top:4px" value="22 juin 2026 · 19h00"></div>
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Lieu</div><input class="fld" id="agLieu" style="width:100%;margin-top:4px" value="Appartement RDC — sur place"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date &amp; heure</div><input class="fld" id="agDate" style="width:100%;margin-top:4px" placeholder="ex. 22/06/2026 19h00"></div>
+            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Lieu</div><input class="fld" id="agLieu" style="width:100%;margin-top:4px" placeholder="ex. Appartement RDC — sur place"></div>
             <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Type</div><select class="fld" id="agType" style="width:100%;margin-top:4px"><option>Ordinaire</option><option>Extraordinaire</option></select></div>
           </div>
         </div>
@@ -833,13 +833,12 @@
       <div class="agpanel" data-panel="2" style="display:none">
         <div class="card">
           <h2>Envoyer les convocations</h2>
-          <div class="sub" style="margin-bottom:16px">L'ordre du jour est figé. Choisissez la date d'envoi, générez le .eml et passez à la suite.</div>
-          <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Date d'envoi de l'email</div><input class="fld" type="text" style="width:100%;margin-top:4px" value="5 juin 2026"></div>
-            <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Destinataires</div><input class="fld" id="agDest" style="width:100%;margin-top:4px" value=""></div>
+          <div class="sub" style="margin-bottom:16px">La convocation reprend l'ordre du jour de l'étape 1 — titres et textes de chaque point. Elle s'ouvre dans votre messagerie, adressée aux copropriétaires, prête à envoyer.</div>
+          <div id="agConvInfo"></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="mailConv">✉ Ouvrir dans ma messagerie</button>
+            <button class="btn btn-ghost" id="genConv">⬇ Fichier .eml</button>
           </div>
-          <div class="alert" style="background:var(--green-soft);border-color:#BcD6c2;color:var(--green-deep)"><span class="ic">✓</span> Délai légal respecté : envoi 17 jours avant la séance (minimum 15 jours).</div>
-          <button class="btn btn-ghost" id="genConv">✉ Générer le .eml de convocation</button>
         </div>
         <div class="save-bar" style="margin-top:18px">
           <div class="n">Convocations prêtes</div>
@@ -857,6 +856,7 @@
         </div>
         <div class="mini-h">Présences par propriétaire</div>
         <div id="presences"></div>
+        <div class="card" id="agBureau" style="margin-top:16px"></div>
         <div class="save-bar" style="margin-top:18px">
           <div class="n">Présences enregistrées</div>
           <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary nextStep">Ouvrir la séance →</button></div>
@@ -875,14 +875,13 @@
 
       <!-- STEP 5 : finish -->
       <div class="agpanel" data-panel="5" style="display:none">
-        <div class="card" style="text-align:center;padding:36px">
-          <div style="font-size:40px">📄</div>
-          <h2 style="font-family:var(--display);font-size:20px;margin-top:8px">Générer le procès-verbal</h2>
-          <div class="sub" style="max-width:460px;margin:8px auto 20px">Le PV reprend l'ordre du jour, les présences, les votes en quotités et les décisions. Vous obtenez un <b>document Word éditable</b> que vous pouvez retoucher avant diffusion.</div>
-          <button class="btn btn-primary" id="genPV">⬇ Générer le PV (Word)</button>
+        <div class="card"><div id="agSignBox"></div></div>
+        <div class="card" style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px"><b>Version Word éditable</b><div class="sub">Pour relire ou retoucher le texte. Ce n'est pas elle qu'on signe.</div></div>
+          <button class="btn btn-ghost" id="genPV"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> PV (Word)</button>
         </div>
         <div class="save-bar" style="margin-top:18px">
-          <div class="n">Document généré et relu ?</div>
+          <div class="n">La signature peut se terminer après la clôture : le PV reste dans l'historique ci-dessous.</div>
           <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary" id="completeAG" style="background:var(--clay)">✓ AG complétée</button></div>
         </div>
       </div>
@@ -1028,6 +1027,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="config.js"></script>
 <script src="db.js"></script>
+<script src="signature.js"></script>
 <script src="app.js"></script>
 
 <style>

@@ -20,3 +20,6 @@ data-réelle/
 
 # Relevés bancaires (jamais committer)
 *.pdf
+
+# Sauf les PV FICTIFS des tests de signature (noms inventés, générés par tests/fixtures/make_*.)
+!tests/fixtures/*.pdf
