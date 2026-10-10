@@ -272,6 +272,7 @@
   .data-panel th{border-top:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:0!important;padding:11px 20px}
   .data-panel td{padding:14px 20px}
   .num{font-variant-numeric:tabular-nums;text-align:right}
+  .app td.num{white-space:nowrap}
   .who{display:flex;align-items:center;gap:9px;white-space:nowrap}
   .who .a{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;flex:none}
 
@@ -836,8 +837,8 @@
           <div class="sub" style="margin-bottom:16px">La convocation reprend l'ordre du jour de l'étape 1 — titres et textes de chaque point. Elle s'ouvre dans votre messagerie, adressée aux copropriétaires, prête à envoyer.</div>
           <div id="agConvInfo"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn btn-primary" id="mailConv">✉ Ouvrir dans ma messagerie</button>
-            <button class="btn btn-ghost" id="genConv">⬇ Fichier .eml</button>
+            <button class="btn btn-primary" id="mailConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg> Ouvrir dans ma messagerie</button>
+            <button class="btn btn-ghost" id="genConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Fichier .eml</button>
           </div>
         </div>
         <div class="save-bar" style="margin-top:18px">
@@ -882,7 +883,7 @@
         </div>
         <div class="save-bar" style="margin-top:18px">
           <div class="n">La signature peut se terminer après la clôture : le PV reste dans l'historique ci-dessous.</div>
-          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary" id="completeAG" style="background:var(--clay)">✓ AG complétée</button></div>
+          <div style="display:flex;gap:10px"><button class="btn btn-ghost prevStep">← Retour</button><button class="btn btn-primary" id="completeAG"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> AG complétée</button></div>
         </div>
       </div>
 
