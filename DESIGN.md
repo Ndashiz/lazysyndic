@@ -130,3 +130,15 @@ fusionné après la refonte : il suit les mêmes jetons. Les statuts de l'AG
 reprennent le code du design — en préparation = `warning`, convoquée / tenue =
 `info`, finalisée = `success`. Plus aucune couleur de l'ancienne palette ni
 police Fraunces dans `app.js`.
+
+L'e-mail de convocation (`convocation.js`) reprend les jetons en hexadécimal : les
+clients mail ne lisent ni les variables CSS, ni le SVG, ni les polices web, et Outlook
+rend le HTML avec le moteur de Word (tableaux et styles inline seulement, `border-radius`
+ignoré). Fond `--background` `#F7F9F7`, carte blanche bordée `#E0E5E2`, bandeau
+`--primary` `#005F45` avec un filet argile `#C9854A` (la fenêtre du symbole) devant la
+date et le lieu, numéros des points en `--secondary` / `--primary`, pastille « Décision »
+en `info`, « Information » en `--muted`, encadré « pièce jointe » en `warning-soft` /
+`--warning-ink`. En-tête : le symbole en PNG (`brand/icon-180.png`, en `cid:` dans le
+`.eml`) et le nom en texte, « Lazy » 800 / « Syndic » 600, Hanken Grotesk avec repli
+Segoe UI / Arial. Le PDF joint (lettre + procuration) suit les couleurs du relevé de
+compte.

@@ -2077,8 +2077,11 @@ document.getElementById('addPoint')?.addEventListener('click',()=>{
   dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,kind:'decision',majorite:'simple',cle:'Acte de base'}); p.id=s.id; });
 });
 
-// --- Convocation : un seul texte (titres ET textes des points), envoyé depuis la messagerie
-//     du syndic (mailto, adresses des copropriétaires pré-remplies) ou en .eml ---
+// --- Convocation : un e-mail mis en page (modèle Outlook, aux couleurs de LazySyndic) et, en pièce
+//     jointe, la convocation complète + le formulaire de procuration (PDF). convocation.js
+//     (LSConvocation) construit le texte, le HTML, le .eml et le PDF ; ici : les données depuis
+//     l'état, les destinataires et les gestes (aperçu, copier pour Outlook, composer, .eml, PDF),
+//     pour tous les copropriétaires ou nominativement pour un seul. ---
 function sansAccents(s){ return String(s||'').normalize('NFD').replace(/\p{M}/gu,''); }
 // « 22/06/2026 19h00 », « 2026-06-22 », « 22 juin 2026 · 19h00 » → Date (minuit local) ; null sinon
 function parseFrDate(s){
@@ -2090,6 +2093,14 @@ function parseFrDate(s){
   if(m){ const k=['janvier','fevrier','mars','avril','mai','juin','juillet','aout','septembre','octobre','novembre','decembre'].indexOf(m[2]); if(k>=0) return new Date(+m[3],k,+m[1]); }
   return null;
 }
+// « 19h00 », « 19:30 », « 19 h » dans la date saisie → 'HHhMM' ; '' sans heure lisible
+function agTimeLabel(label){ const m=sansAccents(label).match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i); return m?`${String(+m[1]).padStart(2,'0')}h${m[2]||'00'}`:''; }
+// Date + heure de la séance (pour le rendez-vous .ics) ; null sans date lisible
+function agStart(ag){
+  const d=parseFrDate(ag.ag_date); if(!d) return null;
+  const m=sansAccents(ag.ag_date||'').match(/(\d{1,2})\s*[h:]\s*(\d{2})?/i); if(m) d.setHours(+m[1],+(m[2]||0),0,0);
+  return d;
+}
 // Délai entre l'envoi (ou aujourd'hui) et la séance — 15 jours minimum (art. 3.87 §3 C. civ.)
 function convocationDelay(ag){
   const d=parseFrDate(ag.ag_date); if(!d) return null;
@@ -2097,40 +2108,111 @@ function convocationDelay(ag){
   const from=sent||new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
   return {days:Math.round((d-from)/86400000), sent:!!sent};
 }
-function convocation(ag){
-  const cn=(state.coproName||'').trim()||'la copropriété';
+// Les copropriétaires à convoquer : tous sauf le syndic lui-même (même liste que le relevé de compte)
+function convocationRecipients(){
   const m=(window.LS&&window.LS.member)||{};
-  const syndic=(m.full_name||'').trim()||'Le syndic';
   const me=String(m.userEmail||m.email||'').toLowerCase();
-  const type=String(ag.type||'ordinaire').toLowerCase();
-  const dateHeure=ag.ag_date||'(date à préciser)', lieu=ag.lieu||'(lieu à préciser)';
-  const points=ag.points.map((p,i)=>{
-    const head=`${i+1}. ${p.title}${p.kind==='decision'?` — décision (${MAJ[p.majorite]})`:' — information'}`;
-    const body=String(p.body||'').trim();
-    return body ? head+'\n'+body.split('\n').map(l=>'   '+l).join('\n') : head;
-  }).join('\n\n');
-  const subject=`Convocation — Assemblée générale ${type} — ${cn} — ${dateHeure}`;
-  const body=`Madame, Monsieur, cher copropriétaire,
-
-En ma qualité de syndic de ${cn}, j'ai l'honneur de vous convoquer à l'assemblée générale ${type} qui se tiendra :
-
-    Date : ${dateHeure}
-    Lieu : ${lieu}
-
-ORDRE DU JOUR
-
-${points}
-
-Tout copropriétaire empêché peut se faire représenter par procuration écrite.
-
-Salutations distinguées,
-${syndic} — Syndic, ${cn}
-`;
-  // le syndic ne s'écrit pas à lui-même
   const others=ownersOf().filter(o=>!(o.email && o.email.toLowerCase()===me) && o.n!==m.full_name);
-  return { subject, body, syndic, from:me,
-           to: others.filter(o=>o.email).map(o=>o.email),
-           missing: others.filter(o=>!o.email).map(o=>o.n) };
+  return { syndic:(m.full_name||'').trim()||'Le syndic', from:me, others,
+           to: others.filter(o=>o.email).map(o=>o.email), missing: others.filter(o=>!o.email).map(o=>o.n) };
+}
+// Les données du modèle (convocation.js). `owner` = un copropriétaire pour un message nominatif, sinon générique.
+function convocationData(ag, owner){
+  const r=convocationRecipients(), d=parseFrDate(ag.ag_date), dl=convocationDelay(ag);
+  const lots=owner ? lotsOf().filter(l=>l.owner_id!=null && l.owner_id===owner.id).map(l=>l.designation||l.label).filter(Boolean).join(', ') : '';
+  return {
+    copro:{name:(state.coproName||'').trim()||'la copropriété', addr:state.coproAddr||'', kbo:state.coproKbo||''},
+    type:String(ag.type||'ordinaire').toLowerCase(),
+    dateLabel:ag.ag_date||'', dateLong:d?d.toLocaleDateString('fr-BE',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'',
+    timeLabel:agTimeLabel(ag.ag_date||''), start:agStart(ag), lieu:ag.lieu||'',
+    points:(ag.points||[]).map((p,i)=>({n:i+1, title:p.title||'', kind:p.kind, maj:MAJ[p.majorite]||'', pct:MAJPCT[p.majorite]||0, body:String(p.body||'').trim()})),
+    syndic:{name:r.syndic, email:r.from},
+    sentLabel:ag.convocation_date||new Date().toLocaleDateString('fr-BE'),
+    delayDays:dl?dl.days:null,
+    recipient:owner?{name:owner.n, lots}:null,
+    // l'image d'en-tête du mail (le symbole, en PNG : Outlook ne lit pas le SVG) ; remplacée par un cid: dans le .eml
+    logoSrc:new URL('brand/icon-180.png',document.baseURI).href,
+  };
+}
+// Le logo horizontal en PNG, pour les PDF (pdf-lib ne lit pas le SVG) ; null si le rendu échoue
+let _brandPngP=null;
+function brandLogoPng(){
+  return _brandPngP = _brandPngP || new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{ try{
+      const c=document.createElement('canvas'); c.width=263*4; c.height=64*4;
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=>{ if(!b) return res(null); b.arrayBuffer().then(x=>res(new Uint8Array(x)),()=>res(null)); },'image/png');
+    }catch(e){ res(null); } };
+    img.onerror=()=>res(null);
+    img.src='brand/logo.svg';
+  });
+}
+const brandMarkPng=()=>fetch('brand/icon-180.png').then(x=>x.ok?x.arrayBuffer():null).then(b=>b?new Uint8Array(b):null).catch(()=>null);
+// Copie le HTML (et sa version texte) dans le presse-papiers : collé dans Outlook, Mail ou Gmail,
+// le message garde sa mise en page. À appeler dans le geste, avant tout await (Safari refuse sinon).
+function copyRichText(html, text){
+  const fallback=()=>{
+    const host=document.createElement('div'); host.contentEditable='true';
+    host.style.cssText='position:fixed;left:-9999px;top:0;width:600px;opacity:0;pointer-events:none';
+    host.innerHTML=html; document.body.appendChild(host);
+    const r=document.createRange(); r.selectNodeContents(host); const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+    let ok=false; try{ ok=document.execCommand('copy'); }catch(e){}
+    s.removeAllRanges(); host.remove(); return ok;
+  };
+  if(navigator.clipboard && window.ClipboardItem){
+    try{
+      const item=new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})});
+      return navigator.clipboard.write([item]).then(()=>true, ()=>fallback());
+    }catch(e){}
+  }
+  return Promise.resolve(fallback());
+}
+async function convocationPdf(d){ return LSConvocation.buildPdf(await loadPdfLib(), {...d, logo:await brandLogoPng()}); }
+// Les gestes de l'étape 2. `owner` = message nominatif pour ce copropriétaire ; null = tous.
+async function convocationAct(act, owner){
+  if(!currentAG){ alert('Aucune assemblée.'); return; }
+  if(act==='preview'){ openConvPreview(owner); return; }
+  const L=LSConvocation, r=convocationRecipients(), d=convocationData(currentAG, owner);
+  const to=owner ? (owner.email?[owner.email]:[]) : r.to;
+  const subj=L.subject(d), txt=L.text(d);
+  const fail=(what,e)=>{ console.error(e); showToast(`${what} impossible à générer : ${e&&e.message||e}`,'err'); };
+  if(act==='copy'){
+    const ok=await copyRichText(L.htmlBody(d), txt);
+    showToast(ok?'Modèle copié : collez-le dans un nouveau message Outlook (⌘V), puis joignez le PDF.':'Copie impossible ici : passez par le fichier .eml.', ok?'':'err');
+    return;
+  }
+  if(act==='compose'){
+    const copied=copyRichText(L.htmlBody(d), txt);                    // dans le geste, avant tout await
+    const addr=to.map(e=>encodeURIComponent(e).replace(/%40/g,'@')).join(',');
+    location.href=`mailto:${addr}?subject=${encodeURIComponent(subj)}`;
+    markConvoked();
+    let ok=false; try{ ok=await copied; }catch(e){}
+    try{ saveBytes(await convocationPdf(d), L.fileName(d,'pdf'));
+         showToast(ok?'Message ouvert, modèle copié (⌘V pour le coller) et PDF téléchargé : joignez-le avant d’envoyer.'
+                     :'Message ouvert et PDF téléchargé : joignez-le avant d’envoyer.'); }
+    catch(e){ fail('PDF',e); }
+    return;
+  }
+  if(act==='pdf'){
+    try{ saveBytes(await convocationPdf(d), L.fileName(d,'pdf')); showToast('Convocation et procuration téléchargées (PDF).'); }
+    catch(e){ fail('PDF',e); }
+    return;
+  }
+  if(act==='eml'){
+    try{
+      const [bytes, mark]=await Promise.all([convocationPdf(d), brandMarkPng()]);
+      const cid='logo@lazysyndic', ics=L.ics(d);
+      const eml=L.eml({from:r.from, fromName:r.syndic, to, subject:subj, text:txt,
+        html:L.html({...d, logoSrc: mark ? 'cid:'+cid : d.logoSrc}),
+        logo: mark ? {bytes:mark, cid} : null,
+        pdf:{name:L.fileName(d,'pdf'), bytes},
+        ics: ics ? {name:'assemblee-generale.ics', text:ics} : null});
+      downloadBlob(new Blob([eml],{type:'message/rfc822'}), L.fileName(d,'eml'));
+      markConvoked();
+      showToast('Brouillon prêt, PDF et rendez-vous joints : ouvrez le fichier .eml dans Outlook pour l’envoyer.');
+    }catch(e){ fail('Brouillon',e); }
+  }
 }
 function markConvoked(){
   if(!canWrite() || !currentAG || currentAG.status!=='prep') return;
@@ -2139,45 +2221,86 @@ function markConvoked(){
   dbWrite(db=>db.agUpdate(currentAG.id,{status:'convoquee',convocation_date:currentAG.convocation_date}));
   renderConvInfo();
 }
+let _convCss=false;
+function convCss(){
+  if(_convCss) return; _convCss=true;
+  const css=document.createElement('style');
+  css.textContent=`
+    .cv-list .cv-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:6px 0}
+    .cv-list .cv-row+.cv-row{border-top:1px solid var(--border)}
+    .cv-acts{display:flex;gap:6px}
+    .cv-acts .rb{margin-left:0}
+    .cv-acts .rb:disabled{opacity:.45;cursor:not-allowed}
+    #convModal{position:fixed;inset:0;background:oklch(.19 .024 166 / .55);z-index:120;display:none;align-items:center;justify-content:center;padding:16px}
+    #convModal.open{display:flex}
+    .cv-card{width:760px;max-width:100%;max-height:94vh;display:flex;flex-direction:column;border-radius:var(--radius);padding:0;box-shadow:var(--shadow-lg);overflow:hidden}
+    .cv-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+    .cv-head h2{margin:0;font-size:16px;flex:1 1 auto}
+    .cv-head select{max-width:280px}
+    .cv-frame{flex:1 1 auto;min-height:300px;height:62vh;border:0;background:var(--background);width:100%;display:block}
+    .cv-bar{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--border)}
+    .cv-note{font-size:12px;color:var(--muted-foreground);margin-right:auto;flex:1 1 220px}
+    @media (max-width:560px){ .cv-bar .btn{flex:1 1 100%;justify-content:center} }`;
+  document.head.appendChild(css);
+}
+let _convModal=null;
+function convModal(){
+  if(_convModal) return _convModal;
+  convCss();
+  const m=document.createElement('div'); m.id='convModal';
+  m.innerHTML=`<div class="card cv-card" role="dialog" aria-modal="true" aria-labelledby="cvTitle">
+    <div class="cv-head"><h2 id="cvTitle">Aperçu de la convocation</h2>
+      <select class="fld" id="cvWho" aria-label="Destinataire"></select>
+      <button class="btn btn-ghost btn-sm" id="cvClose" aria-label="Fermer">✕</button></div>
+    <iframe class="cv-frame" id="cvFrame" title="Aperçu de l’e-mail" sandbox="allow-same-origin"></iframe>
+    <div class="cv-bar"><span class="cv-note">Ce que reçoit le copropriétaire. Le PDF joint reprend la convocation complète et le formulaire de procuration.</span>
+      <button class="btn btn-ghost btn-sm" data-act="pdf">PDF</button>
+      <button class="btn btn-ghost btn-sm" data-act="eml">Fichier .eml</button>
+      <button class="btn btn-ghost btn-sm" data-act="copy">Copier pour Outlook</button>
+      <button class="btn btn-primary btn-sm" data-act="compose">Composer</button></div></div>`;
+  document.body.appendChild(m);
+  const close=()=>m.classList.remove('open');
+  m.addEventListener('click',e=>{ if(e.target===m) close(); });
+  m.querySelector('#cvClose').onclick=close;
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && m.classList.contains('open')) close(); });
+  m.querySelector('#cvWho').onchange=()=>renderConvPreview();
+  m.querySelectorAll('.cv-bar [data-act]').forEach(b=>b.onclick=()=>convocationAct(b.dataset.act, convPreviewOwner()));
+  return _convModal=m;
+}
+function convPreviewOwner(){ const v=convModal().querySelector('#cvWho').value; return v===''?null:(convocationRecipients().others[+v]||null); }
+function renderConvPreview(){
+  if(!currentAG) return;
+  convModal().querySelector('#cvFrame').srcdoc=LSConvocation.html(convocationData(currentAG, convPreviewOwner()));
+}
+function openConvPreview(owner){
+  const m=convModal(), sel=m.querySelector('#cvWho'), r=convocationRecipients();
+  sel.innerHTML=`<option value="">Tous les copropriétaires (message générique)</option>`
+    +r.others.map((o,i)=>`<option value="${i}">${escH(o.n)}${o.email?'':' — sans e-mail'}</option>`).join('');
+  const i=owner?r.others.indexOf(owner):-1; sel.value=i>=0?String(i):'';
+  renderConvPreview(); m.classList.add('open');
+}
 function renderConvInfo(){
   const el=document.getElementById('agConvInfo'); if(!el||!currentAG) return;
-  const c=convocation(currentAG), dl=convocationDelay(currentAG);
-  const who=ownersOf().filter(o=>o.n!==((window.LS&&window.LS.member)||{}).full_name)
-    .map(o=>`<div><b>${escH(o.n)}</b> ${o.email?`<span class="sub">${escH(o.email)}</span>`:'<span style="color:var(--coral)">— e-mail manquant</span>'}</div>`).join('');
+  convCss();
+  const r=convocationRecipients(), dl=convocationDelay(currentAG);
+  const who=r.others.map((o,i)=>`<div class="cv-row"><div class="cv-who"><b>${escH(o.n)}</b> ${o.email?`<span class="sub">${escH(o.email)}</span>`:'<span style="color:var(--danger)">— e-mail manquant</span>'}</div>
+      <div class="cv-acts"><button class="rb" data-conv="preview" data-i="${i}" title="Aperçu du message nominatif">Aperçu</button><button class="rb" data-conv="compose" data-i="${i}" ${o.email?'':'disabled'} title="Message nominatif dans ma messagerie, PDF téléchargé">Composer</button><button class="rb" data-conv="eml" data-i="${i}" title="Brouillon .eml nominatif, PDF et rendez-vous joints">.eml</button></div></div>`).join('');
   let delay;
-  if(!dl) delay=`<div class="alert" style="background:var(--clay-soft);border-color:oklch(.88 .07 80);color:var(--warning-ink)"><span class="ic">i</span> Indiquez la date de l’AG à l’étape 1 (ex. 22/06/2026 19h00) pour vérifier le délai légal de 15 jours.</div>`;
-  else if(dl.days>=15) delay=`<div class="alert" style="background:var(--green-soft);border-color:oklch(.88 .05 160);color:var(--green-deep)"><span class="ic">✓</span> Délai légal respecté : ${dl.sent?'envoyée':'envoi'} ${dl.days} jours avant la séance (minimum 15).</div>`;
+  if(!dl) delay=`<div class="alert" style="background:var(--warning-soft);border-color:oklch(.88 .07 80);color:var(--warning-ink)"><span class="ic">i</span> Indiquez la date de l’AG à l’étape 1 (ex. 22/06/2026 19h00) pour vérifier le délai légal de 15 jours.</div>`;
+  else if(dl.days>=15) delay=`<div class="alert" style="background:var(--success-soft);border-color:oklch(.88 .05 160);color:var(--success)"><span class="ic">✓</span> Délai légal respecté : ${dl.sent?'envoyée':'envoi'} ${dl.days} jours avant la séance (minimum 15).</div>`;
   else delay=`<div class="alert"><span class="ic">!</span> ${dl.days<0?'La date de l’AG est passée.':`Seulement ${dl.days} jour${dl.days>1?'s':''} avant la séance : le minimum légal est de 15 jours (art. 3.87 §3), sauf urgence.`}</div>`;
-  el.innerHTML=`<div class="mini-h" style="margin-top:0">Destinataires</div>
-    <div class="sg-signers">${who||'<div class="sub">Aucun autre copropriétaire.</div>'}</div>
-    ${c.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Budget &amp; copro › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
+  el.innerHTML=`<div class="mini-h" style="margin-top:0">Destinataires — un message nominatif par copropriétaire, ou un envoi groupé</div>
+    <div class="sg-signers cv-list">${who||'<div class="sub">Aucun autre copropriétaire.</div>'}</div>
+    ${r.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Budget &amp; copro › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
     ${delay}
     ${currentAG.convocation_date?`<div class="sub" style="margin-bottom:10px">Convocation marquée envoyée le ${escH(currentAG.convocation_date)}.</div>`:''}`;
+  el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>convocationAct(b.dataset.conv, r.others[+b.dataset.i]||null));
 }
-document.getElementById('mailConv')?.addEventListener('click',()=>{
-  if(!currentAG){ alert('Aucune assemblée.'); return; }
-  const c=convocation(currentAG);
-  const to=c.to.map(e=>encodeURIComponent(e).replace(/%40/g,'@')).join(',');
-  location.href=`mailto:${to}?subject=${encodeURIComponent(c.subject)}&body=${encodeURIComponent(c.body)}`;
-  markConvoked();
-});
-document.getElementById('genConv')?.addEventListener('click',()=>{
-  if(!currentAG){ alert('Aucune assemblée.'); return; }
-  const c=convocation(currentAG);
-  const b64=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
-  const eml=`From: ${c.syndic} (Syndic) <${c.from||'syndic@exemple.be'}>
-To: ${c.to.join(', ')}
-Subject: =?UTF-8?B?${b64(c.subject)}?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset="utf-8"
-Content-Transfer-Encoding: 8bit
-
-${c.body}`;
-  const blob=new Blob([eml],{type:'message/rfc822'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='convocation-AG.eml';
-  document.body.appendChild(a); a.click(); a.remove();
-  markConvoked();
-});
+document.getElementById('mailConv')?.addEventListener('click',()=>convocationAct('compose',null));
+document.getElementById('prevConv')?.addEventListener('click',()=>convocationAct('preview',null));
+document.getElementById('copyConv')?.addEventListener('click',()=>convocationAct('copy',null));
+document.getElementById('genConv')?.addEventListener('click',()=>convocationAct('eml',null));
+document.getElementById('pdfConv')?.addEventListener('click',()=>convocationAct('pdf',null));
 
 function setPresence(short,patch){
   if(!currentAG) return;
@@ -4381,20 +4504,8 @@ setTimeout(boot, 0);
     card.querySelector('#stMail')?.addEventListener('click', ()=>run('mail'));
   }
 
-  // Logo de marque en PNG pour le PDF (pdf-lib ne lit pas le SVG) ; sans lui, le nom en texte.
-  let _logoP = null;
-  function logoPng(){
-    return _logoP = _logoP || new Promise(res=>{
-      const img = new Image();
-      img.onload = ()=>{ try {
-        const c = document.createElement('canvas'); c.width = 263*4; c.height = 64*4;
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        c.toBlob(b=>{ if(!b) return res(null); b.arrayBuffer().then(x=>res(new Uint8Array(x)), ()=>res(null)); }, 'image/png');
-      } catch(e){ res(null); } };
-      img.onerror = ()=>res(null);
-      img.src = 'brand/logo.svg';
-    });
-  }
+  // Logo de marque en PNG pour le PDF (pdf-lib ne lit pas le SVG) ; partagé avec la convocation.
+  const logoPng = () => brandLogoPng();
   function mailText(copro, accounts, extractedAt){
     const cn = copro.name, f = fr(from), t = fr(to), rec = recipients();
     const which = accounts.length>1 ? 'des comptes de paiement et de réserve'

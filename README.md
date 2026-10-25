@@ -11,7 +11,8 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
 - **Front statique** (HTML/CSS/JS, sans build) — `index.html`, `app.js`, `db.js`,
   `ui.js` (barre du haut, notifications, blocs de la page de garde),
   `signature.js` (PV en PDF, lecture des signatures), `statement.js` (relevé de compte PDF),
-  `charges.js` (calcul des charges par poste).
+  `charges.js` (calcul des charges par poste), `convocation.js` (convocation à l'AG : e-mail
+  mis en page, brouillon `.eml`, PDF avec procuration).
 - **Design system** : repris de `Ndashiz/lazysyndic-refined` (maquette Lovable) —
   jetons, composants et correspondance écran par écran dans [`DESIGN.md`](DESIGN.md).
 - **Présentation** : `decouvrir/` — page marketing autonome (aucune dépendance au
@@ -44,9 +45,19 @@ règle plus courte que lui. Code : bloc `OWNER-DETECT` d'`app.js` ; tests :
 ## Assemblées générales et signature des PV
 
 1. **Ordre du jour** — points titrés et documentés, majorité requise par point.
-2. **Convocation** — s'ouvre dans la messagerie du syndic (`mailto:`), adressée aux
-   e-mails des copropriétaires (Budget & copro › Copropriétaires & lots) ; contrôle
-   du délai légal de 15 jours (art. 3.87 §3).
+2. **Convocation** — un e-mail mis en page aux couleurs de LazySyndic (nom du
+   copropriétaire, date, heure, lieu, ordre du jour, règles de la séance : délai, quorum,
+   procurations, votes, documents, PV) et, en pièce jointe, la **convocation complète
+   avec le formulaire de procuration** (PDF, deux pages, instructions de vote par point).
+   Pour tous les copropriétaires ou nominativement pour un seul (e-mails et lots dans
+   Budget & copro › Copropriétaires & lots) : « Aperçu » montre le message tel qu'il sera
+   reçu ; « Composer » ouvre la messagerie du syndic (`mailto:`) avec les destinataires,
+   copie le modèle à coller dans le message (⌘V) et télécharge le PDF à joindre ;
+   « Copier pour Outlook » ne fait que la copie ; « Fichier .eml » est un brouillon
+   Outlook prêt à partir (`X-Unsent`), PDF et rendez-vous `.ics` déjà joints, le symbole
+   en image inline (`cid:`). Contrôle du délai légal de 15 jours (art. 3.87 §3). Code :
+   `convocation.js` (texte, HTML, `.eml`, `.ics`, PDF — sans DOM ni réseau) ; tests :
+   `node --test tests/convocation.test.mjs`.
 3. **Présences** — présent / représenté (mandataire) / excusé / absent, quorum, et
    **bureau de séance** (président = un copropriétaire, secrétaire).
 4. **Séance** — votes et notes par point. Décompte selon l'art. 3.88 : majorité des

@@ -835,11 +835,14 @@
       <div class="agpanel" data-panel="2" style="display:none">
         <div class="card">
           <h2>Envoyer les convocations</h2>
-          <div class="sub" style="margin-bottom:16px">La convocation reprend l'ordre du jour de l'étape 1 — titres et textes de chaque point. Elle s'ouvre dans votre messagerie, adressée aux copropriétaires, prête à envoyer.</div>
+          <div class="sub" style="margin-bottom:16px">La convocation est un e-mail mis en page aux couleurs de LazySyndic — nom du copropriétaire, date, heure, lieu, ordre du jour de l'étape 1 et règles de la séance — avec, en pièce jointe, la convocation complète et le formulaire de procuration (PDF). <b>Composer</b> ouvre votre messagerie avec les destinataires, copie le modèle à coller dans le message (⌘V) et télécharge le PDF à joindre ; le <b>fichier .eml</b> est un brouillon Outlook prêt à partir, PDF et rendez-vous déjà joints.</div>
           <div id="agConvInfo"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn btn-primary" id="mailConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg> Ouvrir dans ma messagerie</button>
+            <button class="btn btn-primary" id="mailConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg> Composer pour tous</button>
+            <button class="btn btn-ghost" id="prevConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> Aperçu</button>
+            <button class="btn btn-ghost" id="copyConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg> Copier pour Outlook</button>
             <button class="btn btn-ghost" id="genConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Fichier .eml</button>
+            <button class="btn btn-ghost" id="pdfConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg> PDF</button>
           </div>
         </div>
         <div class="save-bar" style="margin-top:18px">
@@ -1032,6 +1035,7 @@
 <script src="db.js"></script>
 <script src="signature.js"></script>
 <script src="statement.js"></script>
+<script src="convocation.js"></script>
 <script src="charges.js"></script>
 <script src="app.js"></script>
 
