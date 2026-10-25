@@ -8,7 +8,7 @@
 'use strict';
 
 /* ---------- Helpers monnaie / dates ---------- */
-const eur = n => (n).toLocaleString('fr-BE', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+const eur = n => typeof LSPdf!=='undefined' ? LSPdf.fmt.eur(n) : (n).toLocaleString('fr-BE', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';   // format de référence : pdf.js
 const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + eur(Math.abs(n));
 
 // Parse un montant texte FR/EN/BE → float. Gère "1.234,56", "1234.56",
@@ -4068,35 +4068,7 @@ setTimeout(boot, 0);
     #reportModal.open{display:block}
     .report-toolbar{max-width:820px;margin:0 auto 14px;display:flex;gap:10px;justify-content:flex-end;align-items:center}
     .report-toolbar .rt-title{margin-right:auto;color:#EAF1E8;font-family:var(--display);font-size:16px}
-    .report-sheet{max-width:820px;margin:0 auto;background:#fff;color:#20251F;padding:46px 52px;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-size:13px;line-height:1.5}
-    .report-sheet h1{font-family:var(--display);font-size:26px;font-weight:600;margin:0 0 2px}
-    .report-sheet h2{font-family:var(--display);font-size:16px;font-weight:600;margin:26px 0 8px;padding-bottom:5px;border-bottom:2px solid #21503D;color:#21503D}
-    .report-sheet .r-sub{color:#5C6153;font-size:12px}
-    .report-sheet table{width:100%;border-collapse:collapse;margin-top:6px}
-    .report-sheet th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#5C6153;text-align:left;padding:6px 8px;border-bottom:1.5px solid #20251F}
-    .report-sheet td{padding:5px 8px;border-bottom:1px solid #E6DECE;font-size:12px}
-    .report-sheet td.num,.report-sheet th.num{text-align:right;font-variant-numeric:tabular-nums}
-    .report-sheet tr.tot td{font-weight:700;border-top:1.5px solid #20251F;border-bottom:none}
-    .report-sheet tr.r-group td{padding:8px 8px 3px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#5C6153;border-bottom:1px solid #E6DECE}
-    .report-sheet tr.r-month td{color:#5C6153;border-bottom:none}
-    .report-sheet table.r-wide{font-size:11px}
-    .report-sheet table.r-wide th,.report-sheet table.r-wide td{padding:4px 6px}
-    .report-sheet .pos{color:#2F6B53}.report-sheet .neg{color:#C2564A}
-    .report-sheet .r-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px double #21503D;padding-bottom:14px;margin-bottom:6px}
-    .report-sheet .r-brand img{height:30px;width:auto;display:block}
-    .report-sheet .chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:#E2ECE3;color:#21503D}
-    .report-sheet .sig{display:flex;gap:40px;margin-top:40px;flex-wrap:wrap}
-    .report-sheet .sig div{flex:1;min-width:180px;border-top:1px solid #20251F;padding-top:6px;font-size:11.5px;color:#5C6153}
-    .report-sheet .r-foot{margin-top:34px;padding-top:10px;border-top:1px solid #E6DECE;font-size:10.5px;color:#8A8F80;text-align:center}
-    @media print{
-      body.report-open .app, body.report-open #ctModal{display:none !important}
-      body.report-open #reportModal{position:static;display:block !important;background:#fff;padding:0;overflow:visible}
-      body.report-open .report-toolbar{display:none !important}
-      body.report-open .report-sheet{box-shadow:none;max-width:none;margin:0;padding:0;border-radius:0}
-      body.report-open .report-sheet h2{break-after:avoid}
-      body.report-open .report-sheet tr{break-inside:avoid}
-      @page{margin:16mm 14mm}
-    }`;
+  `;
   document.head.appendChild(css);
 
   /* ---- modal ---- */
@@ -4143,15 +4115,11 @@ setTimeout(boot, 0);
   }
 
   /* ---- sections HTML ---- */
-  function headEl(title, p){
-    return `<div class="r-head">
-      <div><div class="r-brand"><img src="brand/logo.svg" alt="LazySyndic" width="123" height="30"></div>
-        <div style="margin-top:6px"><b>${COPRO().name}</b>${(COPRO().addr||COPRO().kbo)?`<div class="r-sub">${[COPRO().addr, COPRO().kbo?`N° d'entreprise ${COPRO().kbo}`:''].filter(Boolean).join(' · ')}</div>`:''}</div></div>
-      <div style="text-align:right"><span class="chip">${title}</span>
-        <div class="r-sub" style="margin-top:8px">Période : <b>${p.label}</b></div>
-        <div class="r-sub">Édité le ${new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}</div></div>
-    </div>
-    <h1 style="margin-top:18px">${title}</h1>`;
+  // En-tête et pied de tous les rapports : les composants du design system (pdf.js, pdf.css).
+  function headEl(title, p, extra){
+    const o = extra || {};
+    return LSPdf.head({ title, chip:o.chip || title, copro:COPRO(), status:o.status,
+      meta:[...(o.meta || []), ...(p && p.label && !o.noPeriod ? [{label:'Période', value:p.label}] : []), {label:'Édité le', value:LSPdf.fmt.dateLong(new Date())}] });
   }
   function soldesSection(accts, p){
     const rows = accts.map(a=>{
@@ -4212,56 +4180,68 @@ setTimeout(boot, 0);
   }
   // Annexe 4 = le budget du module « Calcul des charges » dès qu'il a des postes pour l'exercice
   // affiché ; sinon, l'ancienne estimation (toutes les dépenses + 4 %).
-  // Annexe 4 en trois parties qui se lisent de la même façon : 1 · fonds de roulement (charges
-  // courantes du compte de paiement), 2 · fonds de réserve, chacun avec la part de chaque
-  // copropriétaire en colonnes, puis 3 · le total par copropriétaire.
+  // Annexe 4 : mise en page du modèle pur (LSCharges.annexModel) avec les composants du design
+  // system (LSPdf). Trois parties qui se lisent de la même façon : 1 · fonds de roulement,
+  // 2 · fonds de réserve, chacun avec la part de chaque copropriétaire, 3 · total par copropriétaire.
+  // Aucun montant n'est calculé ici : tout vient du modèle.
   function chargesAnnex(cy, postes, ow){
-    const bud=chargesBudget(cy), ref=cy-1, cov=bud.cov, n=ow.length||1, draft=!budgetPublished(bud);
-    const b=budgetSplit(cy), res=b.charges, rs=b.res, reserve=b.reserve, qTot=sum(ow.map(o=>+o.q||0))||1000;
-    const money = v => v==null ? '—' : eur(v);
-    const delta = d => d==null ? '—' : `<span${d<-0.005?' style="color:#B42318;font-weight:600"':''}>${d<0?'−':''}${eur(Math.abs(d))}</span>`;
-    const ownerTh = ow.map(o=>`<th class="num">${escH(o.short||o.n)}<div class="r-sub" style="font-size:9.5px;text-transform:none;letter-spacing:0;font-weight:400">${o.q} / ${qTot}</div></th>`).join('');
-    const cells = vals => vals.map(v=>`<td class="num">${v}</td>`).join('');
-    const keyLabel = k => k==='indiv' ? `Individuelle (÷ ${n})` : 'Millièmes';
+    const bud=chargesBudget(cy);
+    const m=LSCharges.annexModel(bud, budgetSplit(cy), ow.map(o=>({n:o.n, short:o.short, q:+o.q||0})), cy);
+    const F=LSPdf.fmt, money=v=>v==null?'—':F.eur(v), ref=m.ref, cov=m.cov;
+    const delta=d=>d==null?{text:'—'}:{text:F.signed(d), neg:d<-0.005};
+    const keyLabel=k=>k==='indiv'?`Individuelle (÷ ${m.n})`:'Millièmes';
+    const ownerCols=m.owners.map(o=>({label:o.short, sub:`${o.q} / ${m.qTot}`, align:'right'}));
+    const wide=m.owners.length<=4;   // au-delà de 4 copropriétaires, la part de chacun passe dans un tableau à part
+    const dense=wide?' pdf-dense':'';
+    const poste=r=>({text:r.label, sub:[r.vendor, r.note].filter(Boolean).join(' · ')});
+    // synthèse
+    const summary=LSPdf.summary([
+      {label:`Fonds de roulement ${cy}`, value:F.eur(m.summary.roulement), sub:'charges courantes · compte de paiement'},
+      {label:`Fonds de réserve ${cy}`, value:F.eur(m.summary.reserve), sub:'appels de l’année · compte de réserve'},
+      {label:`Total annuel ${cy}`, value:F.eur(m.summary.total), sub:'les deux fonds, toutes quotités', emph:true},
+      {label:'Mensualité indicative', value:F.eur(m.summary.monthly), sub:'total annuel ÷ 12'},
+    ]);
     // 1 · fonds de roulement
-    const colsA = 6+ow.length;
-    const rowsA = LSCharges.groupPostes(postes).map(g=>`<tr class="r-group"><td colspan="${colsA}">${escH(g.label||'Sans catégorie')}</td></tr>`
-      + g.items.map(({p})=>{ const c=p.calc;
-        return `<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}${p.vendor?`<div class="r-sub" style="font-size:9.5px">${escH(p.vendor)}</div>`:''}${p.fcNote?`<div class="r-sub" style="font-size:9.5px">${escH(p.fcNote)}</div>`:''}</td>
-          <td>${keyLabel(p.key)}</td><td class="num">${money(c.est)}</td><td class="num">${money(c.real)}</td><td class="num">${delta(c.delta)}</td><td class="num"><b>${eur(p.forecast)}</b></td>${cells(res.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`; }).join('')).join('');
-    const totEst=sum(postes.map(p=>p.calc.est||0)), hasEst=postes.some(p=>p.calc.est!=null);
-    const totReal=sum(postes.map(p=>p.calc.real||0)), hasReal=postes.some(p=>p.calc.real!=null);
-    const totF=sum(postes.map(p=>p.forecast)), totDelta = hasEst&&hasReal ? Math.round((totEst-totReal)*100)/100 : null;
-    const tableA = `<table class="r-wide"><tr><th>Poste</th><th>Clé</th><th class="num">Estimé ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Delta</th><th class="num">Budget ${cy}</th>${ownerTh}</tr>
-      ${rowsA || `<tr><td colspan="${colsA}" class="r-sub">Aucun poste de charges courantes.</td></tr>`}
-      <tr class="tot"><td>Total fonds de roulement ${cy}</td><td></td><td class="num">${hasEst?eur(totEst):'—'}</td><td class="num">${hasReal?eur(totReal):'—'}</td><td class="num">${delta(totDelta)}</td><td class="num">${eur(totF)}</td>${cells(res.map(r=>eur(r.annual)))}</tr>
-      <tr class="r-month"><td>Mensualité (÷ 12)</td><td></td><td></td><td></td><td></td><td class="num">${eur(totF/12)}</td>${cells(res.map(r=>eur(r.monthly)))}</tr></table>`;
+    const colsA=[{label:'Poste'}, {label:'Clé'}, {label:`Estimé ${ref}`, align:'right'}, {label:`Réel ${ref}`, align:'right'}, {label:'Delta', align:'right'}, {label:`Budget ${cy}`, align:'right', emph:true}, ...(wide?ownerCols:[])];
+    const rowA=r=>[poste(r), keyLabel(r.key), money(r.est), money(r.real), delta(r.delta), {text:F.eur(r.budget), emph:true}, ...(wide?r.shares.map(F.eur):[])];
+    const tA=m.roulement.totals;
+    const tableA=LSPdf.table({cols:colsA, cls:'pdf-roulement'+dense, label:`Fonds de roulement ${cy}`, empty:'Aucun poste de charges courantes.',
+      groups:m.roulement.groups.map(g=>({label:g.label||'Sans catégorie', rows:g.rows.map(rowA)})),
+      totals:[{label:`Total fonds de roulement ${cy}`, cells:['', money(tA.est), money(tA.real), delta(tA.delta), {text:F.eur(tA.budget), emph:true}, ...(wide?tA.shares.map(F.eur):[])]},
+              {label:'Mensualité (÷ 12)', kind:'sub', cells:['', '', '', '', F.eur(tA.monthly), ...(wide?tA.sharesMonthly.map(F.eur):[])]}]});
+    const sharesA=wide?'':LSPdf.table({cols:[{label:'Poste'}, {label:`Budget ${cy}`, align:'right', emph:true}, ...ownerCols], cls:'pdf-dense', label:`Part de chaque copropriétaire — fonds de roulement ${cy}`,
+      groups:m.roulement.groups.map(g=>({label:g.label||'Sans catégorie', rows:g.rows.map(r=>[r.label, {text:F.eur(r.budget), emph:true}, ...r.shares.map(F.eur)])})),
+      totals:[{label:`Total fonds de roulement ${cy}`, cells:[{text:F.eur(tA.budget), emph:true}, ...tA.shares.map(F.eur)]}, {label:'Mensualité (÷ 12)', kind:'sub', cells:[F.eur(tA.monthly), ...tA.sharesMonthly.map(F.eur)]}]});
+    const covNote=!cov.months ? `Pas de relevé en ${ref} : aucun réel.` : `Réel ${ref} du compte de paiement${cov.months<12?` à ce jour, ${F.months(cov.from, cov.to, ref)} ramenés à 12 mois`:' sur l’année complète'}.`;
+    const part1=LSPdf.section(`Fonds de roulement — charges courantes ${cy}`, {n:1, chip:'Compte de paiement', sub:`${covNote} « Estimé ${ref} » = budget ${ref} ; delta = estimé − réel, en rouge quand le budget est dépassé. Budget ${cy} = réel × (1 + ${F.pct(m.marge)} de marge), sauf mention sous le poste.`})
+      + tableA + (sharesA ? `<p class="pdf-sub" style="margin-top:12px">Part de chaque copropriétaire, poste par poste :</p>` + sharesA : '');
     // 2 · fonds de réserve
-    const legalTot=Math.round(sum(rs.map(r=>r.legal))*100)/100, minTot=Math.round(sum(rs.map(r=>r.legalMin))*100)/100, resTot=Math.round(sum(rs.map(r=>r.reserve))*100)/100;
-    const legalNote = legalTot ? `complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes` : `couvert : les autres postes appellent déjà plus que le minimum (${ow.map((o,i)=>`${escH(o.short||o.n)} ${eur(rs[i].legalMin)}`).join(' · ')})`;
-    const rowsB = `<tr><td>Contribution minimum légale<div class="r-sub" style="font-size:9.5px">${legalNote}</div></td><td>${LSCharges.LEGAL_RATE} % des charges de chacun</td><td class="num">${eur(minTot)}</td><td>chaque année</td><td class="num"><b>${eur(legalTot)}</b></td>${cells(rs.map(r=>eur(r.legal)))}</tr>`
-      + reserve.map(p=>{ const sp=LSCharges.reserveSpan(p, cy), e=ymLabel(sp.end);
-        return `<tr><td>${escH(p.label||'—')}</td><td>${keyLabel(p.key)}</td><td class="num">${eur(p.amount)}</td><td>${p.months} mois${e?`, jusqu'en ${e.m} ${e.y}`:''}</td><td class="num"><b>${eur(LSCharges.reserveCall(p, cy))}</b></td>${cells(rs.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`; }).join('');
-    const tableB = `<table class="r-wide"><tr><th>Poste</th><th>Clé</th><th class="num">À constituer</th><th>Durée</th><th class="num">Appel ${cy}</th>${ownerTh}</tr>
-      ${rowsB}
-      <tr class="tot"><td>Total fonds de réserve ${cy}</td><td></td><td class="num">${eur(sum(reserve.map(p=>p.amount)))}</td><td></td><td class="num">${eur(resTot)}</td>${cells(rs.map(r=>eur(r.reserve)))}</tr>
-      <tr class="r-month"><td>Mensualité (÷ 12)</td><td></td><td></td><td></td><td class="num">${eur(resTot/12)}</td>${cells(rs.map(r=>eur(r.monthly)))}</tr></table>`;
+    const L=m.reserve.legal, tB=m.reserve.totals;
+    const legalRow=[{text:L.label, sub:L.covered?`couvert : les autres postes appellent déjà plus que le minimum (${m.owners.map((o,i)=>`${o.short} ${F.eur(L.mins[i])}`).join(' · ')})`:`complète l’appel de chacun jusqu’à ${L.rate} % de ses charges courantes`},
+      `${L.rate} % des charges de chacun`, F.eur(L.amount), 'chaque année', {text:F.eur(L.call), emph:true}, ...(wide?L.shares.map(F.eur):[])];
+    const rowB=r=>[{text:r.label}, keyLabel(r.key), F.eur(r.amount), `${r.months} mois${r.end?`, jusqu’en ${(ymLabel(r.end)||{}).m||''} ${(ymLabel(r.end)||{}).y||''}`:''}`, {text:F.eur(r.call), emph:true}, ...(wide?r.shares.map(F.eur):[])];
+    const tableB=LSPdf.table({cols:[{label:'Poste'}, {label:'Clé'}, {label:'À constituer', align:'right'}, {label:'Durée'}, {label:`Appel ${cy}`, align:'right', emph:true}, ...(wide?ownerCols:[])], cls:'pdf-reserve'+dense, label:`Fonds de réserve ${cy}`,
+      groups:[{label:'Ligne automatique', rows:[legalRow]}, {label:m.reserve.rows.length?'Postes à constituer':'', rows:m.reserve.rows.map(rowB)}],
+      totals:[{label:`Total fonds de réserve ${cy}`, cells:['', F.eur(tB.amount), '', {text:F.eur(tB.call), emph:true}, ...(wide?tB.shares.map(F.eur):[])]},
+              {label:'Mensualité (÷ 12)', kind:'sub', cells:['', '', '', F.eur(tB.monthly), ...(wide?tB.sharesMonthly.map(F.eur):[])]}]});
+    const sharesB=wide?'':LSPdf.table({cols:[{label:'Poste'}, {label:`Appel ${cy}`, align:'right', emph:true}, ...ownerCols], cls:'pdf-dense', label:`Part de chaque copropriétaire — fonds de réserve ${cy}`,
+      rows:[[L.label, {text:F.eur(L.call), emph:true}, ...L.shares.map(F.eur)], ...m.reserve.rows.map(r=>[r.label, {text:F.eur(r.call), emph:true}, ...r.shares.map(F.eur)])],
+      totals:[{label:`Total fonds de réserve ${cy}`, cells:[{text:F.eur(tB.call), emph:true}, ...tB.shares.map(F.eur)]}, {label:'Mensualité (÷ 12)', kind:'sub', cells:[F.eur(tB.monthly), ...tB.sharesMonthly.map(F.eur)]}]});
+    const part2=LSPdf.section(`Fonds de réserve — appels ${cy}`, {n:2, chip:'Compte de réserve', sub:`Chaque poste se constitue sur une durée en mois à partir de janvier ${cy} ; appel de l’année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l’appel de chacun jusqu’à ${L.rate} % de ses charges courantes.`})
+      + tableB + (sharesB ? `<p class="pdf-sub" style="margin-top:12px">Part de chaque copropriétaire, poste par poste :</p>` + sharesB : '');
     // 3 · total par copropriétaire
-    const rowsC = ow.map((o,i)=>`<tr><td>${escH(o.n)}</td><td class="num">${o.q}</td><td class="num">${eur(res[i].annual)}</td><td class="num">${eur(res[i].monthly)}</td><td class="num">${eur(rs[i].reserve)}</td><td class="num">${eur(rs[i].monthly)}</td><td class="num"><b>${eur(b.monthly[i])}</b></td></tr>`).join('');
-    const tableC = `<table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Roulement / an</th><th class="num">Roulement / mois</th><th class="num">Réserve / an</th><th class="num">Réserve / mois</th><th class="num">Mensualité totale</th></tr>
-      ${rowsC}<tr class="tot"><td>Total</td><td class="num">${qTot}</td><td class="num">${eur(totF)}</td><td class="num">${eur(totF/12)}</td><td class="num">${eur(resTot)}</td><td class="num">${eur(resTot/12)}</td><td class="num">${eur((totF+resTot)/12)}</td></tr></table>`;
-    const covNote = !cov.months ? `Pas de relevé en ${ref} : aucun réel.` : `Réel ${ref} du compte de paiement${cov.months<12?` à ce jour, ${cov.months} mois de relevés ramenés à 12 mois`:' sur l\'année complète'}.`;
-    return `<h2>Annexe 4 — Budget prévisionnel ${cy}${draft?' — brouillon':''}</h2>
-      <div class="r-sub">${draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l'année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé : « Millièmes » au prorata des quotités, « Individuelle » à parts égales (÷ ${n}).</div>
-      <h2 style="font-size:14px;margin-top:18px">1 · Fonds de roulement — charges courantes ${cy} (compte de paiement)</h2>
-      <div class="r-sub">${covNote} « Estimé ${ref} » = budget ${ref} ; delta = estimé − réel. Budget ${cy} = réel × (1 + ${(+bud.marge||0).toLocaleString('fr-BE')} % de marge), sauf mention sous le poste.</div>
-      ${tableA}
-      <h2 style="font-size:14px;margin-top:18px">2 · Fonds de réserve — appels ${cy} (compte de réserve)</h2>
-      <div class="r-sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${cy} ; appel de l'année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes.</div>
-      ${tableB}
-      <h2 style="font-size:14px;margin-top:18px">3 · Total ${cy} par copropriétaire</h2>
-      <div class="r-sub">Ce que chaque copropriétaire verse en ${cy}, fonds de roulement et fonds de réserve additionnés. La mensualité est le montant du virement permanent conseillé.</div>
-      ${tableC}`;
+    const tC=m.recap.totals;
+    const tableC=LSPdf.table({cols:[{label:'Copropriétaire'}, {label:'Quotité', align:'right'}, {label:'Roulement', sub:'par an', align:'right'}, {label:'Roulement', sub:'par mois', align:'right'}, {label:'Réserve', sub:'par an', align:'right'}, {label:'Réserve', sub:'par mois', align:'right'}, {label:`Total ${cy}`, sub:'par an', align:'right'}, {label:'Mensualité', sub:'conseillée', align:'right', emph:true}], cls:'pdf-recap pdf-dense', label:`Total ${cy} par copropriétaire`,
+      rows:m.recap.rows.map(r=>[r.name, F.int(r.q), F.eur(r.annual), F.eur(r.monthly), F.eur(r.resAnnual), F.eur(r.resMonthly), F.eur(r.total), {text:F.eur(r.totalMonthly), emph:true}]),
+      totals:[{label:'Total', cells:[F.int(tC.q), F.eur(tC.annual), F.eur(tC.monthly), F.eur(tC.resAnnual), F.eur(tC.resMonthly), F.eur(tC.total), {text:F.eur(tC.totalMonthly), emph:true}]}]});
+    const part3=LSPdf.section(`Total ${cy} par copropriétaire`, {n:3, sub:`Ce que chaque copropriétaire verse en ${cy}, fonds de roulement et fonds de réserve additionnés. La mensualité est le montant du virement permanent conseillé.`}) + tableC;
+    const legal=LSPdf.legal([
+      `Clés de répartition : « Millièmes » au prorata des quotités de l’acte de base (${F.int(m.qTot)} millièmes) ; « Individuelle » à parts égales entre les ${m.n} copropriétaires. Les parts sont calculées au centime, le dernier centime revenant au premier copropriétaire de la liste.`,
+      `Fonds de réserve : l’appel annuel ne peut être inférieur à ${L.rate} % des charges ordinaires (art. 3.86, § 3, du Code civil), sauf décision contraire de l’assemblée générale à la majorité des quatre cinquièmes. Le budget est soumis à l’approbation de l’assemblée générale.`,
+    ]);
+    return `<h2 class="pdf-h2" style="margin-top:18px"><span class="pdf-h2-t">Annexe 4 — Budget prévisionnel ${cy}</span>${m.draft?LSPdf.badge('draft','Brouillon'):''}</h2>
+      <p class="pdf-sub">${m.draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l’année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé.</p>
+      ${summary}${part1}${part2}${part3}${legal}`;
   }
   function budgetSection(){
     const ow=ownersOf(); const tot=sum(ow.map(o=>o.q))||1000, n=ow.length||1;
@@ -4311,7 +4291,7 @@ setTimeout(boot, 0);
       <div>Le président de séance</div><div>Le secrétaire</div><div>Le commissaire aux comptes</div>
     </div>`;
   }
-  function foot(){ return `<div class="r-foot">Document généré par LazySyndic — ${COPRO().name}. Les annexes 2, 3 et 4 sont calculées depuis le registre des transactions sur la période indiquée.</div>`; }
+  function foot(note){ return LSPdf.foot({ copro:COPRO(), note:note === undefined ? 'Les annexes 2, 3 et 4 sont calculées depuis le registre des transactions sur la période indiquée.' : note }); }
 
   /* ---- assemblage par type ---- */
   const PAY = {key:'pay', label:'Compte de paiement'};
@@ -4340,17 +4320,24 @@ setTimeout(boot, 0);
       body = headEl(title,p) + resultatSection(tx,p,'tous comptes')
         + soldesSection([PAY,RES],p) + foot();
     } else if (kind==='budget'){
-      title = 'Budget prévisionnel (Annexe 4)';
-      body = headEl(title,p) + budgetSection() + foot();
+      const cy=chargesYear(), bud=chargesBudget(cy), draft=!budgetPublished(bud), cov=bud.cov||{months:0};
+      title = `Budget prévisionnel ${cy}`;
+      const status = draft ? {kind:'draft', label:'Brouillon'} : {kind:'ok', label:bud.publishedAt ? `Publié le ${LSPdf.fmt.date(bud.publishedAt)}` : 'Publié'};
+      const meta = [{label:'Exercice budgétaire', value:String(cy)},
+        cov.months ? {label:'Réel de référence', value:LSPdf.fmt.months(cov.from, cov.to, cy-1)} : {label:'Réel de référence', value:`aucun relevé en ${cy-1}`},
+        {label:'Marge appliquée', value:LSPdf.fmt.pct(bud.marge)}];
+      body = LSPdf.document({ head: headEl(title, p, {chip:'Annexe 4 · Budget prévisionnel', status, meta, noPeriod:true}), body: budgetSection(),
+        foot: foot(`Budget prévisionnel ${cy} · Annexe 4${draft?' · brouillon':''}`) });
+      return {title, body, docTitle:`LazySyndic – ${COPRO().name} – Budget prévisionnel ${cy}`};
     }
     return {title, body};
   }
   function openReport(kind, p){
     p = p || defaultPeriod();
-    const {title, body} = buildReport(kind, p);
+    const {title, body, docTitle} = buildReport(kind, p);
     document.getElementById('reportSheet').innerHTML = body;
     document.getElementById('rtTitle').textContent = title;
-    document.title = `LazySyndic — ${title} — ${p.label}`;
+    document.title = docTitle || `LazySyndic — ${title} — ${p.label}`;   // le nom du fichier PDF enregistré
     modal.classList.add('open');
     document.body.classList.add('report-open');
     modal.scrollTop = 0;

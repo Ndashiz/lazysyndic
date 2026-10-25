@@ -106,6 +106,46 @@ function resolve(p, ctx){
   if (p.fcFormula && !ctx.frozen) { fc = evalFormula(p.fcFormula, f); if (fc.value != null) forecast = Math.max(0, fc.value); }
   return { ...p, forecast, calc: { fields: f, hasRef, real: real.value, realError: real.error, realFormula: rf, est, delta, fcError: fc.error, toDate: f['réel à ce jour'], months: f['mois couverts'] } };
 }
+// Le modèle de l'Annexe 4, prêt à être mis en page : synthèse, fonds de roulement (par groupe,
+// avec la part de chacun), fonds de réserve, total par copropriétaire. `bud` = un budget résolu
+// (postes avec calc, reserve, marge, cov, status/applied), `split` = le résultat de la répartition
+// (charges:[{annual, monthly, byPoste}], res:[{reserve, monthly, byPoste, legal, legalMin}],
+// total[], monthly[]), `owners` = [{n, short, q}]. Aucun montant n'est recalculé autrement
+// qu'en additionnant ce que split et resolve ont déjà établi.
+function annexModel(bud, split, owners, cy){
+  const r2 = n => Math.round((Number(n) || 0) * 100) / 100, sum = a => r2(a.reduce((s, v) => s + (Number(v) || 0), 0));
+  const postes = bud.postes || [], reserve = bud.reserve || [], res = split.charges || [], rs = split.res || [];
+  const own = (owners || []).map(o => ({ name:o.n || o.short || '', short:o.short || o.n || '', q:Number(o.q) || 0 }));
+  const n = own.length || 1, qTot = sum(own.map(o => o.q)) || 1000;
+  const hasEst = postes.some(p => p.calc && p.calc.est != null), hasReal = postes.some(p => p.calc && p.calc.real != null);
+  const totEst = sum(postes.map(p => p.calc ? p.calc.est || 0 : 0)), totReal = sum(postes.map(p => p.calc ? p.calc.real || 0 : 0));
+  const totF = sum(postes.map(p => p.forecast));
+  const groups = groupPostes(postes).map(g => ({ label:g.label, rows:g.items.map(({ p }) => ({
+    id:p.id, label:p.label || catLabel(p.cat), vendor:p.vendor || '', note:p.fcNote || '', key:p.key,
+    est:p.calc ? p.calc.est : null, real:p.calc ? p.calc.real : null, delta:p.calc ? p.calc.delta : null,
+    budget:r2(p.forecast), shares:res.map(r => r2((r.byPoste || {})[p.id] || 0)),
+  })) }));
+  const roulement = { groups, hasEst, hasReal, totals:{
+    est: hasEst ? totEst : null, real: hasReal ? totReal : null, delta: hasEst && hasReal ? r2(totEst - totReal) : null,
+    budget: totF, monthly: r2(totF / 12), shares: res.map(r => r2(r.annual)), sharesMonthly: res.map(r => r2(r.monthly)),
+  } };
+  const legalTot = sum(rs.map(r => r.legal)), minTot = sum(rs.map(r => r.legalMin)), resTot = sum(rs.map(r => r.reserve));
+  const resRows = reserve.map(p => { const sp = reserveSpan(p, cy); return {
+    id:p.id, label:p.label || '—', auto:false, key:p.key, amount:r2(p.amount), months:p.months, end:sp.end,
+    call:r2(reserveCall(p, cy)), shares:rs.map(r => r2((r.byPoste || {})[p.id] || 0)),
+  }; });
+  const legal = { label:'Contribution minimum légale', auto:true, rate:LEGAL_RATE, amount:minTot, call:legalTot, covered:legalTot === 0,
+    shares:rs.map(r => r2(r.legal)), mins:rs.map(r => r2(r.legalMin)) };
+  const fonds = { legal, rows:resRows, totals:{ amount:sum(reserve.map(p => p.amount)), call:resTot, monthly:r2(resTot / 12),
+    shares:rs.map(r => r2(r.reserve)), sharesMonthly:rs.map(r => r2(r.monthly)) } };
+  const recap = { rows:own.map((o, i) => ({ name:o.name, short:o.short, q:o.q,
+      annual:r2((res[i] || {}).annual || 0), monthly:r2((res[i] || {}).monthly || 0),
+      resAnnual:r2((rs[i] || {}).reserve || 0), resMonthly:r2((rs[i] || {}).monthly || 0),
+      total:r2((split.total || [])[i] || 0), totalMonthly:r2((split.monthly || [])[i] || 0) })),
+    totals:{ q:qTot, annual:totF, monthly:r2(totF / 12), resAnnual:resTot, resMonthly:r2(resTot / 12), total:r2(totF + resTot), totalMonthly:r2((totF + resTot) / 12) } };
+  return { cy, ref:cy - 1, draft:!isPublished(bud), publishedAt:bud.publishedAt || null, marge:cleanMarge(bud.marge), cov:bud.cov || { months:0 }, n, qTot, owners:own,
+    summary:{ roulement:totF, reserve:resTot, total:r2(totF + resTot), monthly:r2((totF + resTot) / 12) }, roulement, reserve:fonds, recap };
+}
 // Les postes par catégorie de la comptabilité, dans l'ordre d'apparition ; sans catégorie en dernier.
 function groupPostes(postes){
   const by = new Map();
@@ -304,7 +344,7 @@ function cleanReserve(list, year){
 }
 
 const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
-              cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, REAL_FORMULA, FC_FORMULA,
+              cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, annexModel, REAL_FORMULA, FC_FORMULA,
               reserveSpan, reserveCall, reserveSplit, cleanReserve, LEGAL_RATE };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;

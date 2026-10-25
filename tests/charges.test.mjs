@@ -267,3 +267,38 @@ test('postes groupés par catégorie, dans l\'ordre d\'apparition, sans catégor
   assert.deepEqual(g.map(x => [x.label, x.items.map(i => i.p.id)]), [['Énergie', ['2', '4']], ['Assurance', ['3']], ['', ['1']]]);
   assert.deepEqual(C.groupPostes([]), []);
 });
+
+test('modèle de l\'Annexe 4 : rien d\'autre que les sommes de resolve et de split', () => {
+  const owners = [{ n:'Alex Martin', short:'Alex', q:500 }, { n:'Sam Bernard', short:'Sam', q:251 }, { n:'Lou Petit', short:'Lou', q:249 }];
+  const postes = [
+    { id:'a', label:'Eau', vendor:'Vivaqua', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:1781.32, fcNote:'réel + 3 %', calc:{ est:1227, real:1729.44, delta:-502.44 } },
+    { id:'b', label:'Électricité', vendor:'Engie', cat:{high:'Énergie', sub:'Électricité'}, key:'quote', forecast:234.72, fcNote:'', calc:{ est:187.5, real:227.88, delta:-40.38 } },
+    { id:'c', label:'Chambre de visite', vendor:'', cat:null, key:'quote', forecast:200, fcNote:'devis', calc:{ est:null, real:null, delta:null } },
+  ];
+  const reserve = [{ id:'f', label:'Isoler la façade', amount:18000, months:36, key:'quote', start:'2027-01' }];
+  const ow = owners.map(o => ({ key:o.short, q:o.q }));
+  const charges = C.split(postes, ow), res = C.reserveSplit(reserve, 2027, ow, charges.map(c => c.annual));
+  const split = { charges, res, total: charges.map((c, i) => Math.round((c.annual + res[i].reserve) * 100) / 100), monthly: charges.map((c, i) => Math.round((c.annual + res[i].reserve) * 100 / 12) / 100) };
+  const m = C.annexModel({ postes, reserve, marge:3, cov:{ months:10, from:1, to:10 }, status:'draft' }, split, owners, 2027);
+  assert.equal(m.draft, true);
+  assert.deepEqual(m.summary, { roulement:2216.04, reserve:6000, total:8216.04, monthly:684.67 });
+  assert.deepEqual(m.roulement.groups.map(g => [g.label, g.rows.map(r => r.label)]), [['Énergie', ['Eau', 'Électricité']], ['', ['Chambre de visite']]]);
+  const eau = m.roulement.groups[0].rows[0];
+  assert.deepEqual([eau.est, eau.real, eau.delta, eau.budget], [1227, 1729.44, -502.44, 1781.32]);
+  assert.deepEqual(eau.shares, [593.78, 593.77, 593.77]);                         // ÷ 3 au centime : le reste au premier de la liste
+  assert.equal(Math.round(eau.shares.reduce((s, v) => s + v, 0) * 100) / 100, eau.budget);
+  assert.deepEqual(m.roulement.totals, { est:1414.5, real:1957.32, delta:-542.82, budget:2216.04, monthly:184.67, shares:charges.map(c => c.annual), sharesMonthly:charges.map(c => c.monthly) });
+  assert.equal(Math.round(m.roulement.totals.shares.reduce((s, v) => s + v, 0) * 100) / 100, 2216.04);
+  assert.equal(m.reserve.legal.covered, true);                                    // 6 000 € de travaux couvrent largement 5 % des charges
+  assert.equal(m.reserve.rows[0].call, 6000);
+  assert.deepEqual(m.reserve.rows[0].shares, [3000, 1506, 1494]);
+  assert.deepEqual(m.reserve.totals.shares, res.map(r => r.reserve));
+  assert.equal(m.recap.rows[0].name, 'Alex Martin');
+  assert.equal(m.recap.rows[0].total, split.total[0]);
+  assert.equal(m.recap.totals.total, 8216.04);
+  assert.equal(m.recap.totals.totalMonthly, 684.67);
+  // sans estimé ni réel (nouvelle copro) : les colonnes restent vides, pas de delta inventé
+  const vide = C.annexModel({ postes:[postes[2]], reserve:[], marge:3, cov:{ months:0 }, status:'published', applied:null }, { charges:C.split([postes[2]], ow), res:C.reserveSplit([], 2027, ow, [0, 0, 0]), total:[0,0,0], monthly:[0,0,0] }, owners, 2027);
+  assert.equal(vide.draft, false);
+  assert.deepEqual([vide.roulement.totals.est, vide.roulement.totals.real, vide.roulement.totals.delta], [null, null, null]);
+});

@@ -138,6 +138,16 @@ Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (c
 `ls_settings.charges`). Code : `charges.js` (calcul pur) ; tests :
 `node --test tests/charges.test.mjs` (aucune dépendance).
 
+## Documents PDF — design system
+
+Tous les documents imprimés parlent le même langage : jetons, formats et composants dans
+[`pdf.js`](pdf.js) (`LSPdf`, pur, `node --test tests/pdf.test.mjs`), feuille d'impression A4
+dans [`pdf.css`](pdf.css), règles et état de migration dans [`PDF_DESIGN.md`](PDF_DESIGN.md).
+Le budget prévisionnel (Annexe 4) est le document de référence : synthèse, fonds de roulement
+et fonds de réserve avec la part de chaque copropriétaire, total par copropriétaire, modèle pur
+`LSCharges.annexModel`. Les rapports d'AG et de comptes partagent l'en-tête et le pied ; le
+relevé, le PV et la convocation (pdf-lib) ont les mêmes jetons à disposition.
+
 ## Relevé de compte (PDF)
 
 Écran **Comptes bancaires** › « Relevé de compte (PDF) » (carte des rapports, ou lien

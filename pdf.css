@@ -1,0 +1,125 @@
+/* ============================================================
+   LazySyndic — feuille des documents PDF (design system, voir PDF_DESIGN.md et pdf.js)
+   Une seule feuille pour tout ce que l'app imprime : le rapport d'AG, les comptes, le budget
+   prévisionnel (Annexe 4). À l'écran elle dessine la feuille blanche de l'aperçu ; à
+   l'impression elle règle la page A4, la répétition des en-têtes et des pieds, les coupures.
+   Les jetons sont ceux de pdf.js (LSPdf.tokens) : les changer ici, c'est les changer là.
+   Les anciens rapports (classes r-sub, r-head, chip, tot, sig, r-foot…) restent stylés : rien
+   ne casse tant qu'ils ne sont pas migrés sur les composants.
+   ============================================================ */
+:root{
+  --pdf-ink:#20251F; --pdf-soft:#5C6153; --pdf-faint:#8A8F80;
+  --pdf-line:#E3E7E1; --pdf-rule:#20251F; --pdf-tint:#F4F7F4; --pdf-tint2:#E9F0EA;
+  --pdf-green:#21503D; --pdf-green-deep:#163A2C; --pdf-green-soft:#E2ECE3;
+  --pdf-warning:#8A5A00; --pdf-warning-soft:#FFF1D6; --pdf-danger:#B42318; --pdf-danger-soft:#FBEAE7;
+  --pdf-font:'Hanken Grotesk',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+
+/* ---------- la feuille ---------- */
+.report-sheet,.pdf-doc{max-width:820px;margin:0 auto;background:#fff;color:var(--pdf-ink);padding:44px 48px;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:var(--pdf-font);font-size:12.5px;line-height:1.45;font-variant-numeric:tabular-nums}
+.report-sheet .pdf-doc{max-width:none;margin:0;padding:0;background:transparent;box-shadow:none;border-radius:0}
+.pdf-doc table.pdf-page{width:100%;border-collapse:collapse;margin:0}
+.pdf-doc table.pdf-page>thead>tr>td,.pdf-doc table.pdf-page>tbody>tr>td,.pdf-doc table.pdf-page>tfoot>tr>td{padding:0;border:0;font-size:inherit}
+.pdf-page-top{height:0}
+
+/* ---------- typographie ---------- */
+.report-sheet h1,.pdf-h1{font-family:var(--pdf-font);font-size:22px;font-weight:600;line-height:1.2;margin:18px 0 4px;color:var(--pdf-ink);letter-spacing:-.01em}
+.pdf-h1-sub{display:block;font-size:12.5px;font-weight:400;color:var(--pdf-soft);margin-top:2px}
+.report-sheet h2,.pdf-h2{font-family:var(--pdf-font);font-size:14px;font-weight:600;margin:24px 0 6px;padding-bottom:5px;border-bottom:1.5px solid var(--pdf-green);color:var(--pdf-green);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pdf-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--pdf-green);color:#fff;font-size:11px;font-weight:700;align-self:center}
+.pdf-h2-t{flex:0 1 auto}
+.report-sheet .r-sub,.pdf-sub{color:var(--pdf-soft);font-size:11.5px;margin:0 0 4px;line-height:1.45}
+.pdf-chip,.report-sheet .chip{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:20px;background:var(--pdf-green-soft);color:var(--pdf-green);white-space:nowrap;vertical-align:middle}
+.pdf-chip-soft{background:var(--pdf-tint);color:var(--pdf-soft);font-weight:500;font-size:10.5px}
+
+/* ---------- en-tête commun ---------- */
+.pdf-head,.report-sheet .r-head{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-bottom:3px double var(--pdf-green);padding-bottom:14px;margin-bottom:4px}
+.pdf-head-l{display:flex;flex-direction:column;gap:8px}
+.pdf-brand,.report-sheet .r-brand img{height:30px;width:auto;display:block}
+.pdf-copro{font-size:12px;line-height:1.4;color:var(--pdf-soft)}
+.pdf-copro b{color:var(--pdf-ink);font-size:13px}
+.pdf-head-r{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:200px}
+.pdf-meta{font-size:11.5px;color:var(--pdf-soft);display:flex;gap:8px;justify-content:flex-end}
+.pdf-meta-l::after{content:' :'}
+.pdf-meta-v{color:var(--pdf-ink);font-weight:600}
+.pdf-head-r .pdf-badge{margin-left:6px}
+
+/* ---------- badges de statut ---------- */
+.pdf-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:4px;vertical-align:middle;white-space:nowrap}
+.pdf-badge-ok{background:var(--pdf-green-soft);color:var(--pdf-green)}
+.pdf-badge-draft,.pdf-badge-warning{background:var(--pdf-warning-soft);color:var(--pdf-warning)}
+.pdf-badge-danger{background:var(--pdf-danger-soft);color:var(--pdf-danger)}
+.pdf-badge-neutral{background:var(--pdf-tint);color:var(--pdf-soft)}
+
+/* ---------- synthèse financière ---------- */
+.pdf-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0 6px}
+.pdf-kpi{background:var(--pdf-tint);border-radius:8px;padding:12px 14px;min-width:0}
+.pdf-kpi-emph{background:var(--pdf-green);color:#fff}
+.pdf-kpi-l{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pdf-soft)}
+.pdf-kpi-emph .pdf-kpi-l{color:#DCE8DF}
+.pdf-kpi-v{font-size:20px;font-weight:700;line-height:1.2;margin-top:4px;letter-spacing:-.01em;color:var(--pdf-green)}
+.pdf-kpi-emph .pdf-kpi-v{color:#fff}
+.pdf-kpi-s{font-size:10.5px;color:var(--pdf-soft);margin-top:2px}
+.pdf-kpi-emph .pdf-kpi-s{color:#DCE8DF}
+.pdf-amount{font-weight:700}
+.pdf-amount-emph{font-size:14px;color:var(--pdf-green)}
+.pdf-amount-l{color:var(--pdf-soft);font-size:11px;margin-left:6px}
+
+/* ---------- tableaux financiers ---------- */
+.report-sheet table,.pdf-table{width:100%;border-collapse:collapse;margin-top:6px}
+.report-sheet th,.pdf-table th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--pdf-soft);text-align:left;padding:7px 8px;border-bottom:1.5px solid var(--pdf-rule);vertical-align:bottom;font-weight:600}
+.report-sheet td,.pdf-table td{padding:6px 8px;border-bottom:1px solid var(--pdf-line);font-size:11.5px;vertical-align:top;overflow-wrap:break-word}
+.pdf-table td:first-child,.pdf-table th:first-child{min-width:120px}
+.pdf-table th{white-space:normal}
+.pdf-table.pdf-dense td,.pdf-table.pdf-dense th{padding:5px 6px;font-size:11px}
+.pdf-table th.num,.pdf-table td.num,.report-sheet td.num,.report-sheet th.num{text-align:right;font-variant-numeric:tabular-nums}
+.pdf-table td.num,.report-sheet td.num{white-space:nowrap}
+.pdf-table th.emph{color:var(--pdf-green)}
+.pdf-table td.emph{background:var(--pdf-tint2);font-weight:700;color:var(--pdf-green-deep)}
+.pdf-table td.neg{color:var(--pdf-danger);font-weight:600}
+.pdf-th-sub{font-weight:400;letter-spacing:0;text-transform:none;font-size:10px;color:var(--pdf-faint);margin-top:1px}
+.pdf-cell-sub{font-size:10.5px;color:var(--pdf-soft);font-weight:400;margin-top:1px}
+.pdf-group-row td{background:var(--pdf-tint);font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--pdf-green);padding:6px 8px 5px;border-bottom:1px solid var(--pdf-line)}
+.pdf-tot td,.report-sheet tr.tot td{font-weight:700;background:var(--pdf-tint2);border-top:1.5px solid var(--pdf-rule);border-bottom:none}
+.pdf-sub-row td,.report-sheet tr.r-month td{color:var(--pdf-soft);font-size:11px;border-bottom:none;padding-top:4px}
+.pdf-empty{color:var(--pdf-soft);font-style:italic}
+.report-sheet .pos{color:#2F6B53}.report-sheet .neg{color:var(--pdf-danger)}
+.report-sheet tr.r-group td{padding:8px 8px 3px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--pdf-soft);border-bottom:1px solid var(--pdf-line)}
+.report-sheet table.r-wide{font-size:11px}
+.report-sheet table.r-wide th,.report-sheet table.r-wide td{padding:4px 6px}
+
+/* ---------- encadrés, mentions, signatures, pied ---------- */
+.pdf-note{margin:12px 0 0;padding:10px 14px;border-radius:6px;font-size:11.5px;line-height:1.45}
+.pdf-note-info{background:var(--pdf-tint);color:var(--pdf-ink)}
+.pdf-note-warning{background:var(--pdf-warning-soft);color:var(--pdf-warning)}
+.pdf-note-legal{background:transparent;border-left:2px solid var(--pdf-green-soft);padding:4px 12px;color:var(--pdf-soft);font-size:10.5px}
+.pdf-legal{margin-top:18px;padding-top:8px;border-top:1px solid var(--pdf-line);color:var(--pdf-soft);font-size:10.5px}
+.pdf-legal p{margin:0 0 4px}
+.report-sheet .sig{display:flex;gap:40px;margin-top:40px;flex-wrap:wrap}
+.report-sheet .sig div{flex:1;min-width:180px;border-top:1px solid var(--pdf-rule);padding-top:6px;font-size:11.5px;color:var(--pdf-soft)}
+.pdf-foot,.report-sheet .r-foot{margin-top:28px;padding-top:8px;border-top:1px solid var(--pdf-line);font-size:10px;color:var(--pdf-faint);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.report-sheet .r-foot{display:block;text-align:center}
+.pdf-foot-note{color:var(--pdf-soft)}
+
+/* ---------- impression A4 ---------- */
+@page{size:A4;margin:14mm 12mm 18mm}
+@page{
+  @bottom-right{content:"Page " counter(page) " / " counter(pages);font:9px/1 'Hanken Grotesk',system-ui,sans-serif;color:#8A8F80}
+}
+@media print{
+  html,body.report-open{background:#fff !important}
+  body.report-open .app,body.report-open #ctModal,body.report-open #lsToast,body.report-open .ls-toast{display:none !important}
+  body.report-open #reportModal{position:static;display:block !important;background:#fff;padding:0;overflow:visible}
+  body.report-open .report-toolbar{display:none !important}
+  body.report-open .report-sheet,.pdf-doc{box-shadow:none;max-width:none;margin:0;padding:0;border-radius:0}
+  .report-sheet h2,.pdf-h2,.pdf-h1{break-after:avoid}
+  .pdf-table thead{display:table-header-group}
+  .pdf-doc table.pdf-page>tfoot{display:table-footer-group}
+  .pdf-doc table.pdf-page>thead{display:table-header-group}
+  tr{break-inside:avoid}
+  tbody.pdf-group{break-inside:avoid}
+  tbody.pdf-totals{break-inside:avoid;break-before:avoid}
+  .pdf-summary,.pdf-note,.pdf-head{break-inside:avoid}
+  .pdf-summary{break-after:avoid}
+  .pdf-foot{margin-top:10px}
+}
