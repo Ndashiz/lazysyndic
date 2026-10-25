@@ -2852,15 +2852,27 @@ const CHG_MON = ['janvier','février','mars','avril','mai','juin','juillet','ao�
 let chgYear = null;
 const chargesHint = m => /charges|schema cache|column/i.test(m) ? m+' — lancez supabase/charges.sql dans Supabase (SQL Editor).' : m;
 // Exercice affiché : la prévision se prépare pour l'année qui suit celle en cours, sur le réel
-// de l'année en cours à ce jour ; un budget déjà préparé plus loin l'emporte.
+// de l'année en cours à ce jour ; un budget déjà préparé plus loin l'emporte. Un copropriétaire
+// ne voit que les budgets publiés : il arrive sur le plus récent d'entre eux.
+const budgetPublished = b => typeof LSCharges!=='undefined' && LSCharges.isPublished(b);
 function chargesYear(){
   if (chgYear) return chgYear;
-  const ys = Object.keys(state.charges||{}).filter(y=>/^\d{4}$/.test(y) && (((state.charges[y]||{}).postes||[]).length || ((state.charges[y]||{}).reserve||[]).length)).map(Number);
-  return chgYear = Math.max(new Date().getFullYear()+1, ...ys);
+  const all=state.charges||{};
+  const ys = Object.keys(all).filter(y=>/^\d{4}$/.test(y) && (((all[y]||{}).postes||[]).length || ((all[y]||{}).reserve||[]).length)).map(Number);
+  const pub = canWrite() ? [] : ys.filter(y=>budgetPublished(all[y]));
+  return chgYear = pub.length ? Math.max(...pub) : Math.max(new Date().getFullYear()+1, ...ys);
 }
-// Un exercice = postes de charges courantes (compte de paiement) + postes du fonds de réserve.
+// Un exercice = postes de charges courantes (compte de paiement) + postes du fonds de réserve,
+// en brouillon (status 'draft', visible du seul syndic) ou publié.
 function chargesBudget(y){ const b=(state.charges||{})[y]||{};
-  return {postes:LSCharges.clean(b.postes), reserve:LSCharges.cleanReserve(b.reserve, y), applied:b.applied||null}; }
+  return {postes:LSCharges.clean(b.postes), reserve:LSCharges.cleanReserve(b.reserve, y), applied:b.applied||null, status:b.status||'draft', publishedAt:b.publishedAt||null}; }
+// Un brouillon ne montre rien d'autre au copropriétaire : ni réserve, ni répartition.
+function hideChargesExtras(){
+  const res=document.getElementById('resCard'); if(res){ res.innerHTML=''; res.style.display='none'; }
+  const t=document.getElementById('chgSplit'), bar=document.getElementById('chgApply'), title=document.getElementById('chgSplitTitle');
+  [t&&t.closest('.card'), bar, title].forEach(el=>{ if(el) el.style.display='none'; });
+  if(t) t.innerHTML=''; if(bar) bar.innerHTML='';
+}
 const CHG_MON_SHORT = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const ymLabel = s => { const m=/^(\d{4})-(\d{2})$/.exec(s||''); return m ? {m:CHG_MON_SHORT[+m[2]-1], y:m[1]} : null; };
 // « janv. 2026 → déc. 2028 », ou « janv. → déc. 2026 » dans la même année
@@ -2964,7 +2976,15 @@ function renderCharges(){
   const card=document.getElementById('chgCard'); if(!card || typeof LSCharges==='undefined') return;
   ensureChargesCss();
   const y=chargesYear(), ref=y-1, ed=canWrite();
-  const {postes, reserve}=chargesBudget(y);
+  const bud=chargesBudget(y), {postes, reserve}=bud, pub=budgetPublished(bud);
+  const yearNav = `<div class="chg-year"><button class="lk" id="chgPrev" aria-label="Exercice ${y-1}">‹</button><b>${y}</b><button class="lk" id="chgNext" aria-label="Exercice ${y+1}">›</button></div>`;
+  if (!ed && !pub){   // copropriétaire : un brouillon reste invisible jusqu'à sa publication
+    card.innerHTML = `<div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement</h2><div class="sub">Le syndic prépare le budget ${y} : il sera consultable ici une fois publié.</div></div>${yearNav}</div>`;
+    card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; renderCharges(); };
+    card.querySelector('#chgNext').onclick=()=>{ chgYear=y+1; renderCharges(); };
+    hideChargesExtras();
+    return;
+  }
   const tx=chargesTx(), cov=LSCharges.coverage(tx, ref);
   const refs=postes.map(p=>LSCharges.reference(tx, p.cat, ref, cov));
   const clash=new Set(LSCharges.conflicts(postes).flat());
@@ -3015,13 +3035,15 @@ function renderCharges(){
       <button class="btn btn-ghost" id="chgAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste</button>
       ${seedable?`<button class="btn btn-ghost" id="chgSeed">${postes.length?`Ajouter les catégories de ${ref} sans poste`:`Proposer les postes depuis le réel ${ref}`}</button>`:''}
       ${!postes.length && !reserve.length && (prev.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prev.length?`${prev.length} poste${prev.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
+      ${pub ? (bud.applied ? '' : `<button class="btn btn-ghost" id="chgUnpub">Repasser en brouillon</button>`) : (postes.length||reserve.length ? `<button class="btn btn-primary" id="chgPub">Publier le budget ${y}</button>` : '')}
     </div>`;
   const notes = [];
+  if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi.`);
   if (unc.count) notes.push(`Dépenses ${ref} reprises par aucun poste : ${eur(unc.total)} (${unc.count} mouvement${unc.count>1?'s':''})${unc.uncategorized.count?`, dont ${eur(unc.uncategorized.total)} encore à catégoriser`:''}.`);
   if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; lots).');
   card.innerHTML = `
-    <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement</h2><div class="sub">${covTxt}</div></div>
-      <div class="chg-year"><button class="lk" id="chgPrev" aria-label="Exercice ${y-1}">‹</button><b>${y}</b><button class="lk" id="chgNext" aria-label="Exercice ${y+1}">›</button></div></div>
+    <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement${ed?` <span class="status ${pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${pub?'Publié':'Brouillon'}</span>`:''}</h2><div class="sub">${covTxt}</div></div>
+      ${yearNav}</div>
     ${table}${actions}${notes.map(n=>`<div class="chg-note">${n}</div>`).join('')}`;
 
   card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; renderCharges(); };
@@ -3060,6 +3082,15 @@ function renderCharges(){
     });
     card.querySelector('#chgCopy')?.addEventListener('click', ()=>saveCharges(y, prev.map(p=>({...p, id:LSCharges.newId()})),
       {reserve: prevRes.map(p=>({...p, id:LSCharges.newId()}))}));
+    card.querySelector('#chgPub')?.addEventListener('click', ()=>{
+      saveCharges(y, postes, {status:'published', publishedAt:new Date().toISOString()});
+      logTimeline({title:`Budget ${y} publié`, kind:'manual', description:`${postes.length} poste${postes.length>1?'s':''} de charges courantes et ${reserve.length} de réserve, consultables par les copropriétaires.`});
+      showToast(`Budget ${y} publié : les copropriétaires peuvent le consulter.`);
+    });
+    card.querySelector('#chgUnpub')?.addEventListener('click', ()=>{
+      saveCharges(y, postes, {status:'draft'});
+      showToast(`Budget ${y} repassé en brouillon : visible du syndic seulement.`);
+    });
   }
   renderReserve(y, postes, reserve);
   renderChargesSplit(y);
@@ -3067,6 +3098,7 @@ function renderCharges(){
 // Fonds de réserve : postes à constituer sur une durée, plus la ligne du minimum légal (charges.js).
 function renderReserve(y, postes, reserve){
   const card=document.getElementById('resCard'); if(!card) return;
+  card.style.display='';   // peut avoir été masqué par hideChargesExtras (brouillon vu par un copropriétaire)
   const ed=canWrite(), ow=ownersOf(), b=budgetSplit(y), rs=b.res;
   const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
   const short = o => escH(o.short||o.n);
@@ -3185,7 +3217,7 @@ async function applyCharges(y){
     catch(e){ console.error(e); ow.forEach((o,i)=>{ o.due_pay=before[i].pay; o.due_res=before[i].res; }); toastError(e.message||e); renderProvisions(); renderCharges(); return; }
   }
   const totPay=Math.round(sum(pay)*100)/100, totRes=Math.round(sum(res)*100)/100;
-  saveCharges(y, b.postes, {applied:{at:new Date().toISOString(), total:totPay, reserve:totRes}});
+  saveCharges(y, b.postes, {applied:{at:new Date().toISOString(), total:totPay, reserve:totRes}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
   logTimeline({title:`Budget ${y} appliqué aux provisions`, kind:'manual',
     description:`Charges courantes ${eur(totPay)} et fonds de réserve ${eur(totRes)} répartis : `+ow.map((o,i)=>`${o.short||o.n} ${eur(b.total[i])}`).join(', ')});
   renderProvisions(); renderDashboard();
@@ -3972,8 +4004,9 @@ setTimeout(boot, 0);
     const owRows=ow.map((o,i)=>`<tr><td>${o.n}</td><td class="num">${o.q}</td><td class="num">${eur(res[i].annual)}</td><td class="num">${eur(rs[i].reserve)}</td><td class="num"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}</td></tr>`).join('');
     const covNote = !cov.months ? `Pas de relevé en ${ref} : aucune moyenne.`
       : `Réel ${ref} du compte de paiement${cov.months<12?`, sur ${cov.months} mois de relevés`:''} ; moyenne mensuelle sur ces mois.`;
-    return `<h2>Annexe 4 — Budget prévisionnel ${cy}</h2>
-      <div class="r-sub">${covNote} Clé « Millièmes » : au prorata des quotités ; « Individuelle » : à parts égales entre copropriétaires.</div>
+    const draft = !budgetPublished(chargesBudget(cy));
+    return `<h2>Annexe 4 — Budget prévisionnel ${cy}${draft?' — brouillon':''}</h2>
+      <div class="r-sub">${draft?'Brouillon non publié aux copropriétaires. ':''}${covNote} Clé « Millièmes » : au prorata des quotités ; « Individuelle » : à parts égales entre copropriétaires.</div>
       <table><tr><th>Poste</th><th>Catégorie</th><th>Clé</th><th class="num">Budget ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Moyenne / mois</th><th class="num">Budget ${cy}</th></tr>
         ${rows}<tr class="tot"><td>Total</td><td></td><td></td><td class="num">${prev.length?eur(totP):'—'}</td><td class="num">${eur(totR)}</td><td class="num">${cov.months?eur(totR/cov.months):'—'}</td><td class="num">${eur(totF)}</td></tr></table>
       ${reserveTable}
@@ -4004,7 +4037,7 @@ setTimeout(boot, 0);
       <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Proposition ${cy} — provision par copropriétaire</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges annuelles (paiement)</th><th class="num">Provision mensuelle — paiement</th><th class="num">Provision mensuelle — réserve</th></tr>
         ${provRows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(provTotPay)}</td><td class="num">${eur(provTotPay/12)}</td><td class="num">${eur(provTotRes/12)}</td></tr></table>` : '';
-    if (cb.postes.length || cb.reserve.length) return chargesAnnex(cy, cb.postes, ow, provTable);
+    if ((cb.postes.length || cb.reserve.length) && (budgetPublished(cb) || canWrite())) return chargesAnnex(cy, cb.postes, ow, provTable);
     return `<h2>Annexe 4 — Budget prévisionnel 2026 (marge +4 %)</h2>
       <table><tr><th>Poste</th><th>Clé de répartition</th><th class="num">Réalité</th><th class="num">Budget</th></tr>
         ${rows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(totR)}</td><td class="num">${eur(totB)}</td></tr></table>

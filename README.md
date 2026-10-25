@@ -80,6 +80,11 @@ se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait d
   pas) ; repris sous le poste dans l'Annexe 4.
 - **Budget de l'année précédente** : ce qui avait été prévu pour la même catégorie (sinon le
   même nom) dans le budget d'avant, à côté du réel, à l'écran comme dans l'Annexe 4.
+- **Brouillon / publié** : un budget reste un brouillon, visible du seul syndic (charges, réserve
+  et répartition), jusqu'à « Publier le budget » ; les copropriétaires voient alors « le syndic
+  prépare le budget » et arrivent sur le dernier budget publié. L'appliquer aux provisions le
+  publie aussi ; « Repasser en brouillon » reste possible tant qu'il n'est pas appliqué. L'Annexe 4
+  d'un brouillon est marquée comme telle et ne sort que pour le syndic.
 - **Moyenne de l'année précédente** : dépenses nettes du compte de paiement dans la
   catégorie (remboursements déduits), divisées par les mois couverts par les relevés.
   Un registre commencé en mars compte 10 mois, pas 12. Un nouveau poste n'a pas de moyenne.

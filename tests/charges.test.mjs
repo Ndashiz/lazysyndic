@@ -189,3 +189,11 @@ test('postes relus : le bénéficiaire est gardé et borné', () => {
   assert.equal(c[1].vendor.length, 80);
   assert.equal(C.clean([{ label:'Ancien' }])[0].vendor, '');
 });
+
+test('un budget est un brouillon tant qu\'il n\'est pas publié ; appliqué aux provisions = publié', () => {
+  assert.equal(C.isPublished({ postes:[] }), false);
+  assert.equal(C.isPublished({ status:'draft' }), false);
+  assert.equal(C.isPublished({ status:'published' }), true);
+  assert.equal(C.isPublished({ applied:{ at:'2026-10-25T10:00:00Z', total:1371 } }), true);
+  assert.equal(C.isPublished(null), false);
+});

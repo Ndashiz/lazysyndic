@@ -1,6 +1,8 @@
 /* ============================================================
    LazySyndic — calcul des charges : budget prévisionnel par poste
    Pur : aucun DOM, aucun réseau, montants calculés en centimes entiers.
+   • un budget = {postes, reserve, applied, status:'draft'|'published', publishedAt} : brouillon
+     tant que le syndic ne l'a pas publié (isPublished) ; l'appliquer aux provisions le publie
    • un poste = {id, label, vendor, cat:{high, sub}|null, key:'quote'|'indiv', forecast}
      vendor = le bénéficiaire (fournisseur), texte libre, proposé par vendorOf()
      cat null = nouveau poste, sans historique ; cat.sub vide = toute la catégorie
@@ -24,6 +26,9 @@ function catKey(c){ return c ? c.high + '›' + (c.sub||'') : ''; }
 function overlaps(a, b){ return !!(a && b && a.high === b.high && (!a.sub || !b.sub || a.sub === b.sub)); }
 function matches(t, c){ return !!c && t.high === c.high && (!c.sub || (t.sub||'') === c.sub); }
 const isExpenseCat = high => !!high && high !== '?' && !INCOME.has(high);
+// Un budget reste un brouillon, visible du seul syndic, jusqu'à sa publication ; un budget déjà
+// appliqué aux provisions est publié de fait (le dû de chacun en découle).
+const isPublished = b => !!b && (b.status === 'published' || !!b.applied);
 
 // Bénéficiaire probable d'une catégorie : le tiers le plus fréquent de ses dépenses de l'année
 // (alias déjà résolus à l'import). Les libellés bancaires génériques et les références
@@ -210,7 +215,7 @@ function cleanReserve(list, year){
   }));
 }
 
-const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev,
+const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
               reserveSpan, reserveCall, reserveSplit, cleanReserve, LEGAL_RATE };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
