@@ -84,7 +84,7 @@ pour la courbe de solde. Catégories du camembert (`CAT_META` dans `app.js`) :
 | `.filter-tabs` | `.seg` | séparateur entre deux groupes |
 | `Input`, `select` | `.fld`, `select` | chevron dessiné, anneau de focus `--ring` |
 | zone de dépôt (pointillés + tuile + bouton) | `.drop`, `.drop.compact` | |
-| `Dialog` | `#ctModal`, `#splitModal`, fiche mouvement | voile `--shade`, rayon 8 px |
+| `Dialog` | `#ctModal`, `#splitModal`, `#stmtModal` (relevé de compte), fiche mouvement | voile `--shade`, rayon 8 px |
 | sonner (toast) | `.ls-toast` | carte blanche bordée |
 | `.page-footer` | `.page-footer` (`#footEnv`) | « Démonstration », « Mode local » ou nom de la copropriété |
 

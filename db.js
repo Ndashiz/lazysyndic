@@ -106,6 +106,7 @@
       coproKbo:  settings.copro_kbo  || '',
       budgetKeys: settings.budget_keys || {},
       ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
+      holders: settings.holders || {},   // titulaire par compte (supabase/releve.sql) — relevé de compte PDF
       recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
       annualNote: settings.annual_note || '',
       categories: settings.categories || [],

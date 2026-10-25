@@ -886,12 +886,26 @@ function reconStatus(acct){
   const diff = +(balance(acct) - Number(r.closing)).toFixed(2);
   return {closing:Number(r.closing), asOf:r.asOf||'', diff, ok:Math.abs(diff)<0.01};
 }
-// Carte d'info compte : IBAN + solde d'ouverture (éditables) + solde calculé + réconciliation.
+// Titulaire du compte, pour le relevé PDF : saisi dans la fiche du compte, sinon lu sur le
+// dernier relevé bancaire validé, sinon le nom de la copropriété (une ACP est titulaire de ses comptes).
+function acctHolder(acct){
+  const typed = String(((state.holders||{})[acct])||'').trim();
+  if (typed) return {name:typed, src:'typed'};
+  const im = (state.imports||[]).filter(i=>i.stmt && i.stmt.acct===acct && i.stmt.holder && !i.pending)
+    .sort((a,b)=>(b.v||0)-(a.v||0))[0];
+  if (im) return {name:String(im.stmt.holder).trim(), src:'statement'};
+  const copro = String(state.coproName||'').trim();
+  return {name:copro, src:copro?'copro':'none'};
+}
+const holderHint = m => /holders|schema cache|column/i.test(m) ? m+' — lancez supabase/releve.sql dans Supabase (SQL Editor).' : m;
+
+// Carte d'info compte : IBAN + titulaire + solde d'ouverture (éditables) + solde calculé + réconciliation.
 function renderAcctInfo(acct){
   const box=document.getElementById('acctInfo'); if(!box) return;
   acct = acct || curAcct || 'pay';
   const ed = canWrite();
   const iban = (state.ibans&&state.ibans[acct])||'';
+  const holder = acctHolder(acct);
   const open = (state.opening&&state.opening[acct])||0;
   const bal = balance(acct);
   const rs = reconStatus(acct);
@@ -901,9 +915,11 @@ function renderAcctInfo(acct){
         : `<span class="badge b-late">⚠ Déséquilibre ${rs.diff>0?'+':''}${eur(rs.diff)}</span> <span class="sub">calculé ${eur(bal)} ≠ clôture du relevé ${eur(rs.closing)}${rs.asOf?' au '+rs.asOf:''} — transaction manquante ou en trop ?</span>`)
     : '<span class="sub">Aucun relevé importé pour ce compte — pas encore de réconciliation.</span>';
   box.innerHTML = `
-    <div class="grid" style="grid-template-columns:1.4fr 1fr 1fr;gap:14px;align-items:end">
+    <div class="grid" style="grid-template-columns:1.3fr 1.3fr 1fr 1fr;gap:14px;align-items:end">
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">IBAN du ${acct==='res'?'compte de réserve':'compte de paiement'}</div>
         <input class="fld" id="acctIban" ${ed?'':'disabled'} style="width:100%;margin-top:4px;font-family:monospace;font-size:12.5px" value="${iban}" placeholder="BE00 0000 0000 0000"></div>
+      <div><div class="l" style="font-size:12px;color:var(--ink-faint)" title="Repris sur le relevé de compte PDF envoyé aux copropriétaires">Titulaire du compte${holder.src==='statement'?' <span class="sub">(lu sur le relevé)</span>':holder.src==='copro'?' <span class="sub">(nom de la copropriété)</span>':''}</div>
+        <input class="fld" id="acctHolder" ${ed?'':'disabled'} style="width:100%;margin-top:4px" value="${escH(holder.name)}" placeholder="Ex. ACP Résidence du Parc"></div>
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde d'ouverture</div>
         <input class="fld" id="acctOpening" ${ed?'':'disabled'} style="width:100%;margin-top:4px" value="${eur(open)}"></div>
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Solde calculé (ouverture + transactions)</div>
@@ -913,11 +929,17 @@ function renderAcctInfo(acct){
       <div class="l" style="font-size:12px;color:var(--ink-faint)">Objectif du fonds de réserve</div>
       <input class="fld" id="acctTarget" ${ed?'':'disabled'} style="width:150px" value="${eur(state.reserveTarget||0)}">
       <span class="sub">cible fixée en AG — pilote la jauge de l'accueil</span></div>` : ''}
-    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}${ed?`<button class="lk" id="acctReset" style="margin-left:auto;color:var(--coral)">↺ Réinitialiser ce compte</button>`:''}</div>`;
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}<span style="margin-left:auto;display:flex;gap:14px;flex-wrap:wrap"><button class="lk" id="acctStmt">Relevé de compte (PDF)</button>${ed?`<button class="lk" id="acctReset" style="color:var(--coral)">↺ Réinitialiser ce compte</button>`:''}</span></div>`;
+  box.querySelector('#acctStmt')?.addEventListener('click', ()=>window.LazySyndic.openStatement && window.LazySyndic.openStatement(acct));
   if (ed){
     const ib=box.querySelector('#acctIban');
     ib.onchange=()=>{ const v=ib.value.trim(); state.ibans=state.ibans||{}; state.ibans[acct]=v;
       dbWrite(db=>db.updateSettings(acct==='res'?{iban_res:v}:{iban_pay:v})); };
+    const ho=box.querySelector('#acctHolder');
+    ho.onchange=()=>{ const v=ho.value.trim();
+      state.holders={...(state.holders||{}), [acct]:v}; saveState();
+      dbWrite(async db=>{ try { await db.updateSettings({holders:state.holders}); } catch(e){ throw new Error(holderHint(e.message||String(e))); } });
+      renderAcctInfo(acct); };
     const op=box.querySelector('#acctOpening');
     op.onchange=()=>{ const v=parseAmount(op.value); if(isNaN(v)){op.value=eur(open);return;}
       state.opening=state.opening||{}; state.opening[acct]=v;
@@ -1544,6 +1566,7 @@ async function commitImport(){
     opening: importMeta && !isNaN(importMeta.opening) ? importMeta.opening : null,
     closing: importMeta && !isNaN(importMeta.closing) ? importMeta.closing : null,
     iban: (importMeta && importMeta.iban) || null,
+    holder: (importMeta && importMeta.holder) || null,   // titulaire lu sur le relevé → relevé de compte PDF
     asOf: (toNorm && toNorm.disp) || (toAdd.length ? toAdd[toAdd.length-1].date : ''),
     from: fromNorm ? fromNorm.disp : '',
   };
@@ -3691,6 +3714,222 @@ setTimeout(boot, 0);
   document.getElementById('repAG')?.addEventListener('click', ()=>openReport('ag'));
   document.getElementById('genBudget')?.addEventListener('click', ()=>openReport('budget'));
   document.querySelectorAll('.ag-annexes').forEach(b=>b.addEventListener('click', ()=>openReport('ag', periodForYear(b.dataset.year))));
+})();
+
+/* ============================================================
+   RELEVÉ DE COMPTE (PDF) — pour l'AG, à envoyer aux copropriétaires
+   statement.js calcule et dessine le PDF. Ici : le choix des comptes et de la
+   période, l'aperçu des soldes, le téléchargement, et pour le syndic un brouillon
+   d'e-mail (.eml) adressé aux copropriétaires avec le PDF en pièce jointe.
+   La période est celle du champ « Rapports — période » de l'écran Comptes : les
+   deux restent alignés, un relevé et un rapport d'AG parlent de la même période.
+   ============================================================ */
+(function setupStatements(){
+  const ACCTS = {pay:'Compte de paiement', res:'Compte de réserve'};
+  const css = document.createElement('style');
+  css.textContent = `
+    #stmtModal{position:fixed;inset:0;background:oklch(.19 .024 166 / .55);z-index:120;display:none;align-items:center;justify-content:center;padding:16px}
+    #stmtModal.open{display:flex}
+    .st-card{width:640px;max-width:100%;max-height:92vh;overflow:auto;border-radius:var(--radius);padding:24px;box-shadow:var(--shadow-lg)}
+    .st-l{font-size:12px;color:var(--ink-faint);margin:16px 0 6px}
+    .st-presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+    .st-chip{all:unset;box-sizing:border-box;cursor:pointer;border:1px solid var(--border);border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--ink)}
+    .st-chip:hover{background:var(--accent)}
+    .st-chip.on{background:var(--secondary);border-color:var(--primary);color:var(--primary);font-weight:600}
+    .st-chip:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+    .st-dates{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .st-dates .fld{width:160px}
+    .st-prev{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius)}
+    .st-acc{padding:12px 14px}
+    .st-acc+.st-acc{border-top:1px solid var(--border)}
+    .st-h{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+    .st-bal{font-weight:700;font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .st-meta{font-size:12.5px;color:var(--ink-faint);margin-top:3px;overflow-wrap:anywhere}
+    .st-warn{font-size:12px;color:var(--warning-ink);margin-top:5px}
+    .st-mail{font-size:12px;color:var(--ink-faint);margin-top:12px;overflow-wrap:anywhere}
+    .st-bar{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px}
+    #stmtModal .btn:disabled{opacity:.5;cursor:not-allowed}
+    @media (max-width:560px){ .st-card{padding:18px} .st-bar .btn{flex:1 1 100%;justify-content:center} }`;
+  document.head.appendChild(css);
+
+  const modal = document.createElement('div');
+  modal.id = 'stmtModal';
+  modal.innerHTML = '<div class="card st-card" id="stmtCard" role="dialog" aria-modal="true" aria-labelledby="stTitle"></div>';
+  document.body.appendChild(modal);
+  const card = modal.querySelector('#stmtCard');
+  modal.addEventListener('click', e=>{ if(e.target===modal) close(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && modal.classList.contains('open')) close(); });
+  function close(){ modal.classList.remove('open'); }
+
+  let sel = 'all', from = '', to = '', busy = false;
+  const isoOf = s => (parseDate(s)||{}).iso || '';
+  const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const fr = iso => LSStatement.frDate(iso);
+  const accts = () => sel==='all' ? ['pay','res'] : [sel];
+  const valid = () => !!(from && to && from<=to);
+
+  function lastAgIso(){
+    const t = todayISO();
+    return (state.ags||[]).map(a=>parseFrDate(a.ag_date)).filter(Boolean).map(isoLocal).filter(i=>i<=t).sort().pop() || '';
+  }
+  function presets(){
+    const t = todayISO(), y = +t.slice(0,4), out = [];
+    const ag = lastAgIso();
+    if (ag) out.push({label:'Depuis la dernière AG', from:ag, to:t});
+    out.push({label:`Année ${y} à ce jour`, from:`${y}-01-01`, to:t});
+    out.push({label:`Exercice ${y-1}`, from:`${y-1}-01-01`, to:`${y-1}-12-31`});
+    const first = state.tx.map(x=>isoOf(x.date)).filter(Boolean).sort()[0];
+    out.push({label:'Tout l’historique', from:first||`${y}-01-01`, to:t});
+    return out;
+  }
+  function dataFor(acct){
+    return LSStatement.statementData({
+      acct, label:ACCTS[acct], holder:acctHolder(acct).name, iban:(state.ibans||{})[acct]||'',
+      opening:(state.opening||{})[acct]||0, asOf:isoOf(((state.recon||{})[acct]||{}).asOf),
+      fromIso:from, toIso:to,
+      tx: txOf(acct).map(t=>({iso:isoOf(t.date), tiers:t.tiers, note:t.note, high:t.high, sub:t.sub, comment:t.comment, amount:t.amount})),
+    });
+  }
+  // mêmes destinataires que la convocation : les copropriétaires, sauf le syndic lui-même
+  function recipients(){
+    const m = (window.LS&&window.LS.member)||{};
+    const me = String(m.userEmail||m.email||'').toLowerCase();
+    const others = ownersOf().filter(o=>!(o.email && o.email.toLowerCase()===me) && o.n!==m.full_name);
+    return { syndic:(m.full_name||'').trim()||'Le syndic', from:me,
+             to: others.filter(o=>o.email).map(o=>o.email), missing: others.filter(o=>!o.email).map(o=>o.n) };
+  }
+  function syncReportPeriod(){
+    const f = document.getElementById('repFrom'), t = document.getElementById('repTo');
+    if (f && t && valid()){ f.value = fr(from); t.value = fr(to); }
+  }
+
+  function previewAcc(a){
+    const h = acctHolder(a.acct), warn = [];
+    if (h.src==='none') warn.push('Titulaire non renseigné : à compléter dans la fiche du compte.');
+    if (h.src==='copro') warn.push('Titulaire : nom de la copropriété repris par défaut, à corriger dans la fiche du compte si la banque indique autre chose.');
+    if (!a.iban) warn.push('IBAN non renseigné : à compléter dans la fiche du compte.');
+    if (a.asOf && a.toIso>a.asOf) warn.push(`Dernier relevé bancaire importé arrêté au ${fr(a.asOf)} : les mouvements plus récents n’y figurent pas encore.`);
+    if (a.undated) warn.push(`${a.undated} mouvement${a.undated>1?'s':''} sans date lisible ne ${a.undated>1?'seront':'sera'} pas repris.`);
+    const n = a.rows.length;
+    return `<div class="st-acc">
+      <div class="st-h"><b>${a.label}</b><span class="st-bal">${eur(a.closing)}</span></div>
+      <div class="st-meta">Solde disponible au ${fr(a.toIso)} · ${escH(a.holder||'titulaire non renseigné')}${a.iban?' · '+escH(LSStatement.fmtIban(a.iban)):''}</div>
+      <div class="st-meta">Solde au ${fr(a.fromIso)} : ${eur(a.opening)} · entrées +${eur(a.credits)} · sorties −${eur(a.debits)} · ${n} mouvement${n>1?'s':''}</div>
+      ${warn.map(w=>`<div class="st-warn">${escH(w)}</div>`).join('')}
+    </div>`;
+  }
+  function render(){
+    const ok = valid(), admin = canWrite();
+    const rec = recipients();
+    const mailInfo = !admin ? '' : `<div class="st-mail">${rec.to.length
+        ? `E-mail adressé à ${escH(rec.to.join(', '))}, relevé en pièce jointe.`
+        : 'Aucune adresse e-mail de copropriétaire enregistrée : complétez les destinataires dans votre messagerie.'}${rec.missing.length
+        ? ` Sans e-mail : ${escH(rec.missing.join(', '))} (à ajouter dans Budget &amp; copro › Copropriétaires &amp; lots).` : ''}</div>`;
+    card.innerHTML = `
+      <div class="h-row"><h2 id="stTitle">Relevé de compte (PDF)</h2><button class="lk" id="stClose" aria-label="Fermer" style="font-size:16px">✕</button></div>
+      <div class="sub" style="margin:-6px 0 2px">À envoyer aux copropriétaires : pour chaque compte, la date d’extraction, le titulaire, l’IBAN, le solde disponible et toutes les transactions de la période.</div>
+      <div class="st-l">Comptes</div>
+      <div class="seg" id="stAcct">${[['all','Les deux comptes'],['pay',ACCTS.pay],['res',ACCTS.res]]
+        .map(([k,l])=>`<button type="button" data-a="${k}" class="${sel===k?'on':''}" aria-pressed="${sel===k}">${l}</button>`).join('')}</div>
+      <div class="st-l">Période</div>
+      <div class="st-presets">${presets().map(p=>`<button type="button" class="st-chip${p.from===from&&p.to===to?' on':''}" data-f="${p.from}" data-t="${p.to}">${escH(p.label)}</button>`).join('')}</div>
+      <div class="st-dates">
+        <label class="sub" for="stFrom">Du</label><input class="fld" type="date" id="stFrom" value="${from}">
+        <label class="sub" for="stTo">au</label><input class="fld" type="date" id="stTo" value="${to}">
+      </div>
+      ${ok ? `<div class="st-prev">${accts().map(a=>previewAcc(dataFor(a))).join('')}</div>`
+           : '<div class="st-warn" style="margin-top:10px">Choisissez une date de début antérieure ou égale à la date de fin.</div>'}
+      ${mailInfo}
+      <div class="st-bar">
+        <button class="btn btn-ghost" id="stCancel">Fermer</button>
+        ${admin?`<button class="btn btn-ghost" id="stMail" ${ok?'':'disabled'}>Préparer l’e-mail aux copropriétaires</button>`:''}
+        <button class="btn btn-primary" id="stDl" ${ok?'':'disabled'}>Télécharger le PDF</button>
+      </div>`;
+    card.querySelector('#stClose').onclick = close;
+    card.querySelector('#stCancel').onclick = close;
+    card.querySelectorAll('#stAcct button').forEach(b=>b.onclick=()=>{ sel=b.dataset.a; render(); });
+    card.querySelectorAll('.st-chip').forEach(b=>b.onclick=()=>{ from=b.dataset.f; to=b.dataset.t; syncReportPeriod(); render(); });
+    card.querySelector('#stFrom').onchange = e=>{ from=e.target.value; syncReportPeriod(); render(); };
+    card.querySelector('#stTo').onchange = e=>{ to=e.target.value; syncReportPeriod(); render(); };
+    card.querySelector('#stDl').onclick = ()=>run('pdf');
+    card.querySelector('#stMail')?.addEventListener('click', ()=>run('mail'));
+  }
+
+  // Logo de marque en PNG pour le PDF (pdf-lib ne lit pas le SVG) ; sans lui, le nom en texte.
+  let _logoP = null;
+  function logoPng(){
+    return _logoP = _logoP || new Promise(res=>{
+      const img = new Image();
+      img.onload = ()=>{ try {
+        const c = document.createElement('canvas'); c.width = 263*4; c.height = 64*4;
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b=>{ if(!b) return res(null); b.arrayBuffer().then(x=>res(new Uint8Array(x)), ()=>res(null)); }, 'image/png');
+      } catch(e){ res(null); } };
+      img.onerror = ()=>res(null);
+      img.src = 'brand/logo.svg';
+    });
+  }
+  function mailText(copro, accounts, extractedAt){
+    const cn = copro.name, f = fr(from), t = fr(to), rec = recipients();
+    const which = accounts.length>1 ? 'des comptes de paiement et de réserve'
+      : (accounts[0].acct==='res' ? 'du compte de réserve' : 'du compte de paiement');
+    const lines = accounts.map(a=>`    ${a.label} : ${eur(a.closing)}`);
+    if (accounts.length>1) lines.push(`    Total : ${eur(Math.round(sum(accounts.map(a=>a.closing))*100)/100)}`);
+    const day = new Date(extractedAt).toLocaleDateString('fr-BE', {day:'numeric', month:'long', year:'numeric'});
+    return {
+      subject: `Relevé de compte · ${cn} · du ${f} au ${t}`,
+      body: `Madame, Monsieur, cher copropriétaire,
+
+Vous trouverez en pièce jointe le relevé ${which} de ${cn} pour la période du ${f} au ${t}.
+
+Solde disponible au ${t} :
+${lines.join('\n')}
+
+Le relevé reprend${accounts.length>1?', pour chaque compte,':''} le titulaire, l’IBAN et toutes les transactions de la période. Il a été extrait le ${day}.
+
+Salutations distinguées,
+${rec.syndic==='Le syndic' ? `Le syndic de ${cn}` : `${rec.syndic}, syndic de ${cn}`}
+`};
+  }
+  async function run(kind){
+    if (busy || !valid()) return;
+    busy = true;
+    const btn = card.querySelector(kind==='pdf' ? '#stDl' : '#stMail'), label = btn ? btn.textContent : '';
+    if (btn){ btn.textContent = 'Génération…'; btn.disabled = true; }
+    try {
+      const accounts = accts().map(dataFor);
+      const copro = { name:(state.coproName||'').trim()||'Ma copropriété', addr:state.coproAddr||'', kbo:state.coproKbo||'' };
+      const extractedAt = new Date().toISOString();
+      const bytes = await LSStatement.buildStatementPdf(await loadPdfLib(), {copro, extractedAt, accounts, logo:await logoPng()});
+      const name = LSStatement.statementFileName({copro, accounts});
+      if (kind==='pdf'){ saveBytes(bytes, name); showToast('Relevé téléchargé : '+name); }
+      else {
+        const rec = recipients(), m = mailText(copro, accounts, extractedAt);
+        const eml = LSStatement.statementEml({fromName:rec.syndic, from:rec.from, to:rec.to, subject:m.subject, body:m.body, fileName:name, bytes});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([eml], {type:'message/rfc822'})); a.download = name.replace(/\.pdf$/, '.eml');
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
+        showToast('Brouillon prêt, relevé joint : ouvrez le fichier .eml dans votre messagerie pour l’envoyer.');
+      }
+    } catch(e){ console.error(e); showToast('Relevé impossible à générer : '+(e.message||e), 'err'); }
+    finally {
+      busy = false;
+      if (btn && card.contains(btn)){ btn.textContent = label; btn.disabled = false; }
+    }
+  }
+
+  function open(acct){
+    sel = ACCTS[acct] ? acct : 'all';
+    const f = isoOf(document.getElementById('repFrom')?.value), t = isoOf(document.getElementById('repTo')?.value);
+    if (f && t && f<=t){ from = f; to = t; }
+    else { from = todayISO().slice(0,4)+'-01-01'; to = todayISO(); }
+    render();
+    modal.classList.add('open');
+    card.scrollTop = 0;
+    card.querySelector('#stDl')?.focus({preventScroll:true});
+  }
+  window.LazySyndic.openStatement = open;
+  document.getElementById('repStmt')?.addEventListener('click', ()=>open());
 })();
 
 /* ============================================================
