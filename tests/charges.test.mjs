@@ -97,7 +97,7 @@ test('données relues : nettoyées', () => {
   const c = C.clean([{id:'x', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:'120.456'},
                      {label:'Nouveau', cat:{}, key:'??', forecast:'abc'}, null, 'texte']);
   assert.equal(c.length, 2);
-  assert.deepEqual(c[0], {id:'x', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:120.46});
+  assert.deepEqual(c[0], {id:'x', label:'Eau', vendor:'', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:120.46});
   assert.equal(c[1].cat, null);
   assert.equal(c[1].key, 'quote');
   assert.equal(c[1].forecast, 0);
@@ -145,4 +145,47 @@ test('réserve : données relues nettoyées', () => {
   assert.equal(c[1].months, 12);
   assert.equal(c[1].start, '2027-01');
   assert.equal(c.length, 2);
+});
+
+test('bénéficiaire : le tiers le plus fréquent des dépenses de la catégorie, sans les libellés bancaires', () => {
+  const rows = [
+    { iso:'2025-02-10', account:'pay', high:'Énergie', sub:'Électricité', amount:-22.19, tiers:'Engie' },
+    { iso:'2025-05-20', account:'pay', high:'Énergie', sub:'Électricité', amount:-54.43, tiers:'REF 2210814498/ 709935001629/ 5176206287' },
+    { iso:'2025-06-15', account:'pay', high:'Énergie', sub:'Électricité', amount:-34.43, tiers:'engie' },             // même nom, casse différente
+    { iso:'2025-09-08', account:'pay', high:'Énergie', sub:'Électricité', amount:202.89, tiers:'Luminus' },           // remboursement : pas une dépense
+    { iso:'2025-07-17', account:'pay', high:'Énergie', sub:'Eau', amount:-306.77, tiers:'Vivaqua' },
+    { iso:'2025-08-02', account:'pay', high:'Frais ACP', sub:'Banque', amount:-0.6, tiers:'SEPA Credit Transfer' },
+    { iso:'2025-08-31', account:'pay', high:'Frais ACP', sub:'Banque', amount:-6, tiers:'Account subscription' },
+    { iso:'2025-10-17', account:'res', high:'Entretien', sub:'Réparations', amount:-900, tiers:'Toiture SA' },        // compte de réserve : hors charges
+    { iso:'2024-12-20', account:'pay', high:'Énergie', sub:'Électricité', amount:-70, tiers:'Lampiris' },            // autre année
+  ];
+  assert.equal(C.vendorOf(rows, {high:'Énergie', sub:'Électricité'}, 2025), 'Engie');
+  assert.equal(C.vendorOf(rows, {high:'Énergie', sub:''}, 2025), 'Engie');            // toute la catégorie : Engie 2, Vivaqua 1
+  assert.equal(C.vendorOf(rows, {high:'Énergie', sub:'Électricité'}, 2024), 'Lampiris');
+  assert.equal(C.vendorOf(rows, {high:'Frais ACP', sub:'Banque'}, 2025), '');          // que des libellés génériques
+  assert.equal(C.vendorOf(rows, {high:'Entretien', sub:''}, 2025), '');                // réserve : hors compte de paiement
+  assert.equal(C.vendorOf(rows, null, 2025), '');
+  const s = C.seed(rows, 2025, C.coverage(rows, 2025));
+  assert.equal(s.find(p => p.cat.sub === 'Eau').vendor, 'Vivaqua');
+  assert.equal(s.find(p => p.cat.sub === 'Banque').vendor, '');
+});
+
+test('poste du budget précédent : même catégorie, sinon même nom', () => {
+  const prev = [
+    { id:'a', label:'Électricité', cat:{high:'Énergie', sub:'Électricité'}, key:'indiv', forecast:262 },
+    { id:'b', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:1066 },
+    { id:'c', label:'Chambre de visite', cat:null, key:'quote', forecast:500 },
+  ];
+  assert.equal(C.matchPrev(prev, { label:'Courant', cat:{high:'Énergie', sub:'Électricité'} }).id, 'a');   // la catégorie prime sur le nom
+  assert.equal(C.matchPrev(prev, { label:'Énergie', cat:{high:'Énergie', sub:''} }).id, 'a');             // la catégorie entière recouvre ses sous-catégories
+  assert.equal(C.matchPrev(prev, { label:'chambre de visite ', cat:null }).id, 'c');                        // nouveau poste : par le nom
+  assert.equal(C.matchPrev(prev, { label:'Ascenseur', cat:{high:'Entretien', sub:''} }), null);
+  assert.equal(C.matchPrev(undefined, { label:'Eau', cat:null }), null);
+});
+
+test('postes relus : le bénéficiaire est gardé et borné', () => {
+  const c = C.clean([{ id:'x', label:'Eau', vendor:'Vivaqua', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:1066 }, { label:'Sans', vendor:'x'.repeat(100) }]);
+  assert.equal(c[0].vendor, 'Vivaqua');
+  assert.equal(c[1].vendor.length, 80);
+  assert.equal(C.clean([{ label:'Ancien' }])[0].vendor, '');
 });

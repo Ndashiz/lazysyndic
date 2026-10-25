@@ -1,7 +1,8 @@
 /* ============================================================
    LazySyndic — calcul des charges : budget prévisionnel par poste
    Pur : aucun DOM, aucun réseau, montants calculés en centimes entiers.
-   • un poste = {id, label, cat:{high, sub}|null, key:'quote'|'indiv', forecast}
+   • un poste = {id, label, vendor, cat:{high, sub}|null, key:'quote'|'indiv', forecast}
+     vendor = le bénéficiaire (fournisseur), texte libre, proposé par vendorOf()
      cat null = nouveau poste, sans historique ; cat.sub vide = toute la catégorie
    • reference()  — réel de l'année précédente et moyenne mensuelle d'une catégorie
    • split()      — prévision répartie par copropriétaire (millièmes ou parts égales)
@@ -23,6 +24,34 @@ function catKey(c){ return c ? c.high + '›' + (c.sub||'') : ''; }
 function overlaps(a, b){ return !!(a && b && a.high === b.high && (!a.sub || !b.sub || a.sub === b.sub)); }
 function matches(t, c){ return !!c && t.high === c.high && (!c.sub || (t.sub||'') === c.sub); }
 const isExpenseCat = high => !!high && high !== '?' && !INCOME.has(high);
+
+// Bénéficiaire probable d'une catégorie : le tiers le plus fréquent de ses dépenses de l'année
+// (alias déjà résolus à l'import). Les libellés bancaires génériques et les références
+// (« SEPA Credit Transfer », « REF 2210… », « +++…+++ ») ne nomment personne : ignorés.
+const GENERIC_TIERS = /sepa|credit transfer|instant transfer|direct debit|subscription|abonnement|^ref\b|^\+\+\+|^\d/i;
+function vendorOf(tx, cat, year){
+  if (!cat) return '';
+  const seen = new Map();
+  tx.filter(t => t.account === ACCT && yearOf(t) === String(year) && t.amount < 0 && matches(t, cat)).forEach(t => {
+    const s = String(t.tiers || '').trim();
+    if (!s || GENERIC_TIERS.test(s)) return;
+    const e = seen.get(s.toLowerCase()) || { label: s, count: 0 };
+    e.count++; seen.set(s.toLowerCase(), e);
+  });
+  let best = null;
+  for (const e of seen.values()) if (!best || e.count > best.count) best = e;
+  return best ? best.label : '';
+}
+
+// Le poste du budget précédent qui correspond à `p` : même catégorie (ou recouvrement),
+// sinon même nom ; null quand rien ne correspond. Sert à rappeler ce qui avait été prévu.
+function matchPrev(prev, p){
+  const list = Array.isArray(prev) ? prev : [];
+  const byCat = p.cat ? list.find(q => overlaps(q.cat, p.cat)) : null;
+  if (byCat) return byCat;
+  const name = String(p.label || '').trim().toLowerCase();
+  return name ? (list.find(q => String(q.label || '').trim().toLowerCase() === name) || null) : null;
+}
 
 // Paires de postes rattachés à des catégories qui se recouvrent : une dépense y serait comptée deux fois.
 function conflicts(postes){
@@ -108,7 +137,7 @@ function seed(tx, year, cov, keyFor){
     cats.forEach(cat => {
       const r = reference(tx, cat, year, cov);
       if (!(r.total > 0) || r.avg == null) return;            // remboursements nets : rien à budgéter
-      out.push({ id:newId(), label: cat.sub || cat.high, cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12) });
+      out.push({ id:newId(), label: cat.sub || cat.high, vendor: vendorOf(tx, cat, year), cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12) });
     });
   }
   return out.sort((a, b) => b.forecast - a.forecast);
@@ -119,6 +148,7 @@ function clean(list){
   return (Array.isArray(list) ? list : []).filter(p => p && typeof p === 'object').map(p => ({
     id: String(p.id || newId()),
     label: String(p.label || '').slice(0, 80),
+    vendor: String(p.vendor || '').slice(0, 80),
     cat: p.cat && p.cat.high ? { high: String(p.cat.high), sub: String(p.cat.sub || '') } : null,
     key: p.key === 'indiv' ? 'indiv' : 'quote',
     forecast: Number.isFinite(+p.forecast) ? Math.round(+p.forecast * 100)/100 : 0,
@@ -180,7 +210,7 @@ function cleanReserve(list, year){
   }));
 }
 
-const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat,
+const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev,
               reserveSpan, reserveCall, reserveSplit, cleanReserve, LEGAL_RATE };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;

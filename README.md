@@ -66,7 +66,8 @@ signatures : `node --test tests/signature.test.mjs`.
 ## Calcul des charges
 
 Écran **Budget & copropriétaires** › « Calcul des charges ». Un budget par exercice
-(flèches ‹ ›), fait de postes de dépense :
+(flèches ‹ ›) ; l'écran s'ouvre sur l'année qui suit celle en cours, puisque la prévision
+se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait de postes de dépense :
 
 - **Poste** : un nom, une **catégorie de la comptabilité** (une catégorie entière ou une
   sous-catégorie) ou « nouveau poste » sans historique. Le lien est **1 pour 1** : une
@@ -74,6 +75,11 @@ signatures : `node --test tests/signature.test.mjs`.
   exclut ses sous-catégories, pour qu'aucune dépense ne compte deux fois.
 - **Clé de répartition** : **Millièmes** (au prorata des quotités) ou **Individuelle**
   (parts égales, chaque copropriétaire une fois).
+- **Bénéficiaire** : le fournisseur du poste, texte libre, proposé d'après le tiers le plus
+  fréquent des dépenses de la catégorie (les libellés bancaires et les références ne comptent
+  pas) ; repris sous le poste dans l'Annexe 4.
+- **Budget de l'année précédente** : ce qui avait été prévu pour la même catégorie (sinon le
+  même nom) dans le budget d'avant, à côté du réel, à l'écran comme dans l'Annexe 4.
 - **Moyenne de l'année précédente** : dépenses nettes du compte de paiement dans la
   catégorie (remboursements déduits), divisées par les mois couverts par les relevés.
   Un registre commencé en mars compte 10 mois, pas 12. Un nouveau poste n'a pas de moyenne.

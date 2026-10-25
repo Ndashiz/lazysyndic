@@ -2851,11 +2851,12 @@ function budgetPostes(){
 const CHG_MON = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 let chgYear = null;
 const chargesHint = m => /charges|schema cache|column/i.test(m) ? m+' — lancez supabase/charges.sql dans Supabase (SQL Editor).' : m;
-// Exercice affiché : le dernier budget préparé, sinon l'année en cours.
+// Exercice affiché : la prévision se prépare pour l'année qui suit celle en cours, sur le réel
+// de l'année en cours à ce jour ; un budget déjà préparé plus loin l'emporte.
 function chargesYear(){
   if (chgYear) return chgYear;
   const ys = Object.keys(state.charges||{}).filter(y=>/^\d{4}$/.test(y) && (((state.charges[y]||{}).postes||[]).length || ((state.charges[y]||{}).reserve||[]).length)).map(Number);
-  return chgYear = ys.length ? Math.max(...ys) : new Date().getFullYear();
+  return chgYear = Math.max(new Date().getFullYear()+1, ...ys);
 }
 // Un exercice = postes de charges courantes (compte de paiement) + postes du fonds de réserve.
 function chargesBudget(y){ const b=(state.charges||{})[y]||{};
@@ -2876,7 +2877,7 @@ function budgetSplit(y){
     total: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100)/100),
     monthly: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100/12)/100)};
 }
-function chargesTx(){ return (state.tx||[]).map(t=>({iso:(parseDate(t.date)||{}).iso||'', account:t.account, high:t.high, sub:t.sub||'', amount:+t.amount||0})); }
+function chargesTx(){ return (state.tx||[]).map(t=>({iso:(parseDate(t.date)||{}).iso||'', account:t.account, high:t.high, sub:t.sub||'', amount:+t.amount||0, tiers:t.tiers||''})); }
 function chargesOwners(){ return ownersOf().map(o=>({key:o.id||o.short||o.n, q:+o.q||0})); }
 function saveCharges(y, postes, extra){
   if(!canWrite()) return;
@@ -2922,6 +2923,7 @@ function ensureChargesCss(){
     #chgTable th:last-child,#chgTable td:last-child{padding-right:16px}
     #chgTable .fld{font-size:13px;padding:6px 8px}
     #chgTable .chg-label{width:100%;min-width:112px}
+    #chgTable .chg-vendor{width:100%;min-width:110px}
     #chgTable .chg-cat{width:100%;min-width:148px;max-width:240px}
     #chgTable .chg-key{min-width:118px}
     #chgTable .chg-fc{width:100px;text-align:right}
@@ -2968,12 +2970,17 @@ function renderCharges(){
   const clash=new Set(LSCharges.conflicts(postes).flat());
   const totF=sum(postes.map(p=>p.forecast)), totR=sum(refs.filter(Boolean).map(r=>r.total));
   const unc=LSCharges.uncovered(tx, postes, ref), prevB=chargesBudget(ref), prev=prevB.postes;
+  // bénéficiaire proposé (tiers dominant de la catégorie en N-1) et poste correspondant du budget N-1
+  const vendors=postes.map(p=>LSCharges.vendorOf(tx, p.cat, ref)), prevs=postes.map(p=>LSCharges.matchPrev(prev, p));
+  const totP=sum(prevs.filter(Boolean).map(q=>q.forecast));
   // la réserve d'un exercice précédent continue tant que sa durée n'est pas écoulée
   const prevRes=prevB.reserve.filter(p=>LSCharges.reserveSpan(p, y).inYear>0);
   const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
-  const covTxt = !cov.months ? `Aucun relevé en ${ref} : pas de moyenne possible, saisissez les prévisions.`
-    : cov.months<12 ? `Réel ${ref} du compte de paiement, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} : la moyenne mensuelle est calculée sur ces ${cov.months} mois.`
-    : `Réel ${ref} du compte de paiement sur l'année complète ; moyenne mensuelle = réel ÷ 12.`;
+  const today = ref===new Date().getFullYear() ? ' à ce jour' : '';
+  const covTxt = `Prévision ${y} établie sur le réel ${ref} du compte de paiement` + (!cov.months ? ` : aucun relevé en ${ref}, pas de moyenne possible, saisissez les prévisions.`
+    : cov.months<12 ? `${today}, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} : moyenne mensuelle sur ces ${cov.months} mois.`
+    : ` sur l'année complète ; moyenne mensuelle = réel ÷ 12.`)
+    + (prev.length ? ` La colonne « Budget ${ref} » rappelle ce qui avait été prévu pour ${ref}.` : '');
   const rows = postes.map((p,i)=>{
     const r=refs[i], bad=clash.has(p.id);
     // moyenne mensuelle de l'année de référence, avec le réel de l'année en dessous
@@ -2984,8 +2991,10 @@ function renderCharges(){
     return `<tr class="${bad?'chg-clash':''}">
       <td>${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}
         ${bad?'<div class="chg-warn">Catégorie déjà reprise par un autre poste : la dépense serait comptée deux fois.</div>':''}</td>
+      <td>${ed?`<input class="fld chg-vendor" data-i="${i}" value="${escH(p.vendor||'')}" placeholder="Bénéficiaire" aria-label="Bénéficiaire">${!p.vendor && vendors[i] ? `<div class="chg-sub"><button class="lk chg-vfill" data-i="${i}" title="Tiers le plus fréquent de la catégorie en ${ref}">= ${escH(vendors[i])}</button></div>`:''}`:escH(p.vendor||'—')}</td>
       <td>${ed?`<select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>`:escH(LSCharges.catLabel(p.cat))}</td>
       <td>${ed?`<select class="fld chg-key" data-i="${i}" aria-label="Clé de répartition"><option value="quote" ${p.key==='quote'?'selected':''}>Millièmes</option><option value="indiv" ${p.key==='indiv'?'selected':''}>Individuelle</option></select>`:(p.key==='indiv'?'Individuelle':'Millièmes')}</td>
+      <td class="num">${prevs[i] ? `${eur(prevs[i].forecast)}<div class="chg-sub">prévu pour ${ref}</div>` : `<span class="sub">—</span><div class="chg-sub">${prev.length?`absent du budget ${ref}`:`pas de budget ${ref}`}</div>`}</td>
       <td class="num">${refCell}</td>
       <td class="num">${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Prévision annuelle ${y}">`:`<b>${eur(p.forecast)}</b>`}
         <div class="chg-sub">soit ${eur(p.forecast/12)} / mois</div>${fill}</td>
@@ -2993,9 +3002,10 @@ function renderCharges(){
     </tr>`;
   }).join('');
   const table = postes.length ? `<div class="table-wrap"><table id="chgTable">
-      <tr><th>Poste</th><th>Catégorie de la comptabilité</th><th>Clé de répartition</th><th class="num">Moyenne ${ref}</th><th class="num">Prévision ${y}</th>${ed?'<th></th>':''}</tr>
+      <tr><th>Poste</th><th>Bénéficiaire</th><th>Catégorie de la comptabilité</th><th>Clé de répartition</th><th class="num">Budget ${ref}</th><th class="num">Moyenne ${ref}</th><th class="num">Prévision ${y}</th>${ed?'<th></th>':''}</tr>
       ${rows}
-      <tr class="chg-tot"><td colspan="3">Total · ${postes.length} poste${postes.length>1?'s':''}</td>
+      <tr class="chg-tot"><td colspan="4">Total · ${postes.length} poste${postes.length>1?'s':''}</td>
+        <td class="num">${prev.length?eur(totP):'—'}<div class="chg-sub">${prev.length?`budget ${ref}`:''}</div></td>
         <td class="num">${cov.months?`${eur(totR/cov.months)} / mois`:'—'}<div class="chg-sub">${eur(totR)} en ${ref}</div></td>
         <td class="num">${eur(totF)}<div class="chg-sub">soit ${eur(totF/12)} / mois</div></td>${ed?'<td></td>':''}</tr>
     </table></div>`
@@ -3019,9 +3029,12 @@ function renderCharges(){
   if (ed){
     const upd=(i, patch)=>saveCharges(y, postes.map((p,k)=>k===i ? {...p, ...patch} : p));
     card.querySelectorAll('.chg-label').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {label:inp.value.trim()}));
+    card.querySelectorAll('.chg-vendor').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {vendor:inp.value.trim()}));
+    card.querySelectorAll('.chg-vfill').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; upd(i, {vendor:vendors[i]}); });
     card.querySelectorAll('.chg-cat').forEach(s=>s.onchange=()=>{
       const i=+s.dataset.i, p=postes[i], cat=catFromKey(s.value), patch={cat};
       if (cat && !p.label){ patch.label=cat.sub||cat.high; patch.key=budgetDefaultKey(cat.high, cat.sub); }   // poste neuf : nom et clé suggérés
+      if (cat && !p.vendor){ const v=LSCharges.vendorOf(tx, cat, ref); if(v) patch.vendor=v; }                       // et bénéficiaire d'après les mouvements
       upd(i, patch);
     });
     card.querySelectorAll('.chg-key').forEach(s=>s.onchange=()=>upd(+s.dataset.i, {key:s.value}));
@@ -3950,9 +3963,10 @@ setTimeout(boot, 0);
       <div class="r-sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${cy}. Appel de l'année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes.</div>
       <table><tr><th>Poste</th><th class="num">À constituer</th><th>Durée</th><th>Clé</th><th class="num">Par mois</th><th class="num">Appel ${cy}</th></tr>
         ${resRows}<tr class="tot"><td>Total</td><td class="num">${eur(sum(reserve.map(p=>p.amount)))}</td><td></td><td></td><td class="num">${eur(resTot/12)}</td><td class="num">${eur(resTot)}</td></tr></table>`;
-    const rows=postes.map((p,i)=>{ const r=refs[i];
-      return `<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}</td><td>${escH(LSCharges.catLabel(p.cat))}</td>
-        <td>${p.key==='indiv'?`Individuelle (÷ ${n})`:'Millièmes'}</td><td class="num">${r?eur(r.total):'—'}</td>
+    const prev=chargesBudget(ref).postes, prevs=postes.map(p=>LSCharges.matchPrev(prev, p)), totP=sum(prevs.filter(Boolean).map(q=>q.forecast));
+    const rows=postes.map((p,i)=>{ const r=refs[i], q=prevs[i];
+      return `<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}${p.vendor?`<div class="r-sub" style="margin:0">${escH(p.vendor)}</div>`:''}</td><td>${escH(LSCharges.catLabel(p.cat))}</td>
+        <td>${p.key==='indiv'?`Individuelle (÷ ${n})`:'Millièmes'}</td><td class="num">${q?eur(q.forecast):'—'}</td><td class="num">${r?eur(r.total):'—'}</td>
         <td class="num">${r&&r.avg!=null?eur(r.avg):'—'}</td><td class="num"><b>${eur(p.forecast)}</b></td></tr>`; }).join('');
     const totR=sum(refs.filter(Boolean).map(r=>r.total)), totF=sum(postes.map(p=>p.forecast));
     const owRows=ow.map((o,i)=>`<tr><td>${o.n}</td><td class="num">${o.q}</td><td class="num">${eur(res[i].annual)}</td><td class="num">${eur(rs[i].reserve)}</td><td class="num"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}</td></tr>`).join('');
@@ -3960,8 +3974,8 @@ setTimeout(boot, 0);
       : `Réel ${ref} du compte de paiement${cov.months<12?`, sur ${cov.months} mois de relevés`:''} ; moyenne mensuelle sur ces mois.`;
     return `<h2>Annexe 4 — Budget prévisionnel ${cy}</h2>
       <div class="r-sub">${covNote} Clé « Millièmes » : au prorata des quotités ; « Individuelle » : à parts égales entre copropriétaires.</div>
-      <table><tr><th>Poste</th><th>Catégorie</th><th>Clé</th><th class="num">Réel ${ref}</th><th class="num">Moyenne / mois</th><th class="num">Budget ${cy}</th></tr>
-        ${rows}<tr class="tot"><td>Total</td><td></td><td></td><td class="num">${eur(totR)}</td><td class="num">${cov.months?eur(totR/cov.months):'—'}</td><td class="num">${eur(totF)}</td></tr></table>
+      <table><tr><th>Poste</th><th>Catégorie</th><th>Clé</th><th class="num">Budget ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Moyenne / mois</th><th class="num">Budget ${cy}</th></tr>
+        ${rows}<tr class="tot"><td>Total</td><td></td><td></td><td class="num">${prev.length?eur(totP):'—'}</td><td class="num">${eur(totR)}</td><td class="num">${cov.months?eur(totR/cov.months):'—'}</td><td class="num">${eur(totF)}</td></tr></table>
       ${reserveTable}
       <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Budget ${cy} par copropriétaire</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges courantes</th><th class="num">Fonds de réserve</th><th class="num">Total annuel</th><th class="num">Mensualité</th></tr>
