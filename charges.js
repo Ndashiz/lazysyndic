@@ -3,8 +3,14 @@
    Pur : aucun DOM, aucun réseau, montants calculés en centimes entiers.
    • un budget = {postes, reserve, applied, status:'draft'|'published', publishedAt} : brouillon
      tant que le syndic ne l'a pas publié (isPublished) ; l'appliquer aux provisions le publie
-   • un poste = {id, label, vendor, cat:{high, sub}|null, key:'quote'|'indiv', forecast}
+   • un poste = {id, label, vendor, cat:{high, sub}|null, key:'quote'|'indiv', forecast,
+                 realFormula, fcFormula, fcNote}
      vendor = le bénéficiaire (fournisseur), texte libre, proposé par vendorOf()
+     realFormula = formule du réel N-1 ('' = standard : réel à ce jour ramené à 12 mois)
+     fcFormula = formule de la prévision ('' = montant saisi) ; fcNote = explication libre
+   • un budget porte aussi `marge` (en %, 3 par défaut) : [marge] dans les formules
+   • evalFormula() — formule façon tableur ; resolve() — un poste avec estimé N-1, réel N-1,
+     delta et prévision calculés ; groupPostes() — les postes par catégorie
      cat null = nouveau poste, sans historique ; cat.sub vide = toute la catégorie
    • reference()  — réel de l'année précédente et moyenne mensuelle d'une catégorie
    • split()      — prévision répartie par copropriétaire (millièmes ou parts égales)
@@ -29,6 +35,85 @@ const isExpenseCat = high => !!high && high !== '?' && !INCOME.has(high);
 // Un budget reste un brouillon, visible du seul syndic, jusqu'à sa publication ; un budget déjà
 // appliqué aux provisions est publié de fait (le dû de chacun en découle).
 const isPublished = b => !!b && (b.status === 'published' || !!b.applied);
+const cleanMarge = v => Number.isFinite(+v) && +v >= 0 && +v <= 100 ? Math.round(+v * 100) / 100 : 3;
+
+/* ------------------------------------------------------------
+   Formules façon tableur. Une formule = nombres (virgule ou point, espaces de milliers), champs
+   entre crochets (« [réel à ce jour] »), + − × ÷ (ou * /), parenthèses et % postfixe (÷ 100).
+   Jamais de code : l'analyseur ne connaît que ça ; un champ inconnu, une division par zéro ou un
+   reste inattendu donnent une erreur lisible, pas une exception.
+   ------------------------------------------------------------ */
+const REAL_FORMULA = '[réel à ce jour] × 12 ÷ [mois couverts]';
+const FC_FORMULA = '[réel] × (1 + [marge])';
+const normKey = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+function evalFormula(src, fields){
+  const keys = {}; for (const k in (fields || {})) keys[normKey(k)] = Number(fields[k]) || 0;
+  const s = String(src || '').replace(/[\u00a0\u202f]/g, ' ');
+  let i = 0;
+  const fail = m => { throw new Error(m); };
+  const skip = () => { while (i < s.length && s[i] === ' ') i++; };
+  function primary(){
+    skip(); const c = s[i];
+    if (c === undefined) fail('formule incomplète');
+    if (c === '(') { i++; const v = expr(); skip(); if (s[i] !== ')') fail('parenthèse fermante manquante'); i++; return v; }
+    if (c === '[') { const j = s.indexOf(']', i); if (j < 0) fail('crochet fermant manquant'); const name = s.slice(i + 1, j).trim(); i = j + 1; const k = normKey(name); if (!(k in keys)) fail('champ inconnu : ' + name); return keys[k]; }
+    if (c === '-' || c === '−') { i++; return -primary(); }
+    const m = /^\d+(?: \d{3})*(?:[.,]\d+)?|^[.,]\d+/.exec(s.slice(i));
+    if (!m) fail('caractère inattendu : ' + c);
+    i += m[0].length; return parseFloat(m[0].replace(/ /g, '').replace(',', '.'));
+  }
+  function postfix(){ let v = primary(); for (;;) { skip(); if (s[i] === '%') { i++; v = v / 100; } else return v; } }
+  function term(){ let v = postfix(); for (;;) { skip(); const c = s[i]; if (c === '×' || c === '*' || c === 'x' || c === 'X') { i++; v *= postfix(); } else if (c === '÷' || c === '/' || c === ':') { i++; const d = postfix(); if (!d) fail('division par zéro'); v /= d; } else return v; } }
+  function expr(){ let v = term(); for (;;) { skip(); const c = s[i]; if (c === '+') { i++; v += term(); } else if (c === '-' || c === '−') { i++; v -= term(); } else return v; } }
+  try {
+    skip(); if (i >= s.length) return { value: null, error: 'formule vide' };
+    const v = expr(); skip(); if (i < s.length) fail('caractère inattendu : ' + s[i]);
+    if (!Number.isFinite(v)) fail('résultat non numérique');
+    return { value: Math.round(v * 100) / 100, error: null };
+  } catch (e) { return { value: null, error: e.message }; }
+}
+// « [réel à ce jour] × 12 ÷ [mois couverts] » → « réel à ce jour × 12 ÷ mois couverts » (pastille)
+const shortFormula = f => String(f || '').replace(/\[([^\]]+)\]/g, '$1').replace(/\s+/g, ' ').trim();
+
+// Les champs qu'une formule peut utiliser pour un poste, année de référence `year` (= N-1) :
+// réel à ce jour, mois couverts, moyenne mensuelle, réel de l'année d'avant, budget N-1, marge.
+// `réel` (ramené à 12 mois par realFormula) s'y ajoute pour la formule de la prévision.
+function fieldsFor(tx, p, year, cov, prev, marge){
+  const r = p.cat ? reference(tx, p.cat, year, cov) : null;
+  const r2 = p.cat ? reference(tx, p.cat, year - 1, coverage(tx, year - 1)) : null;
+  const q = matchPrev(prev, p);
+  return {
+    'réel à ce jour': r ? r.total : 0,
+    'mois couverts': cov ? cov.months : 0,
+    'moyenne mensuelle': r && r.avg != null ? r.avg : 0,
+    'réel précédent': r2 ? r2.total : 0,
+    'budget précédent': q ? q.forecast : 0,
+    'marge': cleanMarge(marge) / 100,
+  };
+}
+// Un poste résolu : estimé N-1 (poste correspondant du budget N-1), réel N-1 par sa formule,
+// delta = estimé − réel, et la prévision par sa formule quand il en a une. Un budget publié
+// (`frozen`) garde la prévision enregistrée : les relevés qui arrivent ensuite ne la bougent plus.
+function resolve(p, ctx){
+  const f = fieldsFor(ctx.tx, p, ctx.year, ctx.cov, ctx.prev, ctx.marge);
+  const hasRef = !!p.cat && !!ctx.cov && ctx.cov.months > 0;
+  const rf = p.realFormula || REAL_FORMULA;
+  const real = hasRef ? evalFormula(rf, f) : { value: null, error: null };
+  f['réel'] = real.value == null ? 0 : real.value;
+  const q = matchPrev(ctx.prev, p), est = q ? q.forecast : null;
+  const delta = est != null && real.value != null ? Math.round((est - real.value) * 100) / 100 : null;
+  let forecast = p.forecast, fc = { value: null, error: null };
+  if (p.fcFormula && !ctx.frozen) { fc = evalFormula(p.fcFormula, f); if (fc.value != null) forecast = Math.max(0, fc.value); }
+  return { ...p, forecast, calc: { fields: f, hasRef, real: real.value, realError: real.error, realFormula: rf, est, delta, fcError: fc.error, toDate: f['réel à ce jour'], months: f['mois couverts'] } };
+}
+// Les postes par catégorie de la comptabilité, dans l'ordre d'apparition ; sans catégorie en dernier.
+function groupPostes(postes){
+  const by = new Map();
+  (postes || []).forEach((p, i) => { const k = p.cat && p.cat.high ? p.cat.high : ''; if (!by.has(k)) by.set(k, []); by.get(k).push({ p, i }); });
+  const out = [...by.entries()].filter(([k]) => k).map(([k, items]) => ({ label: k, items }));
+  if (by.has('')) out.push({ label: '', items: by.get('') });
+  return out;
+}
 
 // Bénéficiaire probable d'une catégorie : le tiers le plus fréquent de ses dépenses de l'année
 // (alias déjà résolus à l'import). Les libellés bancaires génériques et les références
@@ -142,7 +227,7 @@ function seed(tx, year, cov, keyFor){
     cats.forEach(cat => {
       const r = reference(tx, cat, year, cov);
       if (!(r.total > 0) || r.avg == null) return;            // remboursements nets : rien à budgéter
-      out.push({ id:newId(), label: cat.sub || cat.high, vendor: vendorOf(tx, cat, year), cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12) });
+      out.push({ id:newId(), label: cat.sub || cat.high, vendor: vendorOf(tx, cat, year), cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12), realFormula: '', fcFormula: FC_FORMULA, fcNote: '' });
     });
   }
   return out.sort((a, b) => b.forecast - a.forecast);
@@ -154,6 +239,9 @@ function clean(list){
     id: String(p.id || newId()),
     label: String(p.label || '').slice(0, 80),
     vendor: String(p.vendor || '').slice(0, 80),
+    realFormula: String(p.realFormula || '').slice(0, 200),
+    fcFormula: String(p.fcFormula || '').slice(0, 200),
+    fcNote: String(p.fcNote || '').slice(0, 160),
     cat: p.cat && p.cat.high ? { high: String(p.cat.high), sub: String(p.cat.sub || '') } : null,
     key: p.key === 'indiv' ? 'indiv' : 'quote',
     forecast: Number.isFinite(+p.forecast) ? Math.round(+p.forecast * 100)/100 : 0,
@@ -216,6 +304,7 @@ function cleanReserve(list, year){
 }
 
 const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
+              cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, REAL_FORMULA, FC_FORMULA,
               reserveSpan, reserveCall, reserveSplit, cleanReserve, LEGAL_RATE };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;

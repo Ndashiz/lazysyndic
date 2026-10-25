@@ -97,7 +97,7 @@ test('données relues : nettoyées', () => {
   const c = C.clean([{id:'x', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:'120.456'},
                      {label:'Nouveau', cat:{}, key:'??', forecast:'abc'}, null, 'texte']);
   assert.equal(c.length, 2);
-  assert.deepEqual(c[0], {id:'x', label:'Eau', vendor:'', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:120.46});
+  assert.deepEqual(c[0], {id:'x', label:'Eau', vendor:'', realFormula:'', fcFormula:'', fcNote:'', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:120.46});
   assert.equal(c[1].cat, null);
   assert.equal(c[1].key, 'quote');
   assert.equal(c[1].forecast, 0);
@@ -196,4 +196,74 @@ test('un budget est un brouillon tant qu\'il n\'est pas publié ; appliqué aux 
   assert.equal(C.isPublished({ status:'published' }), true);
   assert.equal(C.isPublished({ applied:{ at:'2026-10-25T10:00:00Z', total:1371 } }), true);
   assert.equal(C.isPublished(null), false);
+});
+
+test('formule façon tableur : nombres, champs, priorités, parenthèses, pourcentage', () => {
+  const f = { 'réel à ce jour': 1441.2, 'mois couverts': 10, 'marge': 0.03, 'réel': 1729.44 };
+  assert.deepEqual(C.evalFormula('[réel à ce jour] × 12 ÷ [mois couverts]', f), { value: 1729.44, error: null });
+  assert.deepEqual(C.evalFormula('[réel] × (1 + [marge])', f), { value: 1781.32, error: null });
+  assert.deepEqual(C.evalFormula('[Reel] * (1 + 3 %)', f), { value: 1781.32, error: null });        // accents et casse indifférents, % postfixe, * pour ×
+  assert.deepEqual(C.evalFormula('6 × 12', f), { value: 72, error: null });
+  assert.deepEqual(C.evalFormula('1 227,00 + 2,5', f), { value: 1229.5, error: null });             // virgule décimale, espace de milliers
+  assert.deepEqual(C.evalFormula('2 + 3 × 4', f), { value: 14, error: null });                      // × avant +
+  assert.deepEqual(C.evalFormula('-(2 + 3) × 4', f), { value: -20, error: null });
+  assert.deepEqual(C.evalFormula('200', f), { value: 200, error: null });
+  assert.equal(C.evalFormula('[loyer] × 2', f).error, 'champ inconnu : loyer');
+  assert.equal(C.evalFormula('[réel] ÷ 0', f).error, 'division par zéro');
+  assert.equal(C.evalFormula('2 +', f).error, 'formule incomplète');
+  assert.equal(C.evalFormula('2 ) 3', f).error, 'caractère inattendu : )');
+  assert.equal(C.evalFormula('alert(1)', f).error, 'caractère inattendu : a');                        // jamais de code
+  assert.equal(C.evalFormula('', f).error, 'formule vide');
+  assert.equal(C.shortFormula(C.REAL_FORMULA), 'réel à ce jour × 12 ÷ mois couverts');
+});
+
+test('poste résolu : estimé N-1, réel ramené à 12 mois, delta, prévision par formule ou saisie', () => {
+  const tx26 = [
+    { iso:'2026-02-12', account:'pay', high:'Énergie', sub:'Eau', amount:-306.77, tiers:'Vivaqua' },
+    { iso:'2026-08-04', account:'pay', high:'Énergie', sub:'Eau', amount:-380, tiers:'Vivaqua' },
+    { iso:'2026-01-05', account:'pay', high:'Charges', sub:'', amount:79.39 },
+    { iso:'2026-10-16', account:'pay', high:'Énergie', sub:'Électricité', amount:-16.5 },
+    { iso:'2025-06-03', account:'pay', high:'Énergie', sub:'Eau', amount:-199.39, tiers:'Vivaqua' },
+  ];
+  const cov = C.coverage(tx26, 2026);                       // janvier → octobre : 10 mois
+  const prev = [{ id:'p', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:1227 }];
+  const ctx = { tx: tx26, year: 2026, cov, prev, marge: 3, frozen: false };
+  const eau = C.resolve({ id:'a', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:0, realFormula:'', fcFormula:C.FC_FORMULA, fcNote:'' }, ctx);
+  assert.equal(eau.calc.toDate, 686.77);
+  assert.equal(eau.calc.months, 10);
+  assert.equal(eau.calc.real, 824.12);                       // 686,77 × 12 ÷ 10
+  assert.equal(eau.calc.est, 1227);
+  assert.equal(eau.calc.delta, 402.88);                      // sous le budget
+  assert.equal(eau.forecast, 848.84);                        // 824,12 × 1,03
+  assert.equal(eau.calc.fields['réel précédent'], 199.39);
+  // réel à la formule libre, prévision saisie à la main
+  const saisi = C.resolve({ id:'b', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:900, realFormula:'[réel à ce jour]', fcFormula:'', fcNote:'devis' }, ctx);
+  assert.equal(saisi.calc.real, 686.77);
+  assert.equal(saisi.forecast, 900);
+  // formule fausse : erreur lisible, la prévision enregistrée reste
+  const faux = C.resolve({ id:'c', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:900, realFormula:'', fcFormula:'[réel] × [taux]', fcNote:'' }, ctx);
+  assert.equal(faux.forecast, 900);
+  assert.equal(faux.calc.fcError, 'champ inconnu : taux');
+  // budget publié : la prévision enregistrée fait foi, même avec une formule
+  const gele = C.resolve({ id:'d', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:800, realFormula:'', fcFormula:C.FC_FORMULA, fcNote:'' }, { ...ctx, frozen: true });
+  assert.equal(gele.forecast, 800);
+  // nouveau poste sans catégorie : pas de réel, pas de delta, montant saisi
+  const neuf = C.resolve({ id:'e', label:'Chambre de visite', cat:null, key:'quote', forecast:200, realFormula:'', fcFormula:'', fcNote:'' }, ctx);
+  assert.equal(neuf.calc.hasRef, false);
+  assert.equal(neuf.calc.real, null);
+  assert.equal(neuf.calc.delta, null);
+  assert.equal(neuf.forecast, 200);
+  assert.equal(C.cleanMarge('abc'), 3);
+  assert.equal(C.cleanMarge(2.5), 2.5);
+});
+
+test('postes groupés par catégorie, dans l\'ordre d\'apparition, sans catégorie en dernier', () => {
+  const g = C.groupPostes([
+    { id:'1', label:'Divers', cat:null },
+    { id:'2', label:'Eau', cat:{high:'Énergie', sub:'Eau'} },
+    { id:'3', label:'RC', cat:{high:'Assurance', sub:'RC'} },
+    { id:'4', label:'Électricité', cat:{high:'Énergie', sub:'Électricité'} },
+  ]);
+  assert.deepEqual(g.map(x => [x.label, x.items.map(i => i.p.id)]), [['Énergie', ['2', '4']], ['Assurance', ['3']], ['', ['1']]]);
+  assert.deepEqual(C.groupPostes([]), []);
 });

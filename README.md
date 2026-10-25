@@ -78,17 +78,34 @@ se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait d
 - **Bénéficiaire** : le fournisseur du poste, texte libre, proposé d'après le tiers le plus
   fréquent des dépenses de la catégorie (les libellés bancaires et les références ne comptent
   pas) ; repris sous le poste dans l'Annexe 4.
-- **Budget de l'année précédente** : ce qui avait été prévu pour la même catégorie (sinon le
-  même nom) dans le budget d'avant, à côté du réel, à l'écran comme dans l'Annexe 4.
+- **Annexe 4** en trois parties qui se lisent de la même façon : 1 · fonds de roulement
+  (charges courantes du compte de paiement : estimé N-1, réel, delta, budget N, puis la part de
+  chaque copropriétaire en colonnes, total et mensualité), 2 · fonds de réserve (à constituer,
+  durée, appel N, part de chacun), 3 · total par copropriétaire. En tête : le nom, l'adresse et
+  le numéro d'entreprise de la copropriété, saisis dans **Copropriétaires & lots › Copropriété**
+  (colonnes `copro_name` / `copro_addr` / `copro_kbo`, [`supabase/budget.sql`](supabase/budget.sql)
+  à lancer à la main).
 - **Brouillon / publié** : un budget reste un brouillon, visible du seul syndic (charges, réserve
   et répartition), jusqu'à « Publier le budget » ; les copropriétaires voient alors « le syndic
   prépare le budget » et arrivent sur le dernier budget publié. L'appliquer aux provisions le
   publie aussi ; « Repasser en brouillon » reste possible tant qu'il n'est pas appliqué. L'Annexe 4
   d'un brouillon est marquée comme telle et ne sort que pour le syndic.
-- **Moyenne de l'année précédente** : dépenses nettes du compte de paiement dans la
-  catégorie (remboursements déduits), divisées par les mois couverts par les relevés.
-  Un registre commencé en mars compte 10 mois, pas 12. Un nouveau poste n'a pas de moyenne.
-- **Prévision** : montant annuel saisi, ou « = moyenne × 12 » arrondi à l'euro supérieur.
+- **Postes groupés par catégorie** de la comptabilité (Énergie, Assurance, Frais ACP…), les
+  postes sans catégorie en dernier.
+- **Estimé pour N-1** : ce qui avait été budgété l'an dernier pour la même catégorie, sinon le
+  même nom (voir plus bas), à côté du réel.
+- **Réel N-1** : dépenses nettes du compte de paiement dans la catégorie (remboursements
+  déduits), ramenées à 12 mois par une **formule façon tableur** modifiable poste par poste,
+  par défaut `[réel à ce jour] × 12 ÷ [mois couverts]`. Un registre commencé en mars compte
+  10 mois, pas 12. Un nouveau poste n'a pas de réel.
+- **Delta N-1** : estimé − réel, en rouge quand le budget est dépassé.
+- **Estimation N** : par formule, par défaut `[réel] × (1 + [marge])` avec une **marge** en %
+  propre au budget (3 % si rien n'est saisi), ou montant saisi à la main (la formule s'efface).
+  Sous chaque estimation, une **explication du calcul** en texte libre, reprise dans l'Annexe 4.
+  Une formule ne connaît que des nombres, des champs entre crochets (réel, réel à ce jour,
+  mois couverts, moyenne mensuelle, réel précédent, budget précédent, marge), + − × ÷, les
+  parenthèses et le % : jamais de code (`LSCharges.evalFormula`). À la publication, les
+  estimations calculées sont figées : un relevé importé ensuite ne change plus un budget publié.
 
 « Proposer les postes depuis le réel » crée un poste par catégorie dépensée l'année
 précédente. Les dépenses qu'aucun poste ne reprend sont signalées sous le tableau. La

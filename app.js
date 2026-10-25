@@ -2761,7 +2761,24 @@ const ownersById = ()=>{ const m={}; ownersOf().forEach(o=>{ if(o.id) m[o.id]=o;
 const lotsOf = ()=> state.lots || [];
 
 // --- Onglet « Copropriétaires & lots » (référentiel réel) ---
+// Fiche de la copropriété : nom, adresse, numéro d'entreprise (BCE / TVA) — en tête des rapports
+// et de l'Annexe 4. Colonnes copro_name / copro_addr / copro_kbo de ls_settings (supabase/budget.sql).
+async function saveCoproField(field, v){
+  const key={copro_name:'coproName', copro_addr:'coproAddr', copro_kbo:'coproKbo'}[field]; if(!key) return;
+  state[key]=v; saveState();
+  if(!writeToDb()){ toastSaved(); renderAll(); return; }
+  try{ await window.LS.db.updateSettings({[field]: v||null}); toastSaved(); renderAll(); }
+  catch(e){ console.error(e); showToast('Échec de l’enregistrement : '+(e.message||e)+(/schema cache|column/i.test(e.message||'')?' — lancez supabase/budget.sql dans Supabase (SQL Editor).':''),'err'); }
+}
 function renderBudgetOwn(){
+  const cc=document.getElementById('budCopro');
+  if (cc){
+    ensureChargesCss();
+    const ed=canWrite();
+    const f=(id,label,val,ph,hint)=>`<label class="copro-f"><span>${label}</span>${ed?`<input class="fld copro-field" data-field="${id}" value="${escH(val||'')}" placeholder="${ph}">`:`<b>${escH(val||'—')}</b>`}${hint?`<span>${hint}</span>`:''}</label>`;
+    cc.innerHTML=`<div class="mini-h" style="margin:0 0 10px">Copropriété</div><div class="copro-grid">${f('copro_name','Nom',state.coproName,'ACP …','Sur les rapports, les relevés et les convocations')}${f('copro_addr','Adresse',state.coproAddr,'Rue, n°, code postal, commune','')}${f('copro_kbo','N° d’entreprise (BCE / TVA)',state.coproKbo,'BE 0123.456.789','En tête des rapports et de l’Annexe 4')}</div>`;
+    cc.querySelectorAll('.copro-field').forEach(inp=>inp.onchange=()=>saveCoproField(inp.dataset.field, inp.value.trim()));
+  }
   const lt=document.getElementById('budLotsTable');
   const by=ownersById();
   const lots=lotsOf().slice().sort((a,b)=>String(a.label).localeCompare(String(b.label),'fr',{numeric:true}));
@@ -2864,8 +2881,14 @@ function chargesYear(){
 }
 // Un exercice = postes de charges courantes (compte de paiement) + postes du fonds de réserve,
 // en brouillon (status 'draft', visible du seul syndic) ou publié.
+// Les postes reviennent RÉSOLUS (LSCharges.resolve) : estimé N-1, réel N-1 et delta sous `calc`,
+// prévision calculée par formule tant que le budget est un brouillon, figée une fois publié.
 function chargesBudget(y){ const b=(state.charges||{})[y]||{};
-  return {postes:LSCharges.clean(b.postes), reserve:LSCharges.cleanReserve(b.reserve, y), applied:b.applied||null, status:b.status||'draft', publishedAt:b.publishedAt||null}; }
+  const status=b.status||'draft', applied=b.applied||null, marge=LSCharges.cleanMarge(b.marge);
+  const frozen=LSCharges.isPublished({status, applied});
+  const tx=chargesTx(), ref=y-1, cov=LSCharges.coverage(tx, ref), prev=LSCharges.clean(((state.charges||{})[ref]||{}).postes);
+  const postes=LSCharges.clean(b.postes).map(p=>LSCharges.resolve(p, {tx, year:ref, cov, prev, marge, frozen}));
+  return {postes, reserve:LSCharges.cleanReserve(b.reserve, y), applied, status, publishedAt:b.publishedAt||null, marge, cov, prev, frozen}; }
 // Un brouillon ne montre rien d'autre au copropriétaire : ni réserve, ni répartition.
 function hideChargesExtras(){
   const res=document.getElementById('resCard'); if(res){ res.innerHTML=''; res.style.display='none'; }
@@ -2893,7 +2916,8 @@ function chargesTx(){ return (state.tx||[]).map(t=>({iso:(parseDate(t.date)||{})
 function chargesOwners(){ return ownersOf().map(o=>({key:o.id||o.short||o.n, q:+o.q||0})); }
 function saveCharges(y, postes, extra){
   if(!canWrite()) return;
-  state.charges = {...(state.charges||{}), [y]: {...((state.charges||{})[y]||{}), postes, ...(extra||{})}};
+  const plain=(postes||[]).map(p=>{ const {calc, ...q}=p; return q; });   // la prévision résolue est enregistrée, pas le détail du calcul
+  state.charges = {...(state.charges||{}), [y]: {...((state.charges||{})[y]||{}), postes:plain, ...(extra||{})}};
   saveState();
   dbWrite(async db=>{ try { await db.updateSettings({charges: state.charges}); } catch(e){ throw new Error(chargesHint(e.message||String(e))); } });
   renderCharges();
@@ -2936,6 +2960,31 @@ function ensureChargesCss(){
     #chgTable .fld{font-size:13px;padding:6px 8px}
     #chgTable .chg-label{width:100%;min-width:112px}
     #chgTable .chg-vendor{width:100%;min-width:110px}
+    #chgTable .chg-cat{margin-top:4px;font-size:11.5px;padding:3px 5px;color:var(--ink-faint)}
+    #chgTable .chg-note{width:112px;min-width:112px;margin-top:4px;font-size:11px;padding:3px 6px;color:var(--ink-faint)}
+    #chgTable tr.chg-group td{background:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding-top:8px;padding-bottom:8px}
+    .chg-delta.neg{color:var(--danger);font-weight:600}
+    .chg-delta.pos{color:var(--success);font-weight:600}
+    .chg-chip,.chg-formula{display:inline-flex;align-items:center;gap:4px;margin-top:4px;border:1px dashed var(--border);border-radius:999px;padding:1px 8px;font-size:11px;white-space:nowrap;color:var(--ink-faint)}
+    .chg-formula{color:var(--green-deep);cursor:pointer;font-weight:500}
+    .chg-chip i,.chg-formula i{font-family:Georgia,'Times New Roman',serif;font-style:italic}
+    .chg-head-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+    .chg-marge{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+    .chg-marge .fld{width:62px;text-align:right;font-size:13px;padding:6px 8px}
+    #chgTable tr.chg-editor td{background:var(--muted);padding:12px 20px 16px;white-space:normal}
+    .chg-fx{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;max-width:860px;font-weight:400}
+    .chg-fx .sub{white-space:normal}
+    .chg-fx-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+    .chg-fx-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-faint)}
+    .chg-fx-row label:first-child{flex:0 1 320px}
+    .chg-fx-row label:last-child{flex:1 1 320px}
+    .chg-fx .fld{font-size:13px;padding:7px 9px;width:100%;box-sizing:border-box}
+    #chgFx{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+    .chg-fx-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+    .copro-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 18px}
+    .copro-f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-faint)}
+    .copro-f .fld{font-size:13px;padding:7px 9px}
+    .copro-f b{font-size:13.5px;color:var(--ink)}
     #chgTable .chg-cat{width:100%;min-width:148px;max-width:240px}
     #chgTable .chg-key{min-width:118px}
     #chgTable .chg-fc{width:100px;text-align:right}
@@ -2972,11 +3021,36 @@ function ensureChargesCss(){
     #chgApply .ok{color:var(--green-deep)}`;
   document.head.appendChild(s);
 }
+let chgEdit = null;   // éditeur de formule ouvert : {id du poste, which:'real'|'fc'}
+// Champs qu'une formule peut utiliser : [token, libellé] ; « réel » n'existe que pour la prévision.
+const chgFieldList = ref => [
+  ['réel', `Réel ${ref} ramené à 12 mois`], ['réel à ce jour', `Réel ${ref} à ce jour`], ['mois couverts', `Mois couverts en ${ref}`],
+  ['moyenne mensuelle', `Moyenne mensuelle ${ref}`], ['réel précédent', `Réel ${ref-1}`], ['budget précédent', `Budget ${ref}`], ['marge', 'Marge'],
+];
+// Ligne d'éditeur de formule, sous le poste : champs à insérer, formule, résultat, appliquer.
+function formulaEditorRow(p, which, y, ref, cols){
+  const c=p.calc, isFc=which==='fc', num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const cur = isFc ? (p.fcFormula || LSCharges.FC_FORMULA) : c.realFormula;
+  const opts = chgFieldList(ref).filter(([k])=>isFc || k!=='réel').map(([k,l])=>{ const v=c.fields[k]||0;
+    return `<option value="${escH(k)}">${escH(l)} · ${k==='marge'?num(v*100)+' %':k==='mois couverts'?v:eur(v)}</option>`; }).join('');
+  const res = LSCharges.evalFormula(cur, c.fields);
+  const what = isFc ? `de l'estimation ${y}` : `du réel ${ref}`;
+  return `<tr class="chg-editor"><td colspan="${cols}"><div class="chg-fx" role="dialog" aria-label="Formule ${escH(what)} · ${escH(p.label||'poste')}">
+      <div class="h-row" style="align-items:baseline"><b>Formule ${what} · ${escH(p.label||'poste')}</b><span class="sub">Comme dans un tableur : des champs entre crochets et + − × ÷ ( ) %. Le même éditeur sert au réel et à l'estimation.</span></div>
+      <div class="chg-fx-row">
+        <label>Insérer un champ de la comptabilité<select class="fld" id="chgFxField" aria-label="Champ de la comptabilité à insérer"><option value="">Choisir un champ…</option>${opts}</select></label>
+        <label>Formule<input class="fld" id="chgFx" value="${escH(cur)}" spellcheck="false" autocomplete="off" aria-label="Formule ${escH(what)}"></label>
+      </div>
+      <div class="chg-fx-foot"><span id="chgFxOut">${res.value!=null?`= <b>${eur(res.value)}</b>`:`<span class="chg-warn">${escH(res.error||'')}</span>`}</span>
+        <span class="chg-actions" style="margin:0"><button class="btn btn-ghost" id="chgFxStd">Revenir au calcul standard</button><button class="btn btn-ghost" id="chgFxCancel">Annuler</button><button class="btn btn-primary" id="chgFxApply">Appliquer</button></span></div>
+    </div></td></tr>`;
+}
 function renderCharges(){
   const card=document.getElementById('chgCard'); if(!card || typeof LSCharges==='undefined') return;
   ensureChargesCss();
   const y=chargesYear(), ref=y-1, ed=canWrite();
-  const bud=chargesBudget(y), {postes, reserve}=bud, pub=budgetPublished(bud);
+  const bud=chargesBudget(y), {postes, reserve, cov, prev, marge}=bud, pub=budgetPublished(bud);
+  const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
   const yearNav = `<div class="chg-year"><button class="lk" id="chgPrev" aria-label="Exercice ${y-1}">‹</button><b>${y}</b><button class="lk" id="chgNext" aria-label="Exercice ${y+1}">›</button></div>`;
   if (!ed && !pub){   // copropriétaire : un brouillon reste invisible jusqu'à sa publication
     card.innerHTML = `<div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement</h2><div class="sub">Le syndic prépare le budget ${y} : il sera consultable ici une fois publié.</div></div>${yearNav}</div>`;
@@ -2985,48 +3059,54 @@ function renderCharges(){
     hideChargesExtras();
     return;
   }
-  const tx=chargesTx(), cov=LSCharges.coverage(tx, ref);
-  const refs=postes.map(p=>LSCharges.reference(tx, p.cat, ref, cov));
+  const tx=chargesTx();
   const clash=new Set(LSCharges.conflicts(postes).flat());
-  const totF=sum(postes.map(p=>p.forecast)), totR=sum(refs.filter(Boolean).map(r=>r.total));
-  const unc=LSCharges.uncovered(tx, postes, ref), prevB=chargesBudget(ref), prev=prevB.postes;
-  // bénéficiaire proposé (tiers dominant de la catégorie en N-1) et poste correspondant du budget N-1
-  const vendors=postes.map(p=>LSCharges.vendorOf(tx, p.cat, ref)), prevs=postes.map(p=>LSCharges.matchPrev(prev, p));
-  const totP=sum(prevs.filter(Boolean).map(q=>q.forecast));
+  const unc=LSCharges.uncovered(tx, postes, ref), prevB=chargesBudget(ref);
   // la réserve d'un exercice précédent continue tant que sa durée n'est pas écoulée
   const prevRes=prevB.reserve.filter(p=>LSCharges.reserveSpan(p, y).inYear>0);
-  const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const vendors=postes.map(p=>LSCharges.vendorOf(tx, p.cat, ref));
   const today = ref===new Date().getFullYear() ? ' à ce jour' : '';
-  const covTxt = `Prévision ${y} établie sur le réel ${ref} du compte de paiement` + (!cov.months ? ` : aucun relevé en ${ref}, pas de moyenne possible, saisissez les prévisions.`
-    : cov.months<12 ? `${today}, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} : moyenne mensuelle sur ces ${cov.months} mois.`
-    : ` sur l'année complète ; moyenne mensuelle = réel ÷ 12.`)
-    + (prev.length ? ` La colonne « Budget ${ref} » rappelle ce qui avait été prévu pour ${ref}.` : '');
-  const rows = postes.map((p,i)=>{
-    const r=refs[i], bad=clash.has(p.id);
-    // moyenne mensuelle de l'année de référence, avec le réel de l'année en dessous
-    const refCell = !r ? '<span class="sub">inexistante</span><div class="chg-sub">nouveau poste</div>'
-      : r.avg==null ? `<span class="sub">pas de relevé</span><div class="chg-sub">en ${ref}</div>`
-      : `${eur(r.avg)} / mois<div class="chg-sub">${eur(r.total)} en ${ref} · ${r.count} mvt${r.count>1?'s':''}</div>`;
-    const fill = ed && r && r.avg!=null && r.avg>0 ? `<div class="chg-sub"><button class="lk chg-fill" data-i="${i}" title="Prévision = moyenne ${ref} × 12, arrondie à l'euro supérieur">= moyenne × 12</button></div>` : '';
+  const covTxt = `Estimation ${y} établie sur le réel ${ref} du compte de paiement` + (!cov.months ? ` : aucun relevé en ${ref}, saisissez les estimations.`
+    : cov.months<12 ? `${today}, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} ramenés à 12 mois.` : ` sur l'année complète.`)
+    + ` « Estimé pour ${ref} » rappelle le budget ${ref} ; le delta est l'écart entre ce budget et le réel. Estimation ${y} = réel × (1 + marge) par défaut ; formules et explication se modifient poste par poste.`;
+  const totEst=sum(postes.map(p=>p.calc.est||0)), hasEst=postes.some(p=>p.calc.est!=null);
+  const totReal=sum(postes.map(p=>p.calc.real||0)), hasReal=postes.some(p=>p.calc.real!=null);
+  const totF=sum(postes.map(p=>p.forecast));
+  const totDelta = hasEst && hasReal ? Math.round((totEst-totReal)*100)/100 : null;
+  const deltaTxt = d => d==null ? '' : d<-0.005 ? 'dépassement' : d>0.005 ? 'sous le budget' : 'conforme';
+  const deltaCell = d => d==null ? '<span class="sub">—</span>' : `<span class="chg-delta ${d<-0.005?'neg':d>0.005?'pos':''}">${d<0?'−':''}${eur(Math.abs(d))}</span>`;
+  const chip = (p, which, label) => ed ? `<button class="lk chg-formula" data-id="${escH(p.id)}" data-which="${which}" title="Modifier la formule"><i>ƒ</i>${escH(label)}</button>` : `<span class="chg-chip"><i>ƒ</i>${escH(label)}</span>`;
+  const cols = ed ? 8 : 7;
+  const row = (p,i) => { const c=p.calc, bad=clash.has(p.id);
+    const estCell = c.est==null ? `<span class="sub">—</span><div class="chg-sub">${prev.length?`absent du budget ${ref}`:`pas de budget ${ref}`}</div>` : `${eur(c.est)}<div class="chg-sub">budget ${ref}</div>`;
+    const realCell = !c.hasRef ? `<span class="sub">—</span><div class="chg-sub">${p.cat?`pas de relevé en ${ref}`:'nouveau poste'}</div>`
+      : c.real==null ? `<span class="sub">erreur</span><div class="chg-warn">${escH(c.realError||'')}</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`
+      : `${eur(c.real)}<div class="chg-sub">${eur(c.toDate)} sur ${c.months} mois</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`;
+    const catSel = ed ? `<select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>` : `<div class="chg-sub">${escH(LSCharges.catLabel(p.cat))}</div>`;
+    const fcLabel = p.fcFormula ? LSCharges.shortFormula(p.fcFormula) : 'saisie';
     return `<tr class="${bad?'chg-clash':''}">
-      <td>${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}
+      <td>${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}${catSel}
         ${bad?'<div class="chg-warn">Catégorie déjà reprise par un autre poste : la dépense serait comptée deux fois.</div>':''}</td>
       <td>${ed?`<input class="fld chg-vendor" data-i="${i}" value="${escH(p.vendor||'')}" placeholder="Bénéficiaire" aria-label="Bénéficiaire">${!p.vendor && vendors[i] ? `<div class="chg-sub"><button class="lk chg-vfill" data-i="${i}" title="Tiers le plus fréquent de la catégorie en ${ref}">= ${escH(vendors[i])}</button></div>`:''}`:escH(p.vendor||'—')}</td>
-      <td>${ed?`<select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>`:escH(LSCharges.catLabel(p.cat))}</td>
       <td>${ed?`<select class="fld chg-key" data-i="${i}" aria-label="Clé de répartition"><option value="quote" ${p.key==='quote'?'selected':''}>Millièmes</option><option value="indiv" ${p.key==='indiv'?'selected':''}>Individuelle</option></select>`:(p.key==='indiv'?'Individuelle':'Millièmes')}</td>
-      <td class="num">${prevs[i] ? `${eur(prevs[i].forecast)}<div class="chg-sub">prévu pour ${ref}</div>` : `<span class="sub">—</span><div class="chg-sub">${prev.length?`absent du budget ${ref}`:`pas de budget ${ref}`}</div>`}</td>
-      <td class="num">${refCell}</td>
-      <td class="num">${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Prévision annuelle ${y}">`:`<b>${eur(p.forecast)}</b>`}
-        <div class="chg-sub">soit ${eur(p.forecast/12)} / mois</div>${fill}</td>
+      <td class="num">${estCell}</td>
+      <td class="num">${realCell}</td>
+      <td class="num">${deltaCell(c.delta)}${c.delta!=null?`<div class="chg-sub">${deltaTxt(c.delta)}</div>`:''}</td>
+      <td class="num">${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Estimation annuelle ${y}">`:`<b>${eur(p.forecast)}</b>`}
+        ${c.fcError?`<div class="chg-warn">${escH(c.fcError)}</div>`:''}
+        <div>${chip(p,'fc', fcLabel)}</div>
+        ${ed?`<input class="fld chg-note" data-i="${i}" value="${escH(p.fcNote||'')}" placeholder="Explication du calcul" aria-label="Explication du calcul">`:(p.fcNote?`<div class="chg-sub" style="white-space:normal">${escH(p.fcNote)}</div>`:'')}</td>
       ${ed?`<td><button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button></td>`:''}
-    </tr>`;
-  }).join('');
+    </tr>` + (ed && chgEdit && chgEdit.id===p.id ? formulaEditorRow(p, chgEdit.which, y, ref, cols) : '');
+  };
+  const rows = LSCharges.groupPostes(postes).map(g=>`<tr class="chg-group"><td colspan="${cols}">${escH(g.label||'Sans catégorie')}</td></tr>` + g.items.map(({p,i})=>row(p,i)).join('')).join('');
   const table = postes.length ? `<div class="table-wrap"><table id="chgTable">
-      <tr><th>Poste</th><th>Bénéficiaire</th><th>Catégorie de la comptabilité</th><th>Clé de répartition</th><th class="num">Budget ${ref}</th><th class="num">Moyenne ${ref}</th><th class="num">Prévision ${y}</th>${ed?'<th></th>':''}</tr>
+      <tr><th>Poste</th><th>Bénéficiaire</th><th>Clé de répartition</th><th class="num">Estimé pour ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Delta ${ref}</th><th class="num">Estimation ${y}</th>${ed?'<th></th>':''}</tr>
       ${rows}
-      <tr class="chg-tot"><td colspan="4">Total · ${postes.length} poste${postes.length>1?'s':''}</td>
-        <td class="num">${prev.length?eur(totP):'—'}<div class="chg-sub">${prev.length?`budget ${ref}`:''}</div></td>
-        <td class="num">${cov.months?`${eur(totR/cov.months)} / mois`:'—'}<div class="chg-sub">${eur(totR)} en ${ref}</div></td>
+      <tr class="chg-tot"><td colspan="3">Total · ${postes.length} poste${postes.length>1?'s':''}</td>
+        <td class="num">${hasEst?eur(totEst):'—'}<div class="chg-sub">${hasEst?`budget ${ref}`:''}</div></td>
+        <td class="num">${hasReal?eur(totReal):'—'}<div class="chg-sub">${hasReal&&cov.months<12?'ramené à 12 mois':''}</div></td>
+        <td class="num">${deltaCell(totDelta)}<div class="chg-sub">${deltaTxt(totDelta)}</div></td>
         <td class="num">${eur(totF)}<div class="chg-sub">soit ${eur(totF/12)} / mois</div></td>${ed?'<td></td>':''}</tr>
     </table></div>`
     : `<div class="chg-empty">Aucun poste de dépense pour ${y}.${ed?'':' Le syndic n’a pas encore préparé ce budget.'}</div>`;
@@ -3034,38 +3114,62 @@ function renderCharges(){
   const actions = !ed ? '' : `<div class="chg-actions">
       <button class="btn btn-ghost" id="chgAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste</button>
       ${seedable?`<button class="btn btn-ghost" id="chgSeed">${postes.length?`Ajouter les catégories de ${ref} sans poste`:`Proposer les postes depuis le réel ${ref}`}</button>`:''}
-      ${!postes.length && !reserve.length && (prev.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prev.length?`${prev.length} poste${prev.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
+      ${!postes.length && !reserve.length && (prevB.postes.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prevB.postes.length?`${prevB.postes.length} poste${prevB.postes.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
       ${pub ? (bud.applied ? '' : `<button class="btn btn-ghost" id="chgUnpub">Repasser en brouillon</button>`) : (postes.length||reserve.length ? `<button class="btn btn-primary" id="chgPub">Publier le budget ${y}</button>` : '')}
     </div>`;
   const notes = [];
-  if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi.`);
+  if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi. À la publication, les estimations calculées par formule sont figées.`);
   if (unc.count) notes.push(`Dépenses ${ref} reprises par aucun poste : ${eur(unc.total)} (${unc.count} mouvement${unc.count>1?'s':''})${unc.uncategorized.count?`, dont ${eur(unc.uncategorized.total)} encore à catégoriser`:''}.`);
   if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; lots).');
+  const badge = ed ? ` <span class="status ${pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${pub?'Publié':'Brouillon'}</span>` : '';
+  const margeUi = ed ? `<label class="chg-marge">Marge <input class="fld" id="chgMarge" inputmode="decimal" value="${num(marge)}" aria-label="Marge appliquée aux estimations"> %</label>` : `<span class="sub">Marge ${num(marge)} %</span>`;
   card.innerHTML = `
-    <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement${ed?` <span class="status ${pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${pub?'Publié':'Brouillon'}</span>`:''}</h2><div class="sub">${covTxt}</div></div>
-      ${yearNav}</div>
+    <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement${badge}</h2><div class="sub">${covTxt}</div></div>
+      <div class="chg-head-right">${margeUi}${yearNav}</div></div>
     ${table}${actions}${notes.map(n=>`<div class="chg-note">${n}</div>`).join('')}`;
 
-  card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; renderCharges(); };
-  card.querySelector('#chgNext').onclick=()=>{ chgYear=y+1; renderCharges(); };
+  card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; chgEdit=null; renderCharges(); };
+  card.querySelector('#chgNext').onclick=()=>{ chgYear=y+1; chgEdit=null; renderCharges(); };
   if (ed){
     const upd=(i, patch)=>saveCharges(y, postes.map((p,k)=>k===i ? {...p, ...patch} : p));
+    const updId=(id, patch)=>saveCharges(y, postes.map(p=>p.id===id ? {...p, ...patch} : p));
+    card.querySelector('#chgMarge').onchange=e=>{
+      const v=e.target.value.trim() ? parseAmount(e.target.value) : NaN;
+      if (isNaN(v) || v<0 || v>100){ showToast('Marge invalide : un pourcentage entre 0 et 100, par exemple 3','err'); renderCharges(); return; }
+      saveCharges(y, postes, {marge:Math.round(v*100)/100});
+    };
     card.querySelectorAll('.chg-label').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {label:inp.value.trim()}));
     card.querySelectorAll('.chg-vendor').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {vendor:inp.value.trim()}));
     card.querySelectorAll('.chg-vfill').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; upd(i, {vendor:vendors[i]}); });
+    card.querySelectorAll('.chg-note').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {fcNote:inp.value.trim()}));
     card.querySelectorAll('.chg-cat').forEach(s=>s.onchange=()=>{
       const i=+s.dataset.i, p=postes[i], cat=catFromKey(s.value), patch={cat};
       if (cat && !p.label){ patch.label=cat.sub||cat.high; patch.key=budgetDefaultKey(cat.high, cat.sub); }   // poste neuf : nom et clé suggérés
       if (cat && !p.vendor){ const v=LSCharges.vendorOf(tx, cat, ref); if(v) patch.vendor=v; }                       // et bénéficiaire d'après les mouvements
+      if (cat && !p.forecast && !p.fcFormula) patch.fcFormula=LSCharges.FC_FORMULA;                                   // et estimation = réel × (1 + marge)
       upd(i, patch);
     });
     card.querySelectorAll('.chg-key').forEach(s=>s.onchange=()=>upd(+s.dataset.i, {key:s.value}));
     card.querySelectorAll('.chg-fc').forEach(inp=>inp.onchange=()=>{
       const v=inp.value.trim() ? parseAmount(inp.value) : 0;
-      if (isNaN(v) || v<0){ showToast('Prévision invalide : un montant annuel positif, par exemple 1 250,00','err'); renderCharges(); return; }
-      upd(+inp.dataset.i, {forecast:Math.round(v*100)/100});
+      if (isNaN(v) || v<0){ showToast('Estimation invalide : un montant annuel positif, par exemple 1 250,00','err'); renderCharges(); return; }
+      upd(+inp.dataset.i, {forecast:Math.round(v*100)/100, fcFormula:''});   // saisie à la main : la formule s'efface
     });
-    card.querySelectorAll('.chg-fill').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; upd(i, {forecast:Math.ceil(refs[i].avg*12)}); });
+    card.querySelectorAll('.chg-formula').forEach(b=>b.onclick=()=>{ chgEdit={id:b.dataset.id, which:b.dataset.which}; renderCharges(); });
+    const fx=card.querySelector('#chgFx');
+    if (fx && chgEdit){
+      const p=postes.find(q=>q.id===chgEdit.id), out=card.querySelector('#chgFxOut'), isFc=chgEdit.which==='fc';
+      const preview=()=>{ const r=LSCharges.evalFormula(fx.value, p.calc.fields); out.innerHTML = r.value!=null ? `= <b>${eur(r.value)}</b>` : `<span class="chg-warn">${escH(r.error||'')}</span>`; };
+      fx.oninput=preview;
+      card.querySelector('#chgFxField').onchange=e=>{ const t=e.target.value; if(!t) return; const a=fx.selectionStart??fx.value.length, b=fx.selectionEnd??a;
+        fx.value=(fx.value.slice(0,a)+(a&&!/\s$/.test(fx.value.slice(0,a))?' ':'')+'['+t+']'+(/^\s/.test(fx.value.slice(b))||!fx.value.slice(b)?'':' ')+fx.value.slice(b)).replace(/\s{2,}/g,' '); e.target.value=''; fx.focus(); preview(); };
+      card.querySelector('#chgFxApply').onclick=()=>{ const f=fx.value.trim(), r=LSCharges.evalFormula(f, p.calc.fields);
+        if (r.value==null){ showToast('Formule refusée : '+(r.error||'?'),'err'); return; }
+        chgEdit=null; updId(p.id, isFc ? {fcFormula:f} : {realFormula:f===LSCharges.REAL_FORMULA?'':f}); };
+      card.querySelector('#chgFxStd').onclick=()=>{ chgEdit=null; updId(p.id, isFc ? {fcFormula:LSCharges.FC_FORMULA} : {realFormula:''}); };
+      card.querySelector('#chgFxCancel').onclick=()=>{ chgEdit=null; renderCharges(); };
+      fx.focus();
+    }
     card.querySelectorAll('.chg-del').forEach(b=>b.onclick=()=>{
       const i=+b.dataset.i, p=postes[i];
       if (!confirm(`Supprimer le poste « ${p.label||LSCharges.catLabel(p.cat)} » du budget ${y} ?`)) return;
@@ -3078,9 +3182,9 @@ function renderCharges(){
     card.querySelector('#chgSeed')?.addEventListener('click', ()=>{
       const add=LSCharges.seed(tx, ref, cov, c=>budgetDefaultKey(c.high, c.sub)).filter(n=>!postes.some(p=>LSCharges.overlaps(p.cat, n.cat)));
       saveCharges(y, [...postes, ...add]);
-      showToast(`${add.length} poste${add.length>1?'s':''} ajouté${add.length>1?'s':''} depuis le réel ${ref} : vérifiez les prévisions`);
+      showToast(`${add.length} poste${add.length>1?'s':''} ajouté${add.length>1?'s':''} depuis le réel ${ref} : vérifiez les estimations`);
     });
-    card.querySelector('#chgCopy')?.addEventListener('click', ()=>saveCharges(y, prev.map(p=>({...p, id:LSCharges.newId()})),
+    card.querySelector('#chgCopy')?.addEventListener('click', ()=>saveCharges(y, prevB.postes.map(p=>({...p, id:LSCharges.newId()})),
       {reserve: prevRes.map(p=>({...p, id:LSCharges.newId()}))}));
     card.querySelector('#chgPub')?.addEventListener('click', ()=>{
       saveCharges(y, postes, {status:'published', publishedAt:new Date().toISOString()});
@@ -3850,6 +3954,10 @@ setTimeout(boot, 0);
     .report-sheet td{padding:5px 8px;border-bottom:1px solid #E6DECE;font-size:12px}
     .report-sheet td.num,.report-sheet th.num{text-align:right;font-variant-numeric:tabular-nums}
     .report-sheet tr.tot td{font-weight:700;border-top:1.5px solid #20251F;border-bottom:none}
+    .report-sheet tr.r-group td{padding:8px 8px 3px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#5C6153;border-bottom:1px solid #E6DECE}
+    .report-sheet tr.r-month td{color:#5C6153;border-bottom:none}
+    .report-sheet table.r-wide{font-size:11px}
+    .report-sheet table.r-wide th,.report-sheet table.r-wide td{padding:4px 6px}
     .report-sheet .pos{color:#2F6B53}.report-sheet .neg{color:#C2564A}
     .report-sheet .r-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px double #21503D;padding-bottom:14px;margin-bottom:6px}
     .report-sheet .r-brand img{height:30px;width:auto;display:block}
@@ -3915,7 +4023,7 @@ setTimeout(boot, 0);
   function headEl(title, p){
     return `<div class="r-head">
       <div><div class="r-brand"><img src="brand/logo.svg" alt="LazySyndic" width="123" height="30"></div>
-        <div style="margin-top:6px"><b>${COPRO().name}</b>${(COPRO().addr||COPRO().kbo)?`<div class="r-sub">${[COPRO().addr,COPRO().kbo].filter(Boolean).join(' · ')}</div>`:''}</div></div>
+        <div style="margin-top:6px"><b>${COPRO().name}</b>${(COPRO().addr||COPRO().kbo)?`<div class="r-sub">${[COPRO().addr, COPRO().kbo?`N° d'entreprise ${COPRO().kbo}`:''].filter(Boolean).join(' · ')}</div>`:''}</div></div>
       <div style="text-align:right"><span class="chip">${title}</span>
         <div class="r-sub" style="margin-top:8px">Période : <b>${p.label}</b></div>
         <div class="r-sub">Édité le ${new Date().toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}</div></div>
@@ -3981,39 +4089,56 @@ setTimeout(boot, 0);
   }
   // Annexe 4 = le budget du module « Calcul des charges » dès qu'il a des postes pour l'exercice
   // affiché ; sinon, l'ancienne estimation (toutes les dépenses + 4 %).
-  function chargesAnnex(cy, postes, ow, provTable){
-    const tx=chargesTx(), ref=cy-1, cov=LSCharges.coverage(tx, ref), n=ow.length||1;
-    const b=budgetSplit(cy), res=b.charges, rs=b.res, reserve=b.reserve;
-    const refs=postes.map(p=>LSCharges.reference(tx, p.cat, ref, cov));
-    const legalTot=Math.round(sum(rs.map(r=>r.legal))*100)/100, minTot=Math.round(sum(rs.map(r=>r.legalMin))*100)/100;
-    const resTot=Math.round(sum(rs.map(r=>r.reserve))*100)/100;
-    const resRows=`<tr><td>Contribution minimum légale</td><td class="num">${eur(minTot)}</td><td>chaque année</td><td>${LSCharges.LEGAL_RATE} % des charges de chacun</td><td class="num">${eur(legalTot/12)}</td><td class="num"><b>${eur(legalTot)}</b>${legalTot?'':' (couvert)'}</td></tr>`
+  // Annexe 4 en trois parties qui se lisent de la même façon : 1 · fonds de roulement (charges
+  // courantes du compte de paiement), 2 · fonds de réserve, chacun avec la part de chaque
+  // copropriétaire en colonnes, puis 3 · le total par copropriétaire.
+  function chargesAnnex(cy, postes, ow){
+    const bud=chargesBudget(cy), ref=cy-1, cov=bud.cov, n=ow.length||1, draft=!budgetPublished(bud);
+    const b=budgetSplit(cy), res=b.charges, rs=b.res, reserve=b.reserve, qTot=sum(ow.map(o=>+o.q||0))||1000;
+    const money = v => v==null ? '—' : eur(v);
+    const delta = d => d==null ? '—' : `<span${d<-0.005?' style="color:#B42318;font-weight:600"':''}>${d<0?'−':''}${eur(Math.abs(d))}</span>`;
+    const ownerTh = ow.map(o=>`<th class="num">${escH(o.short||o.n)}<div class="r-sub" style="font-size:9.5px;text-transform:none;letter-spacing:0;font-weight:400">${o.q} / ${qTot}</div></th>`).join('');
+    const cells = vals => vals.map(v=>`<td class="num">${v}</td>`).join('');
+    const keyLabel = k => k==='indiv' ? `Individuelle (÷ ${n})` : 'Millièmes';
+    // 1 · fonds de roulement
+    const colsA = 6+ow.length;
+    const rowsA = LSCharges.groupPostes(postes).map(g=>`<tr class="r-group"><td colspan="${colsA}">${escH(g.label||'Sans catégorie')}</td></tr>`
+      + g.items.map(({p})=>{ const c=p.calc;
+        return `<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}${p.vendor?`<div class="r-sub" style="font-size:9.5px">${escH(p.vendor)}</div>`:''}${p.fcNote?`<div class="r-sub" style="font-size:9.5px">${escH(p.fcNote)}</div>`:''}</td>
+          <td>${keyLabel(p.key)}</td><td class="num">${money(c.est)}</td><td class="num">${money(c.real)}</td><td class="num">${delta(c.delta)}</td><td class="num"><b>${eur(p.forecast)}</b></td>${cells(res.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`; }).join('')).join('');
+    const totEst=sum(postes.map(p=>p.calc.est||0)), hasEst=postes.some(p=>p.calc.est!=null);
+    const totReal=sum(postes.map(p=>p.calc.real||0)), hasReal=postes.some(p=>p.calc.real!=null);
+    const totF=sum(postes.map(p=>p.forecast)), totDelta = hasEst&&hasReal ? Math.round((totEst-totReal)*100)/100 : null;
+    const tableA = `<table class="r-wide"><tr><th>Poste</th><th>Clé</th><th class="num">Estimé ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Delta</th><th class="num">Budget ${cy}</th>${ownerTh}</tr>
+      ${rowsA || `<tr><td colspan="${colsA}" class="r-sub">Aucun poste de charges courantes.</td></tr>`}
+      <tr class="tot"><td>Total fonds de roulement ${cy}</td><td></td><td class="num">${hasEst?eur(totEst):'—'}</td><td class="num">${hasReal?eur(totReal):'—'}</td><td class="num">${delta(totDelta)}</td><td class="num">${eur(totF)}</td>${cells(res.map(r=>eur(r.annual)))}</tr>
+      <tr class="r-month"><td>Mensualité (÷ 12)</td><td></td><td></td><td></td><td></td><td class="num">${eur(totF/12)}</td>${cells(res.map(r=>eur(r.monthly)))}</tr></table>`;
+    // 2 · fonds de réserve
+    const legalTot=Math.round(sum(rs.map(r=>r.legal))*100)/100, minTot=Math.round(sum(rs.map(r=>r.legalMin))*100)/100, resTot=Math.round(sum(rs.map(r=>r.reserve))*100)/100;
+    const legalNote = legalTot ? `complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes` : `couvert : les autres postes appellent déjà plus que le minimum (${ow.map((o,i)=>`${escH(o.short||o.n)} ${eur(rs[i].legalMin)}`).join(' · ')})`;
+    const rowsB = `<tr><td>Contribution minimum légale<div class="r-sub" style="font-size:9.5px">${legalNote}</div></td><td>${LSCharges.LEGAL_RATE} % des charges de chacun</td><td class="num">${eur(minTot)}</td><td>chaque année</td><td class="num"><b>${eur(legalTot)}</b></td>${cells(rs.map(r=>eur(r.legal)))}</tr>`
       + reserve.map(p=>{ const sp=LSCharges.reserveSpan(p, cy), e=ymLabel(sp.end);
-        return `<tr><td>${escH(p.label||'—')}</td><td class="num">${eur(p.amount)}</td><td>${p.months} mois${e?`, jusqu'en ${e.m} ${e.y}`:''}</td>
-          <td>${p.key==='indiv'?`Individuelle (÷ ${n})`:'Millièmes'}</td><td class="num">${eur(p.months?p.amount/p.months:0)}</td><td class="num"><b>${eur(LSCharges.reserveCall(p, cy))}</b></td></tr>`; }).join('');
-    const reserveTable = `<h2>Fonds de réserve ${cy}</h2>
-      <div class="r-sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${cy}. Appel de l'année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes.</div>
-      <table><tr><th>Poste</th><th class="num">À constituer</th><th>Durée</th><th>Clé</th><th class="num">Par mois</th><th class="num">Appel ${cy}</th></tr>
-        ${resRows}<tr class="tot"><td>Total</td><td class="num">${eur(sum(reserve.map(p=>p.amount)))}</td><td></td><td></td><td class="num">${eur(resTot/12)}</td><td class="num">${eur(resTot)}</td></tr></table>`;
-    const prev=chargesBudget(ref).postes, prevs=postes.map(p=>LSCharges.matchPrev(prev, p)), totP=sum(prevs.filter(Boolean).map(q=>q.forecast));
-    const rows=postes.map((p,i)=>{ const r=refs[i], q=prevs[i];
-      return `<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}${p.vendor?`<div class="r-sub" style="margin:0">${escH(p.vendor)}</div>`:''}</td><td>${escH(LSCharges.catLabel(p.cat))}</td>
-        <td>${p.key==='indiv'?`Individuelle (÷ ${n})`:'Millièmes'}</td><td class="num">${q?eur(q.forecast):'—'}</td><td class="num">${r?eur(r.total):'—'}</td>
-        <td class="num">${r&&r.avg!=null?eur(r.avg):'—'}</td><td class="num"><b>${eur(p.forecast)}</b></td></tr>`; }).join('');
-    const totR=sum(refs.filter(Boolean).map(r=>r.total)), totF=sum(postes.map(p=>p.forecast));
-    const owRows=ow.map((o,i)=>`<tr><td>${o.n}</td><td class="num">${o.q}</td><td class="num">${eur(res[i].annual)}</td><td class="num">${eur(rs[i].reserve)}</td><td class="num"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}</td></tr>`).join('');
-    const covNote = !cov.months ? `Pas de relevé en ${ref} : aucune moyenne.`
-      : `Réel ${ref} du compte de paiement${cov.months<12?`, sur ${cov.months} mois de relevés`:''} ; moyenne mensuelle sur ces mois.`;
-    const draft = !budgetPublished(chargesBudget(cy));
+        return `<tr><td>${escH(p.label||'—')}</td><td>${keyLabel(p.key)}</td><td class="num">${eur(p.amount)}</td><td>${p.months} mois${e?`, jusqu'en ${e.m} ${e.y}`:''}</td><td class="num"><b>${eur(LSCharges.reserveCall(p, cy))}</b></td>${cells(rs.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`; }).join('');
+    const tableB = `<table class="r-wide"><tr><th>Poste</th><th>Clé</th><th class="num">À constituer</th><th>Durée</th><th class="num">Appel ${cy}</th>${ownerTh}</tr>
+      ${rowsB}
+      <tr class="tot"><td>Total fonds de réserve ${cy}</td><td></td><td class="num">${eur(sum(reserve.map(p=>p.amount)))}</td><td></td><td class="num">${eur(resTot)}</td>${cells(rs.map(r=>eur(r.reserve)))}</tr>
+      <tr class="r-month"><td>Mensualité (÷ 12)</td><td></td><td></td><td></td><td class="num">${eur(resTot/12)}</td>${cells(rs.map(r=>eur(r.monthly)))}</tr></table>`;
+    // 3 · total par copropriétaire
+    const rowsC = ow.map((o,i)=>`<tr><td>${escH(o.n)}</td><td class="num">${o.q}</td><td class="num">${eur(res[i].annual)}</td><td class="num">${eur(res[i].monthly)}</td><td class="num">${eur(rs[i].reserve)}</td><td class="num">${eur(rs[i].monthly)}</td><td class="num"><b>${eur(b.monthly[i])}</b></td></tr>`).join('');
+    const tableC = `<table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Roulement / an</th><th class="num">Roulement / mois</th><th class="num">Réserve / an</th><th class="num">Réserve / mois</th><th class="num">Mensualité totale</th></tr>
+      ${rowsC}<tr class="tot"><td>Total</td><td class="num">${qTot}</td><td class="num">${eur(totF)}</td><td class="num">${eur(totF/12)}</td><td class="num">${eur(resTot)}</td><td class="num">${eur(resTot/12)}</td><td class="num">${eur((totF+resTot)/12)}</td></tr></table>`;
+    const covNote = !cov.months ? `Pas de relevé en ${ref} : aucun réel.` : `Réel ${ref} du compte de paiement${cov.months<12?` à ce jour, ${cov.months} mois de relevés ramenés à 12 mois`:' sur l\'année complète'}.`;
     return `<h2>Annexe 4 — Budget prévisionnel ${cy}${draft?' — brouillon':''}</h2>
-      <div class="r-sub">${draft?'Brouillon non publié aux copropriétaires. ':''}${covNote} Clé « Millièmes » : au prorata des quotités ; « Individuelle » : à parts égales entre copropriétaires.</div>
-      <table><tr><th>Poste</th><th>Catégorie</th><th>Clé</th><th class="num">Budget ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Moyenne / mois</th><th class="num">Budget ${cy}</th></tr>
-        ${rows}<tr class="tot"><td>Total</td><td></td><td></td><td class="num">${prev.length?eur(totP):'—'}</td><td class="num">${eur(totR)}</td><td class="num">${cov.months?eur(totR/cov.months):'—'}</td><td class="num">${eur(totF)}</td></tr></table>
-      ${reserveTable}
-      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Budget ${cy} par copropriétaire</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges courantes</th><th class="num">Fonds de réserve</th><th class="num">Total annuel</th><th class="num">Mensualité</th></tr>
-        ${owRows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(sum(res.map(r=>r.annual)))}</td><td class="num">${eur(resTot)}</td><td class="num">${eur(totF+resTot)}</td><td class="num">${eur((totF+resTot)/12)}</td></tr></table>
-      ${provTable}`;
+      <div class="r-sub">${draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l'année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé : « Millièmes » au prorata des quotités, « Individuelle » à parts égales (÷ ${n}).</div>
+      <h2 style="font-size:14px;margin-top:18px">1 · Fonds de roulement — charges courantes ${cy} (compte de paiement)</h2>
+      <div class="r-sub">${covNote} « Estimé ${ref} » = budget ${ref} ; delta = estimé − réel. Budget ${cy} = réel × (1 + ${(+bud.marge||0).toLocaleString('fr-BE')} % de marge), sauf mention sous le poste.</div>
+      ${tableA}
+      <h2 style="font-size:14px;margin-top:18px">2 · Fonds de réserve — appels ${cy} (compte de réserve)</h2>
+      <div class="r-sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${cy} ; appel de l'année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes.</div>
+      ${tableB}
+      <h2 style="font-size:14px;margin-top:18px">3 · Total ${cy} par copropriétaire</h2>
+      <div class="r-sub">Ce que chaque copropriétaire verse en ${cy}, fonds de roulement et fonds de réserve additionnés. La mensualité est le montant du virement permanent conseillé.</div>
+      ${tableC}`;
   }
   function budgetSection(){
     const ow=ownersOf(); const tot=sum(ow.map(o=>o.q))||1000, n=ow.length||1;
@@ -4037,7 +4162,7 @@ setTimeout(boot, 0);
       <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Proposition ${cy} — provision par copropriétaire</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges annuelles (paiement)</th><th class="num">Provision mensuelle — paiement</th><th class="num">Provision mensuelle — réserve</th></tr>
         ${provRows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(provTotPay)}</td><td class="num">${eur(provTotPay/12)}</td><td class="num">${eur(provTotRes/12)}</td></tr></table>` : '';
-    if ((cb.postes.length || cb.reserve.length) && (budgetPublished(cb) || canWrite())) return chargesAnnex(cy, cb.postes, ow, provTable);
+    if ((cb.postes.length || cb.reserve.length) && (budgetPublished(cb) || canWrite())) return chargesAnnex(cy, cb.postes, ow);
     return `<h2>Annexe 4 — Budget prévisionnel 2026 (marge +4 %)</h2>
       <table><tr><th>Poste</th><th>Clé de répartition</th><th class="num">Réalité</th><th class="num">Budget</th></tr>
         ${rows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(totR)}</td><td class="num">${eur(totB)}</td></tr></table>
