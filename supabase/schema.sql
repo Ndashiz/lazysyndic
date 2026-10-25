@@ -138,6 +138,7 @@ insert into public.ls_settings (id) values (1) on conflict (id) do nothing;
 -- déploiements existants : ajoute la colonne si absente
 alter table public.ls_settings add column if not exists subcats jsonb default '{}'::jsonb;
 alter table public.ls_settings add column if not exists holders jsonb default '{}'::jsonb;  -- titulaire par compte (releve.sql)
+alter table public.ls_settings add column if not exists charges jsonb default '{}'::jsonb;  -- budget par poste (charges.sql)
 
 create table if not exists public.ls_imports (
   id uuid primary key default gen_random_uuid(),

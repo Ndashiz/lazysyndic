@@ -1,0 +1,148 @@
+// Tests de charges.js (calcul des charges par poste).
+// Lancer : node --test tests/charges.test.mjs — aucune dépendance.
+// Données FICTIVES (Alex/Sam/Lou, 500/251/249 millièmes).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+
+const C = createRequire(import.meta.url)('../charges.js');
+const tx = [
+  // 2025 : registre commencé en mars, dernier mouvement en octobre → 8 mois couverts
+  { iso:'2025-03-02', account:'pay', high:'Énergie', sub:'Électricité', amount:-80 },
+  { iso:'2025-05-12', account:'pay', high:'Énergie', sub:'Électricité', amount:-88.4 },
+  { iso:'2025-06-09', account:'pay', high:'Énergie', sub:'Électricité', amount:4.4 },       // remboursement
+  { iso:'2025-07-17', account:'pay', high:'Énergie', sub:'Eau', amount:-306.77 },
+  { iso:'2025-04-28', account:'pay', high:'Assurance', sub:'RC', amount:-142 },
+  { iso:'2025-05-31', account:'pay', high:'Frais ACP', sub:'', amount:-6 },
+  { iso:'2025-08-02', account:'pay', high:'Frais ACP', sub:'Banque', amount:-0.6 },
+  { iso:'2025-09-01', account:'pay', high:'?', sub:'', amount:-25 },                           // à catégoriser
+  { iso:'2025-09-02', account:'pay', high:'Charges', sub:'Alex', amount:300 },                 // rentrée
+  { iso:'2025-10-17', account:'res', high:'Entretien', sub:'Réparations', amount:-900 },       // compte de réserve : hors charges
+  { iso:'2024-12-20', account:'pay', high:'Énergie', sub:'Électricité', amount:-70, note:'année précédente' },
+].map(t => ({...t, iso: t.iso}));
+// le registre de l'exemple commence en mars 2025 : on retire le mouvement de 2024 pour la couverture
+const tx25 = tx.filter(t => t.iso >= '2025-01-01');
+const owners = [{key:'Alex', q:500}, {key:'Sam', q:251}, {key:'Lou', q:249}];
+
+test('couverture : seuls les mois réellement couverts par les relevés comptent', () => {
+  assert.deepEqual(C.coverage(tx25, 2025), {months:8, from:3, to:10});
+  assert.deepEqual(C.coverage(tx, 2025), {months:10, from:1, to:10});    // le registre commence en 2024
+  assert.deepEqual(C.coverage(tx25, 2023), {months:0, from:0, to:0});
+  assert.deepEqual(C.coverage([{iso:'2024-02-01'},{iso:'2026-01-05'}], 2025), {months:12, from:1, to:12});
+});
+
+test('réel N-1 : dépenses nettes du compte de paiement, moyenne sur les mois couverts', () => {
+  const cov = C.coverage(tx25, 2025);
+  const elec = C.reference(tx25, {high:'Énergie', sub:'Électricité'}, 2025, cov);
+  assert.equal(elec.total, 164);                       // 80 + 88,40 − 4,40
+  assert.equal(elec.avg, 20.5);                        // 164 / 8
+  assert.equal(elec.count, 3);
+  const energie = C.reference(tx25, {high:'Énergie', sub:''}, 2025, cov);
+  assert.equal(energie.total, 470.77);                 // toute la catégorie : électricité + eau
+  assert.equal(C.reference(tx25, {high:'Entretien', sub:'Réparations'}, 2025, cov).total, 0);  // réserve exclue
+  assert.equal(C.reference(tx25, null, 2025, cov), null);                                       // nouveau poste
+  assert.equal(C.reference(tx25, {high:'Énergie', sub:'Gaz'}, 2025, C.coverage([], 2025)).avg, null);
+});
+
+test('mapping 1 pour 1 : une catégorie entière recouvre ses sous-catégories', () => {
+  const p = [
+    {id:'a', cat:{high:'Énergie', sub:''}}, {id:'b', cat:{high:'Énergie', sub:'Eau'}},
+    {id:'c', cat:{high:'Assurance', sub:'RC'}}, {id:'d', cat:{high:'Assurance', sub:'Incendie'}},
+    {id:'e', cat:null}, {id:'f', cat:null},
+  ];
+  assert.deepEqual(C.conflicts(p), [['a','b']]);
+  assert.equal(C.overlaps({high:'Assurance', sub:'RC'}, {high:'Assurance', sub:'RC'}), true);
+});
+
+test('répartition : millièmes ou parts égales, au centime près', () => {
+  const postes = [
+    {id:'elec', key:'quote', forecast:1000},
+    {id:'eau', key:'indiv', forecast:100},
+    {id:'neuf', key:'quote', forecast:0.01},
+  ];
+  const r = C.split(postes, owners);
+  assert.deepEqual(r.map(o => o.byPoste.elec), [500, 251, 249]);
+  assert.deepEqual(r.map(o => o.byPoste.eau), [33.34, 33.33, 33.33]);
+  assert.deepEqual(r.map(o => o.byPoste.neuf), [0.01, 0, 0]);
+  assert.equal(Math.round(r.reduce((s, o) => s + o.annual, 0)*100), 110001);   // somme des parts = total
+  assert.equal(r[0].annual, 533.35);
+  assert.equal(r[0].monthly, 44.45);
+  // 100 € en individuel sur 7 copropriétaires : 14,29 × 2 + 14,28 × 5
+  const seven = C.split([{id:'x', key:'indiv', forecast:100}], Array.from({length:7}, (_, i) => ({key:i, q:1})));
+  assert.equal(seven.reduce((s, o) => s + Math.round(o.annual*100), 0), 10000);
+  assert.deepEqual(C.split([{id:'x', key:'quote', forecast:50}], [{key:'a', q:0}]).map(o => o.annual), [0]);
+});
+
+test('postes proposés depuis N-1 : sans doublon, rentrées et compte de réserve exclus', () => {
+  const cov = C.coverage(tx25, 2025);
+  const keyFor = c => (c.sub === 'Eau' || c.high === 'Frais ACP') ? 'indiv' : 'quote';
+  const s = C.seed(tx25, 2025, cov, keyFor);
+  assert.deepEqual(s.map(p => C.catLabel(p.cat)),
+    ['Énergie › Eau', 'Énergie › Électricité', 'Assurance › RC', 'Frais ACP (toute la catégorie)']);
+  assert.deepEqual(s.map(p => p.forecast), [461, 246, 213, 10]);   // moyenne × 12, à l'euro supérieur
+  assert.deepEqual(s.map(p => p.key), ['indiv', 'quote', 'quote', 'indiv']);
+  assert.deepEqual(C.conflicts(s), []);
+  assert.equal(new Set(s.map(p => p.id)).size, s.length);
+});
+
+test('dépenses non reprises : catégories sans poste et mouvements à catégoriser', () => {
+  const postes = [{id:'a', cat:{high:'Énergie', sub:''}}, {id:'b', cat:null}];
+  const u = C.uncovered(tx25, postes, 2025);
+  assert.equal(u.total, 173.6);                  // RC 142 + frais 6 + 0,60 + à catégoriser 25
+  assert.equal(u.count, 4);
+  assert.deepEqual(u.uncategorized, {total:25, count:1});
+});
+
+test('données relues : nettoyées', () => {
+  const c = C.clean([{id:'x', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:'120.456'},
+                     {label:'Nouveau', cat:{}, key:'??', forecast:'abc'}, null, 'texte']);
+  assert.equal(c.length, 2);
+  assert.deepEqual(c[0], {id:'x', label:'Eau', cat:{high:'Énergie', sub:'Eau'}, key:'indiv', forecast:120.46});
+  assert.equal(c[1].cat, null);
+  assert.equal(c[1].key, 'quote');
+  assert.equal(c[1].forecast, 0);
+  assert.ok(c[1].id);
+});
+
+test('réserve : appel de chaque année, montant reconstitué au centime', () => {
+  const facade = { id:'f', amount:18000, months:36, key:'quote', start:'2026-01' };
+  assert.deepEqual([2025, 2026, 2027, 2028, 2029].map(y => C.reserveCall(facade, y)), [0, 6000, 6000, 6000, 0]);
+  assert.deepEqual(C.reserveSpan(facade, 2026), { inYear:12, before:0, end:'2028-12' });
+  const juillet = { amount:1200, months:12, start:'2026-07' };
+  assert.deepEqual([2026, 2027].map(y => C.reserveCall(juillet, y)), [600, 600]);
+  const tiers = { amount:1000, months:3, start:'2026-11' };          // 333,33 / 333,34 / 333,33
+  assert.equal(C.reserveCall(tiers, 2026), 666.67);
+  assert.equal(C.reserveCall(tiers, 2027), 333.33);
+  assert.equal(C.reserveCall({ amount:500, months:0, start:'2026-01' }, 2026), 0);
+});
+
+test('réserve : minimum légal de 5 % complété poste par poste, par copropriétaire', () => {
+  const charges = [937.01, 583.92, 581.07];
+  const travaux = [
+    { id:'f', amount:18000, months:36, key:'quote', start:'2026-01' },
+    { id:'e', amount:4800, months:24, key:'quote', start:'2026-01' },
+    { id:'i', amount:1080, months:12, key:'indiv', start:'2026-01' },
+  ];
+  const r = C.reserveSplit(travaux, 2026, owners, charges);
+  assert.deepEqual(r.map(o => o.legalMin), [46.85, 29.2, 29.05]);
+  assert.deepEqual(r.map(o => o.legal), [0, 0, 0]);                 // déjà couvert
+  assert.deepEqual(r.map(o => o.reserve), [4560, 2468.4, 2451.6]);
+  assert.deepEqual(r.map(o => o.byPoste.f), [3000, 1506, 1494]);
+  assert.deepEqual(r.map(o => o.monthly), [380, 205.7, 204.3]);
+  // peu de réserve : la ligne comble ce qui manque à chacun, et seulement ça
+  const peu = C.reserveSplit([{ id:'p', amount:60, months:12, key:'indiv', start:'2026-01' }], 2026, owners, charges);
+  assert.deepEqual(peu.map(o => o.legal), [26.85, 9.2, 9.05]);
+  assert.deepEqual(peu.map(o => o.reserve), [46.85, 29.2, 29.05]);
+  // aucun poste : la ligne seule fait le minimum
+  assert.deepEqual(C.reserveSplit([], 2026, owners, charges).map(o => o.reserve), [46.85, 29.2, 29.05]);
+});
+
+test('réserve : données relues nettoyées', () => {
+  const c = C.cleanReserve([{ id:'x', label:'Façade', amount:'18000', months:'36', key:'quote', start:'2026-01' },
+                            { label:'Sans durée', amount:-5, months:'abc', start:'janvier' }, null], 2027);
+  assert.deepEqual(c[0], { id:'x', label:'Façade', amount:18000, months:36, key:'quote', start:'2026-01' });
+  assert.equal(c[1].amount, 0);
+  assert.equal(c[1].months, 12);
+  assert.equal(c[1].start, '2027-01');
+  assert.equal(c.length, 2);
+});

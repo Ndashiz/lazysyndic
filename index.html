@@ -942,7 +942,7 @@
         <div class="seg" id="budseg">
           <button class="on" data-bud="own">Copropriétaires &amp; lots</button>
           <button data-bud="keys">Clés de répartition</button>
-          <button data-bud="bud">Budget 2026</button>
+          <button data-bud="bud">Calcul des charges</button>
         </div>
       </div>
 
@@ -962,16 +962,15 @@
       </div>
 
       <div class="budpanel" data-bud="bud" style="display:none">
+        <!-- calcul des charges : postes, clé, réel de l'année précédente, prévision (renderCharges) -->
+        <div class="card data-panel" id="chgCard" style="margin-bottom:16px"></div>
+        <!-- fonds de réserve : postes à constituer sur une durée + minimum légal (renderReserve) -->
+        <div class="card data-panel" id="resCard" style="margin-bottom:16px"></div>
+        <div class="mini-h" id="chgSplitTitle">Répartition par copropriétaire</div>
+        <div class="card data-panel table-wrap" style="margin-bottom:10px"><table id="chgSplit"></table></div>
+        <div id="chgApply"></div>
         <div class="mini-h">Provisions attendues par copropriétaire (le « dû »)</div>
-        <div class="card data-panel table-wrap" style="margin-bottom:16px"><table id="provTable"></table></div>
-        <div class="card data-panel table-wrap" style="margin-bottom:16px">
-          <div class="h-row"><h2>Postes — réalité 2025 → budget 2026</h2><span class="sub">marge +4 % · changez la clé pour recalculer</span></div>
-          <table id="budTable"><tr><th>Poste</th><th>Clé</th><th class="num">Réalité 25</th><th class="num">Budget 26</th></tr></table>
-        </div>
-        <div class="mini-h">Charge annuelle par propriétaire (calculée en direct)</div>
-        <div class="card data-panel table-wrap"><table id="budOwners">
-          <tr><th>Propriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th><th class="num">Fonds de réserve</th></tr>
-        </table></div>
+        <div class="card data-panel table-wrap"><table id="provTable"></table></div>
       </div>
     </section>
 
@@ -1031,6 +1030,7 @@
 <script src="db.js"></script>
 <script src="signature.js"></script>
 <script src="statement.js"></script>
+<script src="charges.js"></script>
 <script src="app.js"></script>
 
 <style>
