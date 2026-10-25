@@ -34,6 +34,13 @@ pense-bête) → budget & clés de répartition → générateur de rapports PDF
 compte de paiement, résultats, Annexes 2/3/4) → calcul des charges par poste → relevé de compte PDF à envoyer aux
 copropriétaires → assemblées générales, de la convocation au PV signé (voir ci-dessous).
 
+Un virement entrant est rattaché à un copropriétaire dans cet ordre : la règle apprise
+sur son libellé exact (une attribution faite à la main), puis le nom d'un copropriétaire,
+court ou complet, en mot entier dans le libellé ou la note, puis les règles apprises par
+sous-chaîne, puis les libellés intégrés. Un nom dans le libellé l'emporte donc sur une
+règle plus courte que lui. Code : bloc `OWNER-DETECT` d'`app.js` ; tests :
+`node --test tests/owner.test.mjs` (aucune dépendance).
+
 ## Assemblées générales et signature des PV
 
 1. **Ordre du jour** — points titrés et documentés, majorité requise par point.

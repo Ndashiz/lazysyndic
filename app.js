@@ -304,6 +304,8 @@ const BUILTIN_RULES = [
   ['account subscription','Frais ACP','Banque'],
   ['abonnement','Frais ACP','Banque'],
 ];
+// OWNER-DETECT-BEGIN — bloc pur (ni DOM ni réseau), extrait tel quel par tests/owner.test.mjs
+// qui fournit norm, state et ownersOf. Ne rien mettre d'autre entre les deux marqueurs.
 // Libellé (normalisé) → copropriétaire (nom court). Appliqué seulement si ce
 // copropriétaire existe réellement. « Charge rdc et garage » = Simon, etc.
 const BUILTIN_OWNERS = [
@@ -314,18 +316,29 @@ const BUILTIN_OWNERS = [
   
 ];
 
-// Un virement entrant est rattaché à un copro si son tiers (résolu via alias)
-// contient le nom court OU le nom complet du copro.
 // Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
+// Dans l'ordre : 1. la règle apprise sur ce libellé exact (une attribution faite à la
+// main, dans la liste ou l'aperçu d'import) ; 2. le nom d'un copropriétaire, court ou
+// complet, en mot entier dans le libellé ou la note ; 3. les règles apprises par
+// sous-chaîne ; 4. les libellés intégrés. Une règle vers un copropriétaire qui n'existe
+// plus est ignorée.
+// Les règles apprises passaient en premier : « fond de reserve » → Simon, apprise sur
+// une ligne de Simon, attrapait aussi « FOND DE RESERVE - AUDE ». Le nom l'emporte
+// désormais sur une règle plus courte que lui ; seule une règle posée sur le libellé
+// entier le bat.
 function detectOwner(t){
-  const hay = norm(t.tiers + ' ' + (t.note||''));
+  const tiers = norm(t.tiers), hay = norm(t.tiers + ' ' + (t.note||''));
   const om = (typeof state!=='undefined'&&state&&state.ownerRules)||{};
-  for (const lbl in om){ if(lbl && hay.includes(lbl)) return om[lbl]; }   // libellés déjà normalisés (appris)
-  const exists = short => ownersOf().some(o=>o.short===short);
+  const owners = ownersOf(), exists = short => owners.some(o=>o.short===short);
+  if (om[tiers] && exists(om[tiers])) return om[tiers];
+  const word = s => !!s && new RegExp('(^|[^\\p{L}\\p{N}])' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'u').test(hay);
+  const named = owners.find(o => word(norm(o.short)) || word(norm(o.n)));
+  if (named) return named.short;
+  for (const lbl in om){ if(lbl && hay.includes(lbl) && exists(om[lbl])) return om[lbl]; }   // libellés déjà normalisés (appris)
   for (const [lbl, short] of BUILTIN_OWNERS){ if(hay.includes(lbl) && exists(short)) return short; }
-  const o = ownersOf().find(o => hay.includes(norm(o.short)) || (o.n && hay.includes(norm(o.n))));
-  return o ? o.short : '';
+  return '';
 }
+// OWNER-DETECT-END
 // Options de catégorie réutilisables (import + liste).
 function categoryOptions(sel){
   return [...allCats().map(c=>({v:c,l:c})), {v:'?',l:'À catégoriser'}, {v:'__new__',l:'➕ Nouvelle catégorie…'}]
