@@ -19,23 +19,30 @@ const BUILTIN_OWNERS = [
 ];
 
 /**
- * app.js:314 detectOwner — heuristic owner attribution from a transaction's
- * tiers+note, used only when the tx has no explicit `owner`.
+ * app.js detectOwner (bloc OWNER-DETECT) — heuristic owner attribution from a transaction's
+ * tiers+note, used only when the tx has no explicit `owner`. Order: 1. learned rule on the
+ * exact label (a manual attribution); 2. an owner's short or full name as a whole word in the
+ * label or note; 3. learned rules by substring; 4. built-in labels. A rule pointing at an owner
+ * that no longer exists is ignored. Learned rules used to come first: « fond de reserve » → Simon
+ * also caught « FOND DE RESERVE - AUDE »; the name now beats any rule shorter than the label.
  * @param {{tiers?:string, note?:string}} t
  * @param {Array<{short:string, name?:string}>} owners
  * @param {Record<string,string>} ownerRules  normalized-label → owner short
  */
 export function detectOwner(t, owners, ownerRules = {}) {
-  const hay = norm(`${t.tiers || ''} ${t.note || ''}`);
-  for (const lbl in ownerRules) {
-    if (lbl && hay.includes(lbl)) return ownerRules[lbl]; // learned labels are pre-normalized
-  }
+  const tiers = norm(t.tiers), hay = norm(`${t.tiers || ''} ${t.note || ''}`);
   const exists = (short) => owners.some((o) => o.short === short);
+  if (ownerRules[tiers] && exists(ownerRules[tiers])) return ownerRules[tiers];
+  const word = (s) => !!s && new RegExp('(^|[^\\p{L}\\p{N}])' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'u').test(hay);
+  const named = owners.find((o) => word(norm(o.short)) || word(norm(o.name)));
+  if (named) return named.short;
+  for (const lbl in ownerRules) {
+    if (lbl && hay.includes(lbl) && exists(ownerRules[lbl])) return ownerRules[lbl]; // learned labels are pre-normalized
+  }
   for (const [lbl, short] of BUILTIN_OWNERS) {
     if (hay.includes(lbl) && exists(short)) return short;
   }
-  const o = owners.find((o) => hay.includes(norm(o.short)) || (o.name && hay.includes(norm(o.name))));
-  return o ? o.short : '';
+  return '';
 }
 
 /** app.js:349 — explicit attribution wins, else heuristic. */
