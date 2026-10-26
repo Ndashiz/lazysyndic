@@ -14,6 +14,7 @@
      cat null = nouveau poste, sans historique ; cat.sub vide = toute la catégorie
    • reference()  — réel de l'année précédente et moyenne mensuelle d'une catégorie
    • split()      — prévision répartie par copropriétaire (millièmes ou parts égales)
+   • legalBase()  — base du minimum légal de réserve : réel N-1 par poste (art. 3.86 §3), sinon prévision
    • seed()       — postes proposés depuis les dépenses de l'année de référence
    Tests : node --test tests/charges.test.mjs
    ============================================================ */
@@ -135,7 +136,9 @@ function annexModel(bud, split, owners, cy){
     call:r2(reserveCall(p, cy)), shares:rs.map(r => r2((r.byPoste || {})[p.id] || 0)),
   }; });
   const legal = { label:'Contribution minimum légale', auto:true, rate:LEGAL_RATE, amount:minTot, call:legalTot, covered:legalTot === 0,
-    shares:rs.map(r => r2(r.legal)), mins:rs.map(r => r2(r.legalMin)) };
+    shares:rs.map(r => r2(r.legal)), mins:rs.map(r => r2(r.legalMin)),
+    // sur quoi portent les 5 % : le réel N-1 (la loi) ou, faute de réel, la prévision N
+    basis: split.legalBasis === 'real' ? 'real' : 'forecast', base: split.legalBase ? sum(split.legalBase) : null };
   const fonds = { legal, rows:resRows, totals:{ amount:sum(reserve.map(p => p.amount)), call:resTot, monthly:r2(resTot / 12),
     shares:rs.map(r => r2(r.reserve)), sharesMonthly:rs.map(r => r2(r.monthly)) } };
   const recap = { rows:own.map((o, i) => ({ name:o.name, short:o.short, q:o.q,
@@ -315,10 +318,22 @@ function reserveCall(p, year){
   const sp = reserveSpan(p, year), upto = k => Math.round(A * k / n);
   return (upto(sp.before + sp.inYear) - upto(sp.before)) / 100;
 }
-// owners = [{key, q}] ; chargesAnnual = charge courante annuelle de chacun, dans le même ordre.
-// Chacun reçoit sa part de chaque poste ; la ligne « contribution minimum légale » complète
-// son appel jusqu'à 5 % de ses charges courantes, jamais en dessous de zéro.
-function reserveSplit(reserve, year, owners, chargesAnnual){
+// Base du minimum légal : « la totalité des charges communes ordinaires de l'exercice précédent »
+// (art. 3.86 §3 du Code civil), soit le réel N-1 de chaque poste ramené à 12 mois (calc.real),
+// réparti selon la clé du poste. Sans aucun réel (nouvelle copro, premier exercice), repli sur la
+// prévision N de chacun (`fallback`), en le disant : basis 'forecast'.
+function legalBase(postes, owners, fallback){
+  const wQuote = owners.map(o => Math.max(0, Number(o.q)||0)), wIndiv = owners.map(() => 1);
+  const withReal = (postes || []).filter(p => p && p.calc && p.calc.real != null);
+  if (!withReal.length) return { basis:'forecast', base: owners.map((_, i) => Number((fallback || [])[i]) || 0) };
+  const tot = owners.map(() => 0);
+  withReal.forEach(p => shares(Math.max(0, cents(p.calc.real)), p.key === 'indiv' ? wIndiv : wQuote).forEach((v, i) => { tot[i] += v; }));
+  return { basis:'real', base: tot.map(c => c/100) };
+}
+// owners = [{key, q}] ; legalBaseAmounts = la base du minimum légal de chacun, dans le même ordre
+// (legalBase : réel N-1, sinon prévision N). Chacun reçoit sa part de chaque poste ; la ligne
+// « contribution minimum légale » complète son appel jusqu'à 5 % de sa base, jamais sous zéro.
+function reserveSplit(reserve, year, owners, legalBaseAmounts){
   const wQuote = owners.map(o => Math.max(0, Number(o.q)||0)), wIndiv = owners.map(() => 1);
   const per = owners.map(() => ({})), tot = owners.map(() => 0);
   reserve.forEach(p => {
@@ -326,7 +341,7 @@ function reserveSplit(reserve, year, owners, chargesAnnual){
       .forEach((v, i) => { per[i][p.id] = v/100; tot[i] += v; });
   });
   return owners.map((o, i) => {
-    const min = Math.round(cents((chargesAnnual||[])[i]) * LEGAL_RATE / 100);
+    const min = Math.round(cents((legalBaseAmounts||[])[i]) * LEGAL_RATE / 100);
     const legal = Math.max(0, min - tot[i]);
     return { key:o.key, byPoste:per[i], others:tot[i]/100, legalMin:min/100, legal:legal/100,
              reserve:(tot[i] + legal)/100, monthly: Math.round((tot[i] + legal)/12)/100 };
@@ -345,7 +360,7 @@ function cleanReserve(list, year){
 
 const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
               cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, annexModel, REAL_FORMULA, FC_FORMULA,
-              reserveSpan, reserveCall, reserveSplit, cleanReserve, LEGAL_RATE };
+              reserveSpan, reserveCall, legalBase, reserveSplit, cleanReserve, LEGAL_RATE };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

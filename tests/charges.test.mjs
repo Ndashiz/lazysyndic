@@ -137,6 +137,28 @@ test('réserve : minimum légal de 5 % complété poste par poste, par copropri�
   assert.deepEqual(C.reserveSplit([], 2026, owners, charges).map(o => o.reserve), [46.85, 29.2, 29.05]);
 });
 
+// art. 3.86 §3 : 5 % « de la totalité des charges communes ordinaires de l'exercice précédent »,
+// donc le réel N-1 de chaque poste (ramené à 12 mois) réparti selon sa clé, pas la prévision N.
+test('réserve : la base du minimum légal est le réel N-1 par poste, la prévision seulement à défaut', () => {
+  const postes = [
+    { id:'a', key:'quote', forecast:1200, calc:{ real:1000 } },   // 1000 aux millièmes : 500 / 251 / 249
+    { id:'b', key:'indiv', forecast:600,  calc:{ real:300 } },    // 300 en parts égales : 100 chacun
+    { id:'c', key:'quote', forecast:50,   calc:{ real:null } },   // nouveau poste : pas de réel
+    { id:'d', key:'quote', forecast:10,   calc:{ real:-20 } },    // remboursement net : ne retire rien
+  ];
+  const lb = C.legalBase(postes, owners, [999, 999, 999]);
+  assert.equal(lb.basis, 'real');
+  assert.deepEqual(lb.base, [600, 351, 349]);
+  assert.deepEqual(C.reserveSplit([], 2026, owners, lb.base).map(o => o.legalMin), [30, 17.55, 17.45]);
+  // aucun réel : la prévision de chacun, et le modèle de l'Annexe 4 le dit
+  const fb = C.legalBase([{ id:'c', key:'quote', forecast:50, calc:{ real:null } }], owners, [937.01, 583.92, 581.07]);
+  assert.deepEqual(fb, { basis:'forecast', base:[937.01, 583.92, 581.07] });
+  const split = { charges:[], res:C.reserveSplit([], 2026, owners, fb.base), total:[], monthly:[], legalBasis:fb.basis, legalBase:fb.base };
+  const m = C.annexModel({ postes:[], reserve:[] }, split, [{n:'Alex', short:'Alex', q:500}, {n:'Sam', short:'Sam', q:251}, {n:'Lou', short:'Lou', q:249}], 2026);
+  assert.equal(m.reserve.legal.basis, 'forecast');
+  assert.equal(m.reserve.legal.base, 2102);
+});
+
 test('réserve : données relues nettoyées', () => {
   const c = C.cleanReserve([{ id:'x', label:'Façade', amount:'18000', months:'36', key:'quote', start:'2026-01' },
                             { label:'Sans durée', amount:-5, months:'abc', start:'janvier' }, null], 2027);

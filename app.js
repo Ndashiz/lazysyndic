@@ -3071,8 +3071,11 @@ function reservePeriod(p, y){
 function budgetSplit(y){
   const {postes, reserve}=chargesBudget(y), owners=chargesOwners();
   const charges=LSCharges.split(postes, owners);
-  const res=LSCharges.reserveSplit(reserve, y, owners, charges.map(c=>c.annual));
-  return {postes, reserve, charges, res,
+  // Minimum légal de réserve : 5 % des charges communes ordinaires de l'exercice précédent
+  // (art. 3.86 §3), soit le réel N-1 de chaque poste réparti selon sa clé ; sans réel, la prévision N.
+  const lb=LSCharges.legalBase(postes, owners, charges.map(c=>c.annual));
+  const res=LSCharges.reserveSplit(reserve, y, owners, lb.base);
+  return {postes, reserve, charges, res, legalBasis:lb.basis, legalBase:lb.base,
     total: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100)/100),
     monthly: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100/12)/100)};
 }
@@ -3370,7 +3373,7 @@ function renderReserve(y, postes, reserve){
   const ed=canWrite(), ow=ownersOf(), b=budgetSplit(y), rs=b.res;
   const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
   const short = o => escH(o.short||o.n);
-  const totCharges=sum(postes.map(p=>p.forecast));
+  const baseTot=sum(b.legalBase||[]), baseLbl = b.legalBasis==='real' ? `réel ${y-1} ramené à 12 mois` : `prévision ${y}, faute de réel ${y-1}`;
   const minTot=sum(rs.map(r=>r.legalMin)), legalTot=Math.round(sum(rs.map(r=>r.legal))*100)/100;
   const calls=reserve.map(p=>LSCharges.reserveCall(p, y));
   const callTot=Math.round((sum(calls)+legalTot)*100)/100;
@@ -3395,12 +3398,12 @@ function renderReserve(y, postes, reserve){
   }).join('');
   card.innerHTML = `
     <div class="h-row"><div><h2>Fonds de réserve ${y} · compte de réserve</h2>
-      <div class="sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${y}. Appel de l'année = montant ÷ durée × mois couverts en ${y}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges courantes : elle diminue quand les autres postes appellent déjà davantage.</div></div></div>
+      <div class="sub">Chaque poste se constitue sur une durée en mois, à partir de janvier ${y}. Appel de l'année = montant ÷ durée × mois couverts en ${y}. La contribution minimum légale complète l'appel de chacun jusqu'à ${LSCharges.LEGAL_RATE} % de ses charges communes ordinaires de l'exercice précédent (art. 3.86 §3), soit le réel ${y-1} ramené à 12 mois${b.legalBasis==='real'?'':`, ou la prévision ${y} tant qu'il n'y a pas de réel ${y-1}`} : elle diminue quand les autres postes appellent déjà davantage.</div></div></div>
     <div class="table-wrap"><table id="resTable">
       <tr><th>Poste</th><th class="num">À constituer</th><th>Durée</th><th>Clé de répartition</th><th class="num">Par mois</th><th class="num">Appel ${y}</th>${ed?'<th></th>':''}</tr>
       <tr class="res-legal"><td><b>Contribution minimum légale</b><div class="chg-sub">Ligne automatique</div></td>
-        <td class="num">${eur(minTot)}<div class="chg-sub">${LSCharges.LEGAL_RATE} % de ${eur(totCharges)}</div></td>
-        <td>chaque année</td><td>${LSCharges.LEGAL_RATE} % des charges de chacun</td>
+        <td class="num">${eur(minTot)}<div class="chg-sub">${LSCharges.LEGAL_RATE} % de ${eur(baseTot)} · ${baseLbl}</div></td>
+        <td>chaque année</td><td>${LSCharges.LEGAL_RATE} % des charges ${y-1} de chacun</td>
         <td class="num">${eur(legalTot/12)}</td>
         <td class="num"><b>${eur(legalTot)}</b><div class="chg-sub">${legalSub}</div></td>${ed?`<td>${lock}</td>`:''}</tr>
       ${note?`<tr class="res-note"><td colspan="${ed?7:6}">${note}</td></tr>`:''}
@@ -3448,7 +3451,7 @@ function renderChargesSplit(y){
   const payRows = postes.map(p=>`<tr><td>${escH(p.label||LSCharges.catLabel(p.cat))}</td><td>${keyLabel(p.key)}</td>
       <td class="num">${eur(p.forecast)}</td>${cells(charges.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`).join('');
   const legalTot=Math.round(sum(res.map(r=>r.legal))*100)/100;
-  const legalRow = `<tr><td>Contribution minimum légale</td><td>${LSCharges.LEGAL_RATE} % des charges</td><td class="num">${eur(legalTot)}</td>
+  const legalRow = `<tr><td>Contribution minimum légale</td><td>${LSCharges.LEGAL_RATE} % des charges ${y-1}</td><td class="num">${eur(legalTot)}</td>
       ${res.map(r=>`<td class="num">${eur(r.legal)}<div class="chg-sub">min. ${eur(r.legalMin)}${r.legal?'':', couvert'}</div></td>`).join('')}</tr>`;
   const resRows = reserve.map(p=>`<tr><td>${escH(p.label||'—')}</td><td>${keyLabel(p.key)}</td>
       <td class="num">${eur(LSCharges.reserveCall(p, y))}</td>${cells(res.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`).join('');
@@ -4272,7 +4275,7 @@ setTimeout(boot, 0);
     const sharesB=wide?'':LSPdf.table({cols:[{label:'Poste'}, {label:`Appel ${cy}`, align:'right', emph:true}, ...ownerCols], cls:'pdf-dense', label:`Part de chaque copropriétaire — fonds de réserve ${cy}`,
       rows:[[L.label, {text:F.eur(L.call), emph:true}, ...L.shares.map(F.eur)], ...m.reserve.rows.map(r=>[r.label, {text:F.eur(r.call), emph:true}, ...r.shares.map(F.eur)])],
       totals:[{label:`Total fonds de réserve ${cy}`, cells:[{text:F.eur(tB.call), emph:true}, ...tB.shares.map(F.eur)]}, {label:'Mensualité (÷ 12)', kind:'sub', cells:[F.eur(tB.monthly), ...tB.sharesMonthly.map(F.eur)]}]});
-    const part2=LSPdf.section(`Fonds de réserve — appels ${cy}`, {n:2, chip:'Compte de réserve', sub:`Chaque poste se constitue sur une durée en mois à partir de janvier ${cy} ; appel de l’année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l’appel de chacun jusqu’à ${L.rate} % de ses charges courantes.`})
+    const part2=LSPdf.section(`Fonds de réserve — appels ${cy}`, {n:2, chip:'Compte de réserve', sub:`Chaque poste se constitue sur une durée en mois à partir de janvier ${cy} ; appel de l’année = montant ÷ durée × mois couverts en ${cy}. La contribution minimum légale complète l’appel de chacun jusqu’à ${L.rate} % de ses charges communes ordinaires de l’exercice précédent${L.basis==='real'?` (réel ${m.ref} ramené à 12 mois${L.base!=null?`, ${F.eur(L.base)} en tout`:''})`:`, calculées ici sur la prévision ${cy} faute de réel ${m.ref}`}.`})
       + tableB + (sharesB ? `<p class="pdf-sub" style="margin-top:12px">Part de chaque copropriétaire, poste par poste :</p>` + sharesB : '');
     // 3 · total par copropriétaire
     const tC=m.recap.totals;
@@ -4282,7 +4285,7 @@ setTimeout(boot, 0);
     const part3=LSPdf.section(`Total ${cy} par copropriétaire`, {n:3, sub:`Ce que chaque copropriétaire verse en ${cy}, fonds de roulement et fonds de réserve additionnés. La mensualité est le montant du virement permanent conseillé.`}) + tableC;
     const legal=LSPdf.legal([
       `Clés de répartition : « Millièmes » au prorata des quotités de l’acte de base (${F.int(m.qTot)} millièmes) ; « Individuelle » à parts égales entre les ${m.n} copropriétaires. Les parts sont calculées au centime, le dernier centime revenant au premier copropriétaire de la liste.`,
-      `Fonds de réserve : l’appel annuel ne peut être inférieur à ${L.rate} % des charges ordinaires (art. 3.86, § 3, du Code civil), sauf décision contraire de l’assemblée générale à la majorité des quatre cinquièmes. Le budget est soumis à l’approbation de l’assemblée générale.`,
+      `Fonds de réserve : la contribution annuelle ne peut être inférieure à ${L.rate} % de la totalité des charges communes ordinaires de l’exercice précédent (art. 3.86, § 3, du Code civil), sauf décision contraire de l’assemblée générale à la majorité des quatre cinquièmes${L.basis==='real'?'':` ; en l’absence de réel ${m.ref}, la base retenue ici est la prévision ${cy}`}. Le budget est soumis à l’approbation de l’assemblée générale.`,
     ]);
     return `<h2 class="pdf-h2" style="margin-top:18px"><span class="pdf-h2-t">Annexe 4 — Budget prévisionnel ${cy}</span>${m.draft?LSPdf.badge('draft','Brouillon'):''}</h2>
       <p class="pdf-sub">${m.draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l’année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé.</p>
