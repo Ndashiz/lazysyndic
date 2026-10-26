@@ -2920,7 +2920,6 @@ document.getElementById('budseg')?.addEventListener('click',e=>{
   document.querySelectorAll('#budseg button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   document.querySelectorAll('.budpanel').forEach(p=>p.style.display=p.dataset.bud===b.dataset.bud?'block':'none');
 });
-const MARGIN=1.04;
 const ownersById = ()=>{ const m={}; ownersOf().forEach(o=>{ if(o.id) m[o.id]=o; }); return m; };
 const lotsOf = ()=> state.lots || [];
 
@@ -3011,15 +3010,6 @@ const BUDGET_KEY_BY_SUB = {
 function budgetDefaultKey(high, sub){
   const k = BUDGET_KEY_BY_SUB[norm(sub)];
   return k || defaultKey(high);
-}
-function budgetPostes(){
-  const by={};
-  state.tx.filter(t=>t.amount<0).forEach(t=>{
-    const label=(t.high==='?'?'À catégoriser':t.high)+(t.sub?(' · '+t.sub):'');
-    by[label]=by[label]||{label, high:t.high, sub:t.sub||'', r:0};
-    by[label].r+=Math.abs(t.amount);
-  });
-  return Object.values(by).sort((a,b)=>b.r-a.r).map(p=>({...p, k:(state.budgetKeys&&state.budgetKeys[p.label])||budgetDefaultKey(p.high, p.sub)}));
 }
 /* --- Onglet « Calcul des charges » (calcul pur dans charges.js) -------------------
    Un poste = un nom, une catégorie de la comptabilité (1 pour 1, ou « nouveau poste »
@@ -3822,6 +3812,7 @@ function renderTimeline(){
 }
 
 function renderAll(){
+  fillReportPeriod();
   renderChrome();
   renderDashboard();
   renderMySituation();
@@ -4099,6 +4090,19 @@ setTimeout(boot, 0);
    GÉNÉRATEUR DE RAPPORTS (PDF via impression navigateur)
    Tout est dérivé du store, filtré sur la période choisie.
    ============================================================ */
+// Période par défaut des rapports : l'exercice précédent tant que l'AG de l'année n'est pas
+// finalisée (c'est lui que l'AG approuve), l'année en cours ensuite. Posée dans les champs dès
+// qu'ils sont vides ; l'utilisateur peut toujours les changer.
+function reportDefaultYear(){
+  const Y=new Date().getFullYear();
+  let done=false;
+  try { done=(state.ags||[]).some(a=>a.status==='finalisee' && (parseFrDate(a.ag_date)||new Date(0)).getFullYear()===Y); } catch(e){}
+  return done ? Y : Y-1;
+}
+function fillReportPeriod(){
+  const f=document.getElementById('repFrom'), t=document.getElementById('repTo'); if(!f||!t) return;
+  if (!f.value.trim() && !t.value.trim()){ const y=reportDefaultYear(); f.value=`01/01/${y}`; t.value=`31/12/${y}`; }
+}
 (function setupReports(){
   // Identité de la copropriété, lue dans l'état (Supabase) au moment du rapport.
   const COPRO = () => ({
@@ -4136,9 +4140,11 @@ setTimeout(boot, 0);
   /* ---- données ---- */
   const isoOf = disp => { const d=parseDate(disp); return d?d.iso:''; };
   function defaultPeriod(){
+    fillReportPeriod();
+    const y = reportDefaultYear();
     const f = document.getElementById('repFrom'), t = document.getElementById('repTo');
-    const fd = parseDate(f?f.value:'01/01/2025') || parseDate('01/01/2025');
-    const td = parseDate(t?t.value:'31/12/2025') || parseDate('31/12/2025');
+    const fd = parseDate(f?f.value:'') || parseDate(`01/01/${y}`);
+    const td = parseDate(t?t.value:'') || parseDate(`31/12/${y}`);
     return { fromIso:fd.iso, toIso:td.iso, label:`${fd.disp} → ${td.disp}` };
   }
   function periodForYear(y){ const fd=parseDate(`01/01/${y}`), td=parseDate(`31/12/${y}`); return {fromIso:fd.iso, toIso:td.iso, label:`01/01/${y} → 31/12/${y}`}; }
@@ -4202,9 +4208,9 @@ setTimeout(boot, 0);
       <div class="r-sub" style="margin-top:8px">Résultat de l'exercice : <b class="${res>=0?'pos':'neg'}">${res>=0?'Excédent ':'Déficit '}${eur(Math.abs(res))}</b></div>`;
   }
   function ownersSection(){
-    const led = ownerLedger(), ly = led.length ? led[0].year : '';
+    const led = ownerLedger(), ly = led.length ? led[0].year : '', qTot = sum(led.map(o=>+o.q||0))||1000;
     const sg = v => `${v<0?'−':''}${eur(Math.abs(v))}`;
-    const rows = led.map(o=>`<tr><td>${o.n}</td><td class="num">${o.q}/1000</td>
+    const rows = led.map(o=>`<tr><td>${o.n}</td><td class="num">${o.q}/${qTot}</td>
       <td class="num">${sg(o.report)}</td><td class="num">${eur(o.due)}</td><td class="num">${eur(o.verse)}</td>
       <td class="num ${o.solde<0?'neg':'pos'}">${sg(o.solde)}</td>
       <td>${o.solde<-0.005?'En retard':'À jour'}</td></tr>`).join('');
@@ -4212,7 +4218,7 @@ setTimeout(boot, 0);
     return `<h2>Récapitulatif par copropriétaire — exercice ${ly}</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Report</th><th class="num">Dû ${ly}</th><th class="num">Versé ${ly}</th><th class="num">Solde</th><th>Statut</th></tr>
         ${rows}
-        <tr class="tot"><td>Total</td><td class="num">1000/1000</td><td class="num">${sg(tRep)}</td><td class="num">${eur(tDue)}</td><td class="num">${eur(tVer)}</td><td class="num">${sg(tSol)}</td><td></td></tr>
+        <tr class="tot"><td>Total</td><td class="num">${qTot}/${qTot}</td><td class="num">${sg(tRep)}</td><td class="num">${eur(tDue)}</td><td class="num">${eur(tVer)}</td><td class="num">${sg(tSol)}</td><td></td></tr>
       </table>
       <div class="r-sub" style="margin-top:6px">Report = versements antérieurs à l'exercice, moins le dû des exercices déjà appliqués. Solde = report + versé − dû.</div>`;
   }
@@ -4291,35 +4297,16 @@ setTimeout(boot, 0);
       <p class="pdf-sub">${m.draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l’année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé.</p>
       ${summary}${part1}${part2}${part3}${legal}`;
   }
-  function budgetSection(){
-    const ow=ownersOf(); const tot=sum(ow.map(o=>o.q))||1000, n=ow.length||1;
-    const cy=chargesYear(), cb=chargesBudget(cy);
-    const postes=budgetPostes();
-    const rows = postes.map(po=>{
-      const bud=po.r*MARGIN;
-      const key = po.k==='indiv'?('Individuelle (÷'+n+')'):'Quote-part (millièmes)';
-      return `<tr><td>${po.label}</td><td>${key}</td><td class="num">${eur(po.r)}</td><td class="num"><b>${eur(bud)}</b></td></tr>`;
-    }).join('') || '<tr><td colspan="4" class="r-sub">Aucune dépense sur la période.</td></tr>';
-    const split={}; ow.forEach(o=>split[o.short||o.n]=0);
-    postes.forEach(po=>{ const bud=po.r*MARGIN; ow.forEach(o=>{ split[o.short||o.n]+= po.k==='indiv'?bud/n:bud*o.q/tot; }); });
-    const totR=sum(postes.map(p=>p.r)), totB=totR*MARGIN;
-    const owRows = ow.map(o=>{ const k=o.short||o.n; return `<tr><td>${o.n}</td><td class="num"><b>${eur(split[k]||0)}</b></td><td class="num">${eur((split[k]||0)/12)}</td></tr>`; }).join('');
-    // Proposition de l'exercice : provision par copropriétaire (paiement + réserve), depuis le « dû » saisi.
-    const hasProv = ow.some(o=>(+o.due_pay||0)>0 || (+o.due_res||0)>0);
-    const provRows = ow.map(o=>{ const dp=+(o.due_pay||0), dr=+(o.due_res||0);
-      return `<tr><td>${o.n}</td><td class="num">${o.q}</td><td class="num">${eur(dp)}</td><td class="num"><b>${eur(dp/12)}</b></td><td class="num"><b>${eur(dr/12)}</b></td></tr>`; }).join('');
-    const provTotPay=sum(ow.map(o=>+o.due_pay||0)), provTotRes=sum(ow.map(o=>+o.due_res||0));
-    const provTable = hasProv ? `
-      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Proposition ${cy} — provision par copropriétaire</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Charges annuelles (paiement)</th><th class="num">Provision mensuelle — paiement</th><th class="num">Provision mensuelle — réserve</th></tr>
-        ${provRows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(provTotPay)}</td><td class="num">${eur(provTotPay/12)}</td><td class="num">${eur(provTotRes/12)}</td></tr></table>` : '';
+  // Annexe 4 du rapport : le budget de l'exercice demandé (celui qui suit la période du rapport
+  // d'AG, ou l'exercice affiché dans l'onglet Charges). Sans budget préparé, le document le dit ;
+  // plus de repli calculé « toutes les dépenses + 4 % » qui ignorait comptes, réserve et marge.
+  function budgetSection(cy){
+    const ow=ownersOf(), cb=chargesBudget(cy);
     if ((cb.postes.length || cb.reserve.length) && (budgetPublished(cb) || canWrite())) return chargesAnnex(cy, cb.postes, ow);
-    return `<h2>Annexe 4 — Budget prévisionnel 2026 (marge +4 %)</h2>
-      <table><tr><th>Poste</th><th>Clé de répartition</th><th class="num">Réalité</th><th class="num">Budget</th></tr>
-        ${rows}<tr class="tot"><td>Total</td><td></td><td class="num">${eur(totR)}</td><td class="num">${eur(totB)}</td></tr></table>
-      <h2 style="font-size:14px;border:none;color:#20251F;margin-top:18px">Charge annuelle par copropriétaire (budget réparti)</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Charge annuelle</th><th class="num">Mensualité</th></tr>${owRows}</table>
-      ${provTable}`;
+    const all=state.charges||{};
+    const others=Object.keys(all).filter(y=>/^\d{4}$/.test(y) && y!==String(cy) && ((all[y]||{}).postes||[]).length && (budgetPublished(all[y])||canWrite())).sort();
+    return `<h2 class="pdf-h2" style="margin-top:18px"><span class="pdf-h2-t">Annexe 4 — Budget prévisionnel ${cy}</span></h2>`
+      + LSPdf.note(`Aucun budget prévisionnel ${cy} n'est ${canWrite()?'préparé':'publié'}. Le budget se prépare dans Budget & copropriétaires › Calcul des charges ; l'Annexe 4 le reprend dès qu'il a des postes.${others.length?` Budgets existants : ${others.join(', ')}.`:''}`, {kind:'info', title:'Annexe 4 absente.'});
   }
   function chronoSection(p){
     const evs=(state.timeline||[]).filter(e=>{ const d=e.date||''; return d>=p.fromIso && d<=p.toIso; })
@@ -4356,7 +4343,7 @@ setTimeout(boot, 0);
         + chronoSection(p)
         + annexeTxSection('pay',p,'Annexe 2 — Transactions du compte de paiement')
         + annexeTxSection('res',p,'Annexe 3 — Transactions du compte de réserve')
-        + budgetSection()
+        + budgetSection(Number(p.toIso.slice(0,4))+1)
         + signatures() + foot();
     } else if (kind==='pay'){
       title = 'Rapport — Compte de paiement';
@@ -4374,7 +4361,7 @@ setTimeout(boot, 0);
       const meta = [{label:'Exercice budgétaire', value:String(cy)},
         cov.months ? {label:'Réel de référence', value:LSPdf.fmt.months(cov.from, cov.to, cy-1)} : {label:'Réel de référence', value:`aucun relevé en ${cy-1}`},
         {label:'Marge appliquée', value:LSPdf.fmt.pct(bud.marge)}];
-      body = LSPdf.document({ head: headEl(title, p, {chip:'Annexe 4 · Budget prévisionnel', status, meta, noPeriod:true}), body: budgetSection(),
+      body = LSPdf.document({ head: headEl(title, p, {chip:'Annexe 4 · Budget prévisionnel', status, meta, noPeriod:true}), body: budgetSection(cy),
         foot: foot(`Budget prévisionnel ${cy} · Annexe 4${draft?' · brouillon':''}`) });
       return {title, body, docTitle:`LazySyndic – ${COPRO().name} – Budget prévisionnel ${cy}`};
     }
