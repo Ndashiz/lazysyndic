@@ -3113,15 +3113,24 @@ function ensureChargesCss(){
     #chgTable th:last-child,#chgTable td:last-child{padding-right:16px}
     #chgTable .fld{font-size:13px;padding:6px 8px}
     #chgTable .chg-label{width:100%;min-width:112px}
-    #chgTable .chg-vendor{width:100%;min-width:110px}
-    #chgTable .chg-cat{margin-top:4px;font-size:11.5px;padding:3px 5px;color:var(--ink-faint)}
-    #chgTable .chg-note{width:112px;min-width:112px;margin-top:4px;font-size:11px;padding:3px 6px;color:var(--ink-faint)}
+    #chgTable .chg-cat{font-size:11.5px;padding:3px 5px;color:var(--ink-faint)}
+    #chgTable .chg-poste{min-width:280px;max-width:420px}
+    #chgTable .chg-meta{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:4px;align-items:center}
+    #chgTable .chg-meta-v{display:inline-flex;flex-direction:column;gap:2px;min-width:0}
+    #chgTable .chg-meta .fld{font-size:11.5px;padding:3px 6px}
+    #chgTable .chg-fcnote{white-space:normal;max-width:220px}
+    /* la première colonne reste en vue quand le tableau défile ; une seule colonne engage : le budget */
+    #chgTable th:first-child,#chgTable td:first-child{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:1px 0 0 var(--border)}
+    #chgTable tr.chg-group td:first-child{background:var(--muted)}
+    #chgTable tr.chg-clash td:first-child{background:var(--coral-soft, oklch(.97 .03 40))}
+    #chgTable th.emph{color:var(--primary)}
+    #chgTable td.emph{background:var(--secondary)}
     #chgTable tr.chg-group td{background:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding-top:8px;padding-bottom:8px}
     .chg-delta.neg{color:var(--danger);font-weight:600}
     .chg-delta.pos{color:var(--success);font-weight:600}
     .chg-chip,.chg-formula{display:inline-flex;align-items:center;gap:4px;margin-top:4px;border:1px dashed var(--border);border-radius:999px;padding:1px 8px;font-size:11px;white-space:nowrap;color:var(--ink-faint)}
     .chg-formula{color:var(--green-deep);cursor:pointer;font-weight:500}
-    .chg-chip i,.chg-formula i{font-family:Georgia,'Times New Roman',serif;font-style:italic}
+    .chg-chip i,.chg-formula i{font-style:normal;font-weight:700}
     .chg-head-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
     .chg-marge{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
     .chg-marge .fld{width:62px;text-align:right;font-size:13px;padding:6px 8px}
@@ -3133,6 +3142,7 @@ function ensureChargesCss(){
     .chg-fx-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-faint)}
     .chg-fx-row label:first-child{flex:0 1 320px}
     .chg-fx-row label:last-child{flex:1 1 320px}
+    .chg-fx-row label.chg-fx-note{flex:1 1 100%}
     .chg-fx .fld{font-size:13px;padding:7px 9px;width:100%;box-sizing:border-box}
     #chgFx{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
     .chg-fx-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
@@ -3140,8 +3150,9 @@ function ensureChargesCss(){
     .copro-f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-faint)}
     .copro-f .fld{font-size:13px;padding:7px 9px}
     .copro-f b{font-size:13.5px;color:var(--ink)}
-    #chgTable .chg-cat{width:100%;min-width:148px;max-width:240px}
-    #chgTable .chg-key{min-width:118px}
+    #chgTable .chg-cat{min-width:140px;max-width:220px}
+    #chgTable .chg-key{min-width:104px}
+    #chgTable .chg-vendor{min-width:110px;width:150px}
     #chgTable .chg-fc{width:100px;text-align:right}
     .chg-sub{font-size:11.5px;color:var(--ink-faint);margin-top:3px;white-space:nowrap}
     .chg-sub .lk{font-size:11.5px}
@@ -3195,6 +3206,7 @@ function formulaEditorRow(p, which, y, ref, cols){
       <div class="chg-fx-row">
         <label>Insérer un champ de la comptabilité<select class="fld" id="chgFxField" aria-label="Champ de la comptabilité à insérer"><option value="">Choisir un champ…</option>${opts}</select></label>
         <label>Formule<input class="fld" id="chgFx" value="${escH(cur)}" spellcheck="false" autocomplete="off" aria-label="Formule ${escH(what)}"></label>
+        ${isFc?`<label class="chg-fx-note">Explication du calcul, reprise dans l'Annexe 4<input class="fld" id="chgFxNote" value="${escH(p.fcNote||'')}" maxlength="160" placeholder="Ex. : contrat indexé de 3 %, ou devis reçu" aria-label="Explication du calcul"></label>`:''}
       </div>
       <div class="chg-fx-foot"><span id="chgFxOut">${res.value!=null?`= <b>${eur(res.value)}</b>`:`<span class="chg-warn">${escH(res.error||'')}</span>`}</span>
         <span class="chg-actions" style="margin:0"><button class="btn btn-ghost" id="chgFxStd">Revenir au calcul standard</button><button class="btn btn-ghost" id="chgFxCancel">Annuler</button><button class="btn btn-primary" id="chgFxApply">Appliquer</button></span></div>
@@ -3223,7 +3235,7 @@ function renderCharges(){
   const today = ref===new Date().getFullYear() ? ' à ce jour' : '';
   const covTxt = `Estimation ${y} établie sur le réel ${ref} du compte de paiement` + (!cov.months ? ` : aucun relevé en ${ref}, saisissez les estimations.`
     : cov.months<12 ? `${today}, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} ramenés à 12 mois.` : ` sur l'année complète.`)
-    + ` « Estimé pour ${ref} » rappelle le budget ${ref} ; le delta est l'écart entre ce budget et le réel. Estimation ${y} = réel × (1 + marge) par défaut ; formules et explication se modifient poste par poste.`;
+    + ` « Estimé pour ${ref} » rappelle le budget ${ref} ; l'écart est la différence entre ce budget et le réel. Budget ${y} = réel × (1 + marge) par défaut ; la formule et son explication se modifient poste par poste (ƒ).`;
   const totEst=sum(postes.map(p=>p.calc.est||0)), hasEst=postes.some(p=>p.calc.est!=null);
   const totReal=sum(postes.map(p=>p.calc.real||0)), hasReal=postes.some(p=>p.calc.real!=null);
   const totF=sum(postes.map(p=>p.forecast));
@@ -3231,27 +3243,40 @@ function renderCharges(){
   const deltaTxt = d => d==null ? '' : d<-0.005 ? 'dépassement' : d>0.005 ? 'sous le budget' : 'conforme';
   const deltaCell = d => d==null ? '<span class="sub">—</span>' : `<span class="chg-delta ${d<-0.005?'neg':d>0.005?'pos':''}">${d<0?'−':''}${eur(Math.abs(d))}</span>`;
   const chip = (p, which, label) => ed ? `<button class="lk chg-formula" data-id="${escH(p.id)}" data-which="${which}" title="Modifier la formule"><i>ƒ</i>${escH(label)}</button>` : `<span class="chg-chip"><i>ƒ</i>${escH(label)}</span>`;
-  const cols = ed ? 8 : 7;
+  // Vue copropriétaire : Poste · Budget N · Ma part ; le syndic garde les colonnes d'analyse.
+  const me=(window.LS&&window.LS.member)||{};
+  const myIdx = !ed && me.owner_short ? ownersOf().findIndex(o=>(o.short||o.n)===me.owner_short) : -1;
+  const mySplit = myIdx>=0 ? budgetSplit(y).charges[myIdx] : null;
+  const cols = ed ? 6 : (myIdx>=0 ? 3 : 2);
+  const keyLabel = k => k==='indiv' ? 'Individuelle' : 'Millièmes';
   const row = (p,i) => { const c=p.calc, bad=clash.has(p.id);
     const estCell = c.est==null ? `<span class="sub">—</span><div class="chg-sub">${prev.length?`absent du budget ${ref}`:`pas de budget ${ref}`}</div>` : `${eur(c.est)}<div class="chg-sub">budget ${ref}</div>`;
     const realCell = !c.hasRef ? `<span class="sub">—</span><div class="chg-sub">${p.cat?`pas de relevé en ${ref}`:'nouveau poste'}</div>`
       : c.real==null ? `<span class="sub">erreur</span><div class="chg-warn">${escH(c.realError||'')}</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`
       : `${eur(c.real)}<div class="chg-sub">${eur(c.toDate)} sur ${c.months} mois</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`;
-    const catSel = ed ? `<select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>` : `<div class="chg-sub">${escH(LSCharges.catLabel(p.cat))}</div>`;
     const fcLabel = p.fcFormula ? LSCharges.shortFormula(p.fcFormula) : 'saisie';
-    return `<tr class="${bad?'chg-clash':''}">
-      <td>${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}${catSel}
-        ${bad?'<div class="chg-warn">Catégorie déjà reprise par un autre poste : la dépense serait comptée deux fois.</div>':''}</td>
-      <td>${ed?`<input class="fld chg-vendor" data-i="${i}" value="${escH(p.vendor||'')}" placeholder="Bénéficiaire" aria-label="Bénéficiaire">${!p.vendor && vendors[i] ? `<div class="chg-sub"><button class="lk chg-vfill" data-i="${i}" title="Tiers le plus fréquent de la catégorie en ${ref}">= ${escH(vendors[i])}</button></div>`:''}`:escH(p.vendor||'—')}</td>
-      <td>${ed?`<select class="fld chg-key" data-i="${i}" aria-label="Clé de répartition"><option value="quote" ${p.key==='quote'?'selected':''}>Millièmes</option><option value="indiv" ${p.key==='indiv'?'selected':''}>Individuelle</option></select>`:(p.key==='indiv'?'Individuelle':'Millièmes')}</td>
-      <td class="num">${estCell}</td>
-      <td class="num">${realCell}</td>
-      <td class="num">${deltaCell(c.delta)}${c.delta!=null?`<div class="chg-sub">${deltaTxt(c.delta)}</div>`:''}</td>
-      <td class="num">${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Estimation annuelle ${y}">`:`<b>${eur(p.forecast)}</b>`}
+    // Le poste porte tout ce qui le définit : nom, catégorie de la comptabilité, bénéficiaire, clé.
+    const meta = ed
+      ? `<div class="chg-meta">
+          <select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>
+          <span class="chg-meta-v"><input class="fld chg-vendor" data-i="${i}" value="${escH(p.vendor||'')}" placeholder="Bénéficiaire" aria-label="Bénéficiaire">${!p.vendor && vendors[i] ? `<button class="lk chg-vfill" data-i="${i}" title="Tiers le plus fréquent de la catégorie en ${ref}">= ${escH(vendors[i])}</button>` : ''}</span>
+          <select class="fld chg-key" data-i="${i}" aria-label="Clé de répartition"><option value="quote" ${p.key==='quote'?'selected':''}>Millièmes</option><option value="indiv" ${p.key==='indiv'?'selected':''}>Individuelle</option></select>
+        </div>`
+      : `<div class="chg-sub" style="white-space:normal">${[LSCharges.catLabel(p.cat), p.vendor, keyLabel(p.key)].filter(Boolean).map(escH).join(' · ')}</div>`;
+    const budgetCell = `${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Budget ${y} du poste">`:`<b>${eur(p.forecast)}</b>`}
         ${c.fcError?`<div class="chg-warn">${escH(c.fcError)}</div>`:''}
         <div>${chip(p,'fc', fcLabel)}</div>
-        ${ed?`<input class="fld chg-note" data-i="${i}" value="${escH(p.fcNote||'')}" placeholder="Explication du calcul" aria-label="Explication du calcul">`:(p.fcNote?`<div class="chg-sub" style="white-space:normal">${escH(p.fcNote)}</div>`:'')}</td>
-      ${ed?`<td><button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button></td>`:''}
+        ${p.fcNote?`<div class="chg-sub chg-fcnote">${escH(p.fcNote)}</div>`:''}`;
+    const share = mySplit ? (mySplit.byPoste||{})[p.id]||0 : 0;
+    return `<tr class="${bad?'chg-clash':''}">
+      <td class="chg-poste">${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}${meta}
+        ${bad?'<div class="chg-warn">Catégorie déjà reprise par un autre poste : la dépense serait comptée deux fois.</div>':''}</td>
+      ${ed?`<td class="num">${estCell}</td>
+      <td class="num">${realCell}</td>
+      <td class="num">${deltaCell(c.delta)}${c.delta!=null?`<div class="chg-sub">${deltaTxt(c.delta)}</div>`:''}</td>`:''}
+      <td class="num emph">${budgetCell}</td>
+      ${ed?`<td><button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button></td>`
+          : myIdx>=0 ? `<td class="num">${eur(share)}<div class="chg-sub">${eur(share/12)} / mois</div></td>` : ''}
     </tr>`;
   };
   // L'éditeur de formule vit sous le tableau, pas dans une ligne : dans le tableau défilant, à
@@ -3259,14 +3284,15 @@ function renderCharges(){
   const edited = ed && chgEdit ? postes.find(p=>p.id===chgEdit.id) : null;
   const editor = edited ? formulaEditorRow(edited, chgEdit.which, y, ref, cols) : '';
   const rows = LSCharges.groupPostes(postes).map(g=>`<tr class="chg-group"><td colspan="${cols}">${escH(g.label||'Sans catégorie')}</td></tr>` + g.items.map(({p,i})=>row(p,i)).join('')).join('');
+  const myTot = mySplit ? mySplit.annual : 0;
   const table = postes.length ? `<div class="table-wrap"><table id="chgTable">
-      <tr><th>Poste</th><th>Bénéficiaire</th><th>Clé de répartition</th><th class="num">Estimé pour ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Delta ${ref}</th><th class="num">Estimation ${y}</th>${ed?'<th></th>':''}</tr>
+      <tr><th scope="col">Poste</th>${ed?`<th class="num" scope="col">Estimé pour ${ref}</th><th class="num" scope="col">Réel ${ref}</th><th class="num" scope="col">Écart ${ref}</th>`:''}<th class="num emph" scope="col">Budget ${y}</th>${ed?'<th></th>':(myIdx>=0?'<th class="num" scope="col">Ma part</th>':'')}</tr>
       ${rows}
-      <tr class="chg-tot"><td colspan="3">Total · ${postes.length} poste${postes.length>1?'s':''}</td>
-        <td class="num">${hasEst?eur(totEst):'—'}<div class="chg-sub">${hasEst?`budget ${ref}`:''}</div></td>
+      <tr class="chg-tot"><td>Total · ${postes.length} poste${postes.length>1?'s':''}</td>
+        ${ed?`<td class="num">${hasEst?eur(totEst):'—'}<div class="chg-sub">${hasEst?`budget ${ref}`:''}</div></td>
         <td class="num">${hasReal?eur(totReal):'—'}<div class="chg-sub">${hasReal&&cov.months<12?'ramené à 12 mois':''}</div></td>
-        <td class="num">${deltaCell(totDelta)}<div class="chg-sub">${deltaTxt(totDelta)}</div></td>
-        <td class="num">${eur(totF)}<div class="chg-sub">soit ${eur(totF/12)} / mois</div></td>${ed?'<td></td>':''}</tr>
+        <td class="num">${deltaCell(totDelta)}<div class="chg-sub">${deltaTxt(totDelta)}</div></td>`:''}
+        <td class="num emph">${eur(totF)}<div class="chg-sub">soit ${eur(totF/12)} / mois</div></td>${ed?'<td></td>':(myIdx>=0?`<td class="num">${eur(myTot)}<div class="chg-sub">${eur(myTot/12)} / mois</div></td>`:'')}</tr>
     </table></div>${editor}`
     : `<div class="chg-empty">Aucun poste de dépense pour ${y}.${ed?'':' Le syndic n’a pas encore préparé ce budget.'}</div>`;
   const seedable = cov.months>0 && LSCharges.seed(tx, ref, cov).some(n=>!postes.some(p=>LSCharges.overlaps(p.cat, n.cat)));
@@ -3300,7 +3326,6 @@ function renderCharges(){
     card.querySelectorAll('.chg-label').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {label:inp.value.trim()}));
     card.querySelectorAll('.chg-vendor').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {vendor:inp.value.trim()}));
     card.querySelectorAll('.chg-vfill').forEach(b=>b.onclick=()=>{ const i=+b.dataset.i; upd(i, {vendor:vendors[i]}); });
-    card.querySelectorAll('.chg-note').forEach(inp=>inp.onchange=()=>upd(+inp.dataset.i, {fcNote:inp.value.trim()}));
     card.querySelectorAll('.chg-cat').forEach(s=>s.onchange=()=>{
       const i=+s.dataset.i, p=postes[i], cat=catFromKey(s.value), patch={cat};
       if (cat && !p.label){ patch.label=cat.sub||cat.high; patch.key=budgetDefaultKey(cat.high, cat.sub); }   // poste neuf : nom et clé suggérés
@@ -3324,7 +3349,7 @@ function renderCharges(){
         fx.value=(fx.value.slice(0,a)+(a&&!/\s$/.test(fx.value.slice(0,a))?' ':'')+'['+t+']'+(/^\s/.test(fx.value.slice(b))||!fx.value.slice(b)?'':' ')+fx.value.slice(b)).replace(/\s{2,}/g,' '); e.target.value=''; fx.focus(); preview(); };
       card.querySelector('#chgFxApply').onclick=()=>{ const f=fx.value.trim(), r=LSCharges.evalFormula(f, p.calc.fields);
         if (r.value==null){ showToast('Formule refusée : '+(r.error||'?'),'err'); return; }
-        chgEdit=null; updId(p.id, isFc ? {fcFormula:f} : {realFormula:f===LSCharges.REAL_FORMULA?'':f}); };
+        chgEdit=null; updId(p.id, isFc ? {fcFormula:f, fcNote:String((card.querySelector('#chgFxNote')||{}).value||'').trim()} : {realFormula:f===LSCharges.REAL_FORMULA?'':f}); };
       card.querySelector('#chgFxStd').onclick=()=>{ chgEdit=null; updId(p.id, isFc ? {fcFormula:LSCharges.FC_FORMULA} : {realFormula:''}); };
       card.querySelector('#chgFxCancel').onclick=()=>{ chgEdit=null; renderCharges(); };
       fx.focus();
