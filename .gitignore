@@ -23,3 +23,7 @@ data-réelle/
 
 # Sauf les PV FICTIFS des tests de signature (noms inventés, générés par tests/fixtures/make_*.)
 !tests/fixtures/*.pdf
+
+# Clé privée Enable Banking du pont (bridge/*.pem) — jamais dans un dépôt public
+*.pem
+*.key

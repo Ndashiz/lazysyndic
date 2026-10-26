@@ -12,7 +12,10 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
   `ui.js` (barre du haut, notifications, blocs de la page de garde),
   `signature.js` (PV en PDF, lecture des signatures), `statement.js` (relevé de compte PDF),
   `charges.js` (calcul des charges par poste), `convocation.js` (convocation à l'AG : e-mail
-  mis en page, brouillon `.eml`, PDF avec procuration).
+  mis en page, brouillon `.eml`, PDF avec procuration), `banque.html` (retour de la banque
+  après l'accord de synchronisation bancaire).
+- **Pont serveur** (`bridge/`, Node sans dépendance, sur le VPS) : expose la copro à Jarvis et,
+  en option, synchronise la banque via Enable Banking ([`bridge/README.md`](bridge/README.md)).
 - **Design system** : repris de `Ndashiz/lazysyndic-refined` (maquette Lovable) —
   jetons, composants et correspondance écran par écran dans [`DESIGN.md`](DESIGN.md).
 - **Présentation** : `decouvrir/` — page marketing autonome (aucune dépendance au
@@ -29,7 +32,8 @@ copropriétaire, budget & clés de répartition, et génération du rapport d'AG
 ## Périmètre
 
 Import du relevé Swan/Syndic4you (CSV, PDF en édition française ou anglaise, ou
-liste copiée-collée depuis l'app Swan) → catégorisation par règles & alias →
+liste copiée-collée depuis l'app Swan), ou synchronisation bancaire via Enable Banking
+(voir plus bas) → catégorisation par règles & alias →
 tableau de bord (réserve, soldes, qui-paie-quoi, dépenses par catégorie,
 pense-bête) → budget & clés de répartition → générateur de rapports PDF (AG,
 compte de paiement, résultats, Annexes 2/3/4) → calcul des charges par poste → relevé de compte PDF à envoyer aux
@@ -195,6 +199,35 @@ document. Le PDF est un vrai fichier (pdf-lib), pas une impression du navigateur
 
 Code : `statement.js` (chiffres et PDF, sans DOM) ; tests :
 `node --test tests/statement.test.mjs` (avec `npm i --no-save pdf-lib@1.17.1 pdfjs-dist@3.11.174`).
+
+## Synchronisation bancaire (Enable Banking)
+
+Écran **Import** › carte « Synchronisation bancaire » (syndic seulement). Au lieu de déposer un
+relevé, on connecte la banque une fois : les mouvements arrivent ensuite d'eux-mêmes, toutes les
+quelques heures, dans un **relevé à valider** par compte. Rien n'entre dans les soldes sans la
+validation du syndic, exactement comme pour un fichier déposé.
+
+- **Connexion** : nom de la banque (tel qu'Enable Banking l'écrit), pays, type de compte →
+  « Connecter la banque » → la banque demande son accord (soldes et mouvements, lecture seule) et
+  ramène sur `banque.html`, qui rend la main à l'app. L'accord dure jusqu'à 180 jours selon la
+  banque ; la carte et une alerte Jarvis préviennent 14 jours avant l'échéance.
+- **Rangement** : les lignes synchronisées passent par les mêmes règles, alias et détection du
+  copropriétaire qu'un import (`classifyImported`), à l'ouverture de l'app.
+- **Comptes** : reconnus par leur IBAN (appris à l'import ou saisi dans la fiche du compte) ; un
+  compte inconnu attend un choix dans la carte.
+- **Doublons** : une ligne déjà importée par fichier n'est pas recomptée (même compte, même
+  montant, dates à 3 jours près, libellé le plus proche d'abord), et inversement quand un fichier
+  est déposé après une synchro. Un relevé synchronisé puis écarté ne revient pas.
+- **Rapprochement** : le solde donné par la banque sert de clôture au relevé ; la validation le
+  compare au solde calculé.
+
+Le navigateur ne détient aucun secret : la clé privée Enable Banking vit sur le VPS, dans le pont
+([`bridge/README.md`](bridge/README.md#bank-sync-enable-banking) : mise en place, outil `eb.js`).
+Supabase sert de boîte aux lettres entre l'app et le pont (table `ls_bank_links`, baseline §12).
+
+> ⚠️ Au 26/10/2026, la liste publique d'Enable Banking ne contient **pas** Swan. Vérifier avec
+> `node bridge/eb.js banks FR swan` (ou dans le Control Panel) avant tout : sans Swan chez Enable
+> Banking, la synchro ne peut pas joindre les comptes Swan.
 
 ## Mise en place du backend
 

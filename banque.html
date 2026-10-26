@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<!-- Le code d'autorisation est dans l'adresse : il ne part vers aucune autre page. -->
+<meta name="referrer" content="no-referrer">
+<title>LazySyndic — retour de la banque</title>
+<link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+<style>
+  :root{--bg:#F6F7F4;--ink:#21281E;--soft:#5E6A60;--green:#21503D}
+  @media (prefers-color-scheme:dark){:root{--bg:#141914;--ink:#E8ECE6;--soft:#A3ADA5;--green:#7FB89C}}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);
+       font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;box-sizing:border-box}
+  p{margin:0;text-align:center} a{color:var(--green);font-weight:600}
+  .s{color:var(--soft);font-size:13px;margin-top:6px}
+</style>
+<script>
+/* Retour de la banque après l'autorisation de la synchro (Enable Banking).
+   La banque renvoie ici avec ?code=…&state=… (ou ?error=…&error_description=…&state=…).
+   On met la réponse de côté pour l'app — qui la reconnaît à son `state` et la transmet au pont —
+   puis on y retourne, en effaçant cette adresse de l'historique.
+   Page à part, sans supabase-js : posée sur index.html, une adresse portant `error_description`
+   serait lue par supabase-js comme un échec de connexion, et la session du syndic fermée. */
+(function(){
+  var p = new URLSearchParams(location.search), out = { at: Date.now() };
+  ['code', 'state', 'error', 'error_description'].forEach(function(k){
+    var v = p.get(k); if (v) out[k] = String(v).slice(0, 2000);
+  });
+  try { if (out.state) localStorage.setItem('ls:bankCallback', JSON.stringify(out)); } catch (e) {}
+  location.replace('./#imp');
+})();
+</script>
+</head>
+<body>
+  <main>
+    <p>Retour de la banque…</p>
+    <p class="s"><a href="./#imp">Revenir à LazySyndic</a></p>
+  </main>
+</body>
+</html>

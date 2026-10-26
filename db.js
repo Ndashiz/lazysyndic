@@ -60,7 +60,9 @@
   const mapTx = r => ({
     id:r.id, date:isoToDisp(r.tx_date), tiers:r.tiers, high:r.high, sub:r.sub||'',
     amount:Number(r.amount), account:r.account, note:r.note||'', flag:!!r.flag,
-    comment:r.comment||'', owner:r.owner||'', importV:r.import_v ?? null
+    comment:r.comment||'', owner:r.owner||'', importV:r.import_v ?? null,
+    // ligne arrivée par la synchro bancaire (Enable Banking) : la référence de la banque
+    bankRef:r.bank_ref||''
   });
 
   /* ---------- CHARGEMENT (read) ---------- */
@@ -172,6 +174,32 @@
     async softDeleteTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').update({deleted_at:new Date().toISOString()}).in('id',ids); if(error)throw error; },
     async restoreTransactions(ids){ if(!ids||!ids.length)return; const {error}=await T('ls_transactions').update({deleted_at:null}).in('id',ids); if(error)throw error; },
     async purgeOldTrash(){ const cut=new Date(Date.now()-7*86400000).toISOString(); const {error}=await T('ls_transactions').delete().not('deleted_at','is',null).lt('deleted_at',cut); if(error)throw error; },
+
+    /** Le plus grand numéro de relevé en base : le pont de synchro bancaire en crée aussi, pendant
+     *  que l'app est ouverte ; deux relevés qui partagent un numéro se valideraient ensemble. */
+    async maxImportV(){
+      const [a, b] = await Promise.all([
+        T('ls_imports').select('v').not('v','is',null).order('v',{ascending:false}).limit(1),
+        T('ls_transactions').select('import_v').not('import_v','is',null).order('import_v',{ascending:false}).limit(1),
+      ]);
+      if (a.error) throw a.error;
+      if (b.error) throw b.error;
+      return Math.max(Number(a.data?.[0]?.v)||0, Number(b.data?.[0]?.import_v)||0);
+    },
+
+    /* ---------- Synchro bancaire (Enable Banking — baseline §12, bridge/banksync.js) ----------
+       ls_bank_links est la boîte aux lettres entre l'app et le pont : réservée au syndic (RLS),
+       un copropriétaire en lecture seule reçoit une liste vide. Le code de la banque n'est jamais
+       relu ici. */
+    async bankLinks(){
+      const {data, error} = await T('ls_bank_links')
+        .select('id,status,aspsp_name,aspsp_country,psu_type,state,auth_url,valid_until,accounts,acct_map,sync_requested_at,last_sync_at,last_ok_at,last_sync,error,created_at,updated_at')
+        .order('created_at', {ascending:false}).limit(10);
+      if (error) throw error;
+      return data || [];
+    },
+    async bankLinkAdd(row){ const {data,error}=await T('ls_bank_links').insert(row).select('id').single(); if(error)throw error; return data; },
+    async bankLinkUpdate(id, patch){ const {error}=await T('ls_bank_links').update(patch).eq('id',id); if(error)throw error; },
 
     async addImport(row){
       const {data, error} = await T('ls_imports').insert(row).select().single(); if (error) throw error; return data;

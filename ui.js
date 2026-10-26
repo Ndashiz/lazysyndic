@@ -190,7 +190,7 @@
   /* ---------- recherche (pages, comme dans le design) ---------- */
   const KEYWORDS = {
     dash:'accueil page de garde reserve soldes pense-bete', acc:'transactions mouvements iban solde rapport releve compte paiement reserve',
-    cpta:'flux tresorerie bilan entrees sorties', imp:'releve csv pdf swan coller', ag:'assemblee pv proces-verbal convocation vote',
+    cpta:'flux tresorerie bilan entrees sorties', imp:'releve csv pdf swan coller banque synchro synchronisation enable banking', ag:'assemblee pv proces-verbal convocation vote',
     budget:'charges repartition quotites lots provisions annexe', ct:'contrats fournisseurs prestataires', timeline:'chronologie historique journal notes',
     rules:'regles alias sauvegarde restauration export',
   };

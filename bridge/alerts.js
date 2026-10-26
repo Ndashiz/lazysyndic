@@ -165,7 +165,54 @@ export function buildAlerts(data, opts = {}) {
     });
   }
 
+  // 4) Synchro bancaire — une connexion qui expire en silence arrête la synchro sans bruit.
+  alerts.push(...bankAlerts(data.bankLinks || [], now));
+
   return alerts;
+}
+
+const dayFr = (iso) => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : ''; };
+
+/**
+ * Avis sur la synchro bancaire (ls_bank_links, du plus récent au plus ancien) :
+ *  - connexion active qui expire dans moins de 14 jours → la renouveler ;
+ *  - connexion active en échec depuis plus de 36 h → regarder l'erreur ;
+ *  - dernière connexion expirée, sans connexion active ni demande en cours → la synchro est arrêtée.
+ * Une connexion déconnectée volontairement (revoked) ou remplacée ne dit rien.
+ */
+export function bankAlerts(links, now = new Date()) {
+  const list = Array.isArray(links) ? links : [];
+  const t = now.getTime();
+  const active = list.find((l) => l.status === 'active');
+  if (active) {
+    const out = [];
+    const until = active.valid_until ? Date.parse(active.valid_until) : NaN;
+    if (Number.isFinite(until) && until - t < 14 * 86400000) {
+      out.push({
+        id: `bank-renew-${active.id}`, kind: 'notice',
+        title: `Synchro bancaire — reconnecter ${active.aspsp_name || 'la banque'} avant le ${dayFr(active.valid_until)}`,
+        detail: 'Le consentement donné à la banque arrive à échéance ; ensuite, plus aucun mouvement n’arrive dans LazySyndic.',
+        dueDate: String(active.valid_until).slice(0, 10),
+      });
+    }
+    // Une erreur passagère se rattrape à la synchro suivante : on ne parle qu'au-delà de 36 h
+    // sans synchro réussie (depuis la mise en service, si aucune n'a jamais réussi).
+    const okAt = Date.parse(active.last_ok_at || active.created_at || '');
+    if (active.error && Number.isFinite(okAt) && t - okAt > 36 * 3600000) {
+      out.push({ id: `bank-error-${active.id}`, kind: 'notice', title: 'Synchro bancaire en échec', detail: String(active.error).slice(0, 300) });
+    }
+    return out;
+  }
+  const pending = list.some((l) => ['requested', 'auth_ready', 'code_received'].includes(l.status));
+  const latest = list.find((l) => l.status !== 'error' && l.status !== 'requested' && l.status !== 'auth_ready');
+  if (!pending && latest && latest.status === 'expired') {
+    return [{
+      id: `bank-expired-${latest.id}`, kind: 'notice',
+      title: `Synchro bancaire arrêtée — connexion ${latest.aspsp_name || ''} expirée`.replace(/\s+—/, ' —').trim(),
+      detail: 'Reconnectez la banque dans LazySyndic › Import › Synchronisation bancaire.',
+    }];
+  }
+  return [];
 }
 
 /**

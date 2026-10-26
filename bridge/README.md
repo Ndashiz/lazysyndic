@@ -7,6 +7,8 @@ implementing the pull contract in Jarvis's `docs/08-lazysyndic-bridge.md`.
   is the missing server piece that reads Supabase with the `service_role` key
   (server-side only, never in the browser) and serves `GET /api/jarvis/alerts`.
 - **Zero dependencies**: plain Node 22 (`http`, `fetch`, `crypto`). Nothing to `npm install`.
+- **Optional bank sync**: with an Enable Banking key, it also brings the bank's movements into
+  LazySyndic as a statement to validate — see [Bank sync](#bank-sync-enable-banking).
 - **Runs on the same VPS as Jarvis**, listening on **localhost** — Jarvis calls it
   in-VPS, so the endpoint is never publicly exposed.
 
@@ -98,3 +100,98 @@ POLL_MS=300000     # check every 5 min; first pass primes (no backlog storm)
 ```bash
 ssh ubuntu@<vps> 'sudo -u jarvis git -C /opt/lazysyndic pull --ff-only && sudo systemctl restart lazysyndic-bridge'
 ```
+
+## Bank sync (Enable Banking)
+
+Optional. With `EB_APP_ID` + `EB_KEY_PATH` set, the bridge pulls the bank's movements through
+[Enable Banking](https://enablebanking.com/docs/api/reference/) and drops them into LazySyndic as a
+**statement to validate** — the same draft path as a dropped PDF/CSV, never straight into the
+balances. Off by default; nothing else in the bridge changes.
+
+**No new public endpoint.** The browser holds no secret and cannot reach the bridge (localhost
+only). Supabase is the mailbox between them — table `ls_bank_links` (baseline §12, syndic-only RLS):
+
+| Step | Who | `status` after |
+|---|---|---|
+| « Connecter la banque » (Import screen) | app inserts bank name, country, `state`, return URL | `requested` |
+| `POST /auth` | bridge writes the bank's authorization link | `auth_ready` |
+| bank login, back on `banque.html?code=…&state=…` | app writes the code | `code_received` |
+| `POST /sessions` + first sync | bridge writes accounts, consent end, clears the code | `active` |
+| every `EB_SYNC_HOURS`, or « Synchroniser maintenant » | bridge syncs | `active` |
+| « Déconnecter » → `DELETE /sessions` | app, then bridge | `revoked` |
+
+The private key never leaves the VPS. Without it, a `code` or a `session_id` read from Supabase
+opens nothing: every Enable Banking call is signed with an RS256 JWT (`kid` = application id).
+
+**What a sync writes** (`banksync.js`, pure rules in `bank.js`):
+
+- `ls_transactions` rows with `draft = true`, `high = null` (the app runs its own rules, aliases
+  and owner detection on them when the syndic opens it — `classifyBankDrafts` → `classifyImported`,
+  the code a file import uses), and `bank_ref` = the bank's `entry_reference` / `transaction_id`
+  (fallback: a content hash, `#2` for identical twins the same day). A unique index on
+  `(account, bank_ref)` stops a double insert.
+- one pending `ls_imports` row per account (`stmt.source = 'bank'`) that grows with each sync until
+  validated; `stmt.closing` is the bank's balance, so validation reconciles against it.
+- a timeline entry when something arrived.
+
+**Duplicates.** Window = last sync (else last ledger line, else 89 days) minus 5 days. Skipped: a
+known `bank_ref` (deleted rows included), a ref already seen by an earlier sync (a discarded synced
+statement does not come back), and an existing line without `bank_ref` (PDF/CSV/paste) with the same
+amount within 3 days — label words decide between twins, so Sam's and Lou's equal payments stay
+apart. The app applies the same rule the other way when a file is dropped after a sync.
+
+**Limits to know.** PSD2 lets a bank cap unattended reads at 4 a day per account (`EB_SYNC_HOURS=8`
+leaves room for the button). Consent lasts at most 180 days (the bank's
+`maximum_consent_validity`); the Import card and a Jarvis notice (`bankAlerts`: renew < 14 days,
+failing > 36 h, expired) say when to reconnect.
+
+### Coverage: check before anything else
+
+On 2026-10-26, Enable Banking's public coverage list did **not** include Swan (France: 115
+institutions, Belgium: 40, Netherlands: 29, full list searched). The authoritative answer is the
+API, from the bridge:
+
+```bash
+sudo -u jarvis node /opt/lazysyndic/bridge/eb.js banks FR swan     # exit 2 = not there
+```
+
+or the Control Panel's « Activate by linking accounts » bank picker. If Swan is missing, nothing
+below can work for Swan — ask Enable Banking (support.api@enablebanking.com) whether it is planned.
+
+### Setup
+
+1. **Enable Banking** — <https://enablebanking.com> → Get started → Control Panel → API
+   applications → new application, environment **Production**, redirect URL
+   `https://ndashiz.be/lazysyndic/banque.html`, key generated in the browser → it downloads
+   `<application-id>.pem`. Then « Activate by linking accounts » with the copro's accounts:
+   restricted mode (own accounts, non-commercial use, free).
+2. **Supabase** — rerun `supabase/migrations/000_baseline.sql`, then `supabase/check.sql`.
+3. **VPS** — the key and two lines of `.env`:
+
+   ```bash
+   sudo -u jarvis git -C /opt/lazysyndic pull --ff-only
+   sudo -u jarvis nano /opt/lazysyndic/bridge/enablebanking.pem   # paste the .pem content
+   sudo chmod 600 /opt/lazysyndic/bridge/enablebanking.pem
+   sudo -u jarvis nano /opt/lazysyndic/bridge/.env                # EB_APP_ID=<application id>, EB_KEY_PATH=enablebanking.pem
+   sudo systemctl restart lazysyndic-bridge
+   sudo -u jarvis node /opt/lazysyndic/bridge/eb.js app            # ACTIVE, redirect URL listed
+   journalctl -u lazysyndic-bridge -n 20 --no-pager                # "bank sync enabled …"
+   ```
+
+4. **App** — LazySyndic › Import › Synchronisation bancaire: bank name exactly as `eb.js banks`
+   prints it, country, account type → « Connecter la banque » → authorize at the bank → back in
+   the app. Accounts are matched by IBAN (`iban_map`, else the IBAN of each account card); an
+   unknown one waits for a choice in the card.
+
+CLI (`eb.js`, reads `.env`, never prints the key, a JWT, a code or a session id):
+
+```bash
+node eb.js app              # the application as Enable Banking sees it
+node eb.js banks FR [swan]  # institutions of a country, consent length, account types
+node eb.js status           # connections stored in Supabase, accounts, last sync
+node eb.js sync             # one sync now (prefer the app's button while the service runs)
+```
+
+Tests: `node --test` covers the JWT (signature checked with the public key), the mapping, the
+dedup rules and the whole connection lifecycle against an in-memory PostgREST
+(`enablebanking.test.js`, `bank.test.js`, `banksync.test.js`).

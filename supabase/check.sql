@@ -6,12 +6,13 @@
 --  Sur une base complète, le résultat doit contenir :
 --    • AUCUNE ligne « TABLE MANQUANTE », « COLONNE MANQUANTE », « BUCKET MANQUANT »,
 --      « FONCTION MANQUANTE », « TRIGGER MANQUANT » ni « RLS DÉSACTIVÉE » ;
---    • section « colonne » : les 15 tables ls_* et leurs colonnes (la liste attendue
+--    • section « colonne » : les 16 tables ls_* et leurs colonnes (la liste attendue
 --      ci-dessous = la définition de 000_baseline.sql, vérifiée par tests/schema.test.mjs) ;
 --    • section « policy » : ls_<table>_read + ls_<table>_write pour les 13 tables de données
 --      (ls_owners, ls_lots, ls_transactions, ls_rules, ls_aliases, ls_contracts, ls_reminders,
 --      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points, ls_periods), ls_members_read seule
---      (jamais d'écriture côté client), ls_invites_admin, et sur storage.objects :
+--      (jamais d'écriture côté client), ls_invites_admin, ls_bank_links_admin (syndic seul,
+--      lecture comprise), et sur storage.objects :
 --      ls_docs_read / ls_docs_insert / ls_docs_update / ls_docs_delete ;
 --    • section « bucket » : ls-docs, privé, 20971520 o, application/pdf ;
 --    • section « fonction » : ls_is_admin, ls_is_member (boolean), ls_provision_member (trigger) ;
@@ -21,7 +22,7 @@
 with attendu_tables(t) as (values
   ('ls_members'), ('ls_owners'), ('ls_lots'), ('ls_transactions'), ('ls_rules'), ('ls_aliases'),
   ('ls_contracts'), ('ls_reminders'), ('ls_settings'), ('ls_imports'), ('ls_timeline'),
-  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites')
+  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites'), ('ls_bank_links')
 ),
 attendu_colonnes(t, c) as (values
   ('ls_members','id'), ('ls_members','email'), ('ls_members','full_name'), ('ls_members','owner_short'),
@@ -35,7 +36,7 @@ attendu_colonnes(t, c) as (values
   ('ls_transactions','sub'), ('ls_transactions','amount'), ('ls_transactions','account'), ('ls_transactions','note'),
   ('ls_transactions','flag'), ('ls_transactions','comment'), ('ls_transactions','created_by'),
   ('ls_transactions','created_at'), ('ls_transactions','owner'), ('ls_transactions','deleted_at'),
-  ('ls_transactions','draft'), ('ls_transactions','import_v'),
+  ('ls_transactions','draft'), ('ls_transactions','import_v'), ('ls_transactions','bank_ref'),
   ('ls_rules','id'), ('ls_rules','label'), ('ls_rules','high'), ('ls_rules','sub'), ('ls_rules','sort'),
   ('ls_aliases','id'), ('ls_aliases','label'), ('ls_aliases','entity'), ('ls_aliases','is_owner'),
   ('ls_aliases','short'), ('ls_aliases','sort'),
@@ -60,7 +61,13 @@ attendu_colonnes(t, c) as (values
   ('ls_periods','year'), ('ls_periods','starts'), ('ls_periods','ends'), ('ls_periods','closed_at'), ('ls_periods','closed_by'),
   ('ls_periods','opening_pay'), ('ls_periods','opening_res'), ('ls_periods','closing_pay'), ('ls_periods','closing_res'),
   ('ls_periods','approved_ag_id'), ('ls_periods','report_html'), ('ls_periods','note'), ('ls_periods','created_at'),
-  ('ls_invites','email'), ('ls_invites','role'), ('ls_invites','owner_short'), ('ls_invites','full_name')
+  ('ls_invites','email'), ('ls_invites','role'), ('ls_invites','owner_short'), ('ls_invites','full_name'),
+  ('ls_bank_links','id'), ('ls_bank_links','status'), ('ls_bank_links','aspsp_name'), ('ls_bank_links','aspsp_country'),
+  ('ls_bank_links','psu_type'), ('ls_bank_links','redirect_url'), ('ls_bank_links','state'), ('ls_bank_links','auth_url'),
+  ('ls_bank_links','code'), ('ls_bank_links','session_id'), ('ls_bank_links','valid_until'), ('ls_bank_links','accounts'),
+  ('ls_bank_links','acct_map'), ('ls_bank_links','seen'), ('ls_bank_links','sync_requested_at'), ('ls_bank_links','last_sync_at'),
+  ('ls_bank_links','last_ok_at'), ('ls_bank_links','last_sync'), ('ls_bank_links','error'), ('ls_bank_links','created_by'),
+  ('ls_bank_links','created_at'), ('ls_bank_links','updated_at')
 ),
 presentes as (
   select table_name::text as t, column_name::text as c, data_type::text as data_type,

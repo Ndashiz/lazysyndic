@@ -1315,6 +1315,33 @@ function categorize(tiers, note, type){
   return {tiers:displayTiers, high:'?', sub:''};
 }
 
+// Une ligne de relevé (fichier, collage, ou synchro bancaire) → transaction rangée : règles et
+// alias, copropriétaire d'un versement, sous-catégorie par défaut selon le compte. Un seul code
+// pour les trois sources : une ligne synchronisée se range exactement comme la même ligne déposée.
+function classifyImported({date, rawTiers, note, type, amount, account}){
+  const cat = categorize(extractTiers(rawTiers), note, type);
+  const t = {date, tiers:cat.tiers||rawTiers||'—', high:cat.high, sub:cat.sub, amount, account, note};
+  // Modèle : les contributions des copropriétaires sont des « Charges » ; la
+  // sous-catégorie indique le pot. Ancienne catégorie top-level « Fonds de
+  // réserve » → normalisée vers Charges › Fonds de réserve.
+  if (t.high==='Fonds de réserve'){ t.high='Charges'; t.sub='Fonds de réserve'; }
+  // Entrée (montant positif) : on attribue le copropriétaire, et une entrée dont on reconnaît
+  // le copropriétaire est une « Charge » (sa contribution). Une entrée sans copropriétaire
+  // reconnu reste « à catégoriser » : un remboursement de fournisseur, un versement d'assureur
+  // ou de notaire n'est pas une recette de charges. Forcée en « Charges », elle sortait du
+  // filtre « À catégoriser » et gonflait le compte de résultats sans que personne ne la voie.
+  if (amount>0){
+    const det=detectOwner(t); if(det) t.owner=det;
+    if (t.high==='?' && det){ t.high='Charges'; t.sub=''; }
+  }
+  // Sous-catégorie par défaut d'une Charge selon le compte :
+  //   paiement → « Compte de paiement » · réserve → « Fonds de réserve »
+  if (t.high==='Charges' && !t.sub){
+    t.sub = (account==='res') ? 'Fonds de réserve' : 'Compte de paiement';
+  }
+  return t;
+}
+
 // Signature de doublon. Inclut le COMPTE : deux transactions identiques sur
 // des comptes différents (paiement vs réserve) ne sont PAS des doublons ; un
 // doublon = deux transactions identiques sur le MÊME compte.
@@ -1350,26 +1377,7 @@ function interpret(){
     const note = (mapping.note>=0 ? cells[mapping.note] : '').trim();
     const rawTiers = (mapping.tiers>=0 ? cells[mapping.tiers] : '').trim();
     const type = (mapping.type>=0 ? cells[mapping.type] : '').trim();
-    const cat = categorize(extractTiers(rawTiers), note, type);
-    const t = {date:d.disp, tiers:cat.tiers||rawTiers||'—', high:cat.high, sub:cat.sub, amount, account:importTargetAcct, note};
-    // Modèle : les contributions des copropriétaires sont des « Charges » ; la
-    // sous-catégorie indique le pot. Ancienne catégorie top-level « Fonds de
-    // réserve » → normalisée vers Charges › Fonds de réserve.
-    if (t.high==='Fonds de réserve'){ t.high='Charges'; t.sub='Fonds de réserve'; }
-    // Entrée (montant positif) : on attribue le copropriétaire, et une entrée dont on reconnaît
-    // le copropriétaire est une « Charge » (sa contribution). Une entrée sans copropriétaire
-    // reconnu reste « à catégoriser » : un remboursement de fournisseur, un versement d'assureur
-    // ou de notaire n'est pas une recette de charges. Forcée en « Charges », elle sortait du
-    // filtre « À catégoriser » et gonflait le compte de résultats sans que personne ne la voie.
-    if (amount>0){
-      const det=detectOwner(t); if(det) t.owner=det;
-      if (t.high==='?' && det){ t.high='Charges'; t.sub=''; }
-    }
-    // Sous-catégorie par défaut d'une Charge selon le compte :
-    //   paiement → « Compte de paiement » · réserve → « Fonds de réserve »
-    if (t.high==='Charges' && !t.sub){
-      t.sub = (importTargetAcct==='res') ? 'Fonds de réserve' : 'Compte de paiement';
-    }
+    const t = classifyImported({date:d.disp, rawTiers, note, type, amount, account:importTargetAcct});
     const sig = signature(t);
     const matches = existingBySig[sig] || [];
     const used = usedCount[sig] || 0;
@@ -1379,7 +1387,46 @@ function interpret(){
     t._force = false;  // doublon réimporté volontairement
     out.push(t);
   });
+  markBankDupes(out.filter(t=>!t._dupe));
   return out;
+}
+
+// Mots d'un libellé (sans accents ni mots de service), pour départager deux lignes de même montant.
+const DEDUP_STOP = new Set(['transfer','transfert','from','the','virement','vers','des','les','pour','par','sepa',
+  'credit','debit','paiement','payment','card','carte','instant','incoming','outgoing','recu','emis']);
+function dedupWords(s){
+  return new Set(String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .split(/[^a-z0-9]+/).filter(w=>w.length>=3 && !DEDUP_STOP.has(w)));
+}
+// Lignes du fichier déjà arrivées par la synchro bancaire. Elles y portent le libellé de la banque,
+// pas celui du fichier : la signature ne les reconnaît pas. Même compte, même montant au centime,
+// dates à 3 jours près ; chaque ligne synchronisée n'absorbe qu'une ligne du fichier, et les paires
+// dont les libellés partagent le plus de mots passent d'abord. Sans cela, quand Sam et Lou versent
+// le même montant le même jour, le versement de Lou pouvait « reconnaître » celui de Sam : Sam
+// compté deux fois, Lou oublié. Même règle que le pont (bridge/bank.js dedupe), dans l'autre sens.
+function markBankDupes(rows){
+  const pool = [...state.tx, ...(state.draftTx||[])]
+    .filter(t=>t.bankRef && t.account===importTargetAcct)
+    .map(t=>({t, c:Math.round(t.amount*100), at:Date.parse((parseDate(t.date)||{}).iso||''), w:dedupWords(t.tiers+' '+t.note)}))
+    .filter(p=>Number.isFinite(p.at));
+  if (!pool.length) return;
+  const pairs = [];
+  rows.forEach((t,i)=>{
+    const c = Math.round(t.amount*100), at = Date.parse((parseDate(t.date)||{}).iso||''), w = dedupWords(t.tiers+' '+t.note);
+    pool.forEach((p,j)=>{
+      if (p.c!==c) return;
+      const gap = Math.abs(p.at-at)/86400000;
+      if (gap<=3){ let score=0; for (const x of w) if (p.w.has(x)) score++; pairs.push({i, j, score, gap}); }
+    });
+  });
+  pairs.sort((a,b)=>b.score-a.score || a.gap-b.gap || a.i-b.i || a.j-b.j);
+  const takenI = new Set(), takenJ = new Set();
+  for (const p of pairs){
+    if (takenI.has(p.i) || takenJ.has(p.j)) continue;
+    takenI.add(p.i); takenJ.add(p.j);
+    const t = rows[p.i], hit = pool[p.j].t;
+    t._dupe = true; t._match = hit; t._matchBank = true; t._matchDraft = !state.tx.includes(hit);
+  }
 }
 
 let interpreted = null;
@@ -1484,7 +1531,7 @@ function renderPreviewRow(t,i){
     actions=`<button class="lk del" data-act="skip" data-i="${i}">supprimer</button>`;
   }
   const orig = isDupe && t._match
-    ? `<div class="pv-orig">↳ ${t._matchDraft?'déjà dans un relevé en attente de validation':'déjà en mémoire'} : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
+    ? `<div class="pv-orig">↳ ${t._matchBank?'déjà arrivée par la synchro bancaire':(t._matchDraft?'déjà dans un relevé en attente de validation':'déjà en mémoire')} : ${t._match.date} · ${t._match.tiers} · ${signed(t._match.amount)}</div>` : '';
   const ownerCell = (t.amount>0 && !t._skip && !isDupe)
     ? `<div class="cmt" style="font-style:normal;margin-top:3px"><span style="color:var(--ink-faint)">Versé par :</span> <select class="pv-owner" data-i="${i}">${ownerOptions(t.owner||'')}</select></div>` : '';
   return `<tr class="${cls}"><td>${t.date}</td><td><b>${t.tiers}</b>${ownerCell}${orig}</td>
@@ -1597,11 +1644,16 @@ async function commitImport(){
   // à importer = non supprimées ET (nouvelles OU doublons forcés)
   const toAdd = interpreted
     .filter(t=>!t._skip && (!t._dupe || t._force))
-    .map(t=>{ const {_dupe,_match,_matchDraft,_skip,_force, ...rest}=t; return rest; });
+    .map(t=>{ const {_dupe,_match,_matchDraft,_matchBank,_skip,_force, ...rest}=t; return rest; });
   if (!toAdd.length){ alert('Aucune transaction à importer.'); return; }
   // Le prochain numéro doit tenir compte des relevés déjà en attente, sinon deux brouillons
-  // partagent le même `import_v` et se valident (ou se jettent) l'un l'autre.
-  const nextV = Math.max(state.imports[0]?.v || 0, ...draftsOf().map(t=>t.importV||0)) + 1;
+  // partagent le même `import_v` et se valident (ou se jettent) l'un l'autre. En ligne, la base
+  // fait foi : la synchro bancaire a pu ouvrir un relevé depuis le chargement de la page.
+  let nextV = Math.max(state.imports[0]?.v || 0, ...draftsOf().map(t=>t.importV||0)) + 1;
+  if (writeToDb()){
+    try { nextV = Math.max(nextV, (await window.LS.db.maxImportV()) + 1); }
+    catch(e){ console.warn('numéro de relevé', e.message||e); }
+  }
   const acct = importTargetAcct;
 
   // Ce que le relevé annonce de lui-même. Mis de côté, PAS appliqué : le solde d'ouverture et la
@@ -1894,11 +1946,15 @@ function renderPendingImports(){
     const open = g.v===openDraftV;
     const accts = [...g.accounts].map(acctLabel).join(' + ');
     const net = sum(g.rows.map(t=>t.amount));
+    // Relevé ouvert par la synchro bancaire : il grossit à chaque synchro jusqu'à sa validation.
+    const rec = state.imports.find(im=>im.v===g.v);
+    const bankStmt = rec && rec.stmt && rec.stmt.source==='bank' ? rec.stmt : null;
     return `
     <div class="card" style="margin-bottom:14px;border-color:var(--clay);background:var(--clay-soft)">
       <div class="h-row" style="align-items:flex-start">
         <div>
-          <h2 style="margin:0">Relevé v${g.v} — à valider</h2>
+          <h2 style="margin:0">${bankStmt ? `${escH(rec.label)} · v${g.v} — à valider` : `Relevé v${g.v} — à valider`}</h2>
+          ${bankStmt && bankStmt.closing!=null ? `<div class="sub">Solde ${escH(bankStmt.aspsp||'de la banque')} au ${escH(bankStmt.asOf||'?')} : <b>${eur(bankStmt.closing)}</b> — rapproché du solde calculé à la validation.</div>` : ''}
           <div class="sub">${g.rows.length} mouvement(s) · ${accts} · net ${signed(net)}${
             g.uncat ? ` · <b style="color:var(--warning-ink)">${g.uncat} sans catégorie</b>` : ' · tout est catégorisé'}</div>
           <div class="sub" style="margin-top:4px">Ces lignes ne comptent dans aucun solde tant qu'elles ne sont pas validées.</div>
@@ -1968,6 +2024,298 @@ function renderImports(){
       ? `<div class="hist cur"><span class="v">v${im.v}</span><div><b>${im.label}</b><div class="meta">${im.meta}</div></div><span class="now">Version actuelle</span></div>`
       : `<div class="hist"><span class="v">v${im.v}</span><div><b>${im.label}</b><div class="meta">${im.meta}</div></div><button class="rb">↺ Revenir à cette version</button></div>`
   ).join('');
+}
+
+/* ============================================================
+   SYNCHRO BANCAIRE (Enable Banking) — carte de l'écran Import
+   Le navigateur ne détient aucun secret. Il dépose une demande dans ls_bank_links ; le pont
+   (VPS, bridge/banksync.js), seul à détenir la clé privée Enable Banking, en fait un lien
+   d'autorisation ; la banque renvoie sur banque.html avec un code, que l'app dépose à son
+   tour ; le pont ouvre la session puis synchronise toutes les quelques heures. Les mouvements
+   arrivent en relevé « à valider », exactement comme un fichier déposé, sans catégorie :
+   classifyBankDrafts les range ici, avec les mêmes règles qu'un import (classifyImported).
+   ============================================================ */
+const BANK_CB_KEY = 'ls:bankCallback';    // posé par banque.html, consommé une fois ici
+const BANK_COUNTRIES = [['FR','France'],['BE','Belgique'],['NL','Pays-Bas'],['DE','Allemagne'],['ES','Espagne'],['IT','Italie'],['LU','Luxembourg']];
+const BANK_LIVE = ['requested','auth_ready','code_received','active','revoke_requested'];
+const bank = { links:null, error:'', busy:'', timeout:false, timer:null };
+
+const bankAvailable = () => writeToDb() && canWrite();
+/** La connexion qui compte : celle en cours ou active, sinon la plus récente. */
+function bankCurrent(){
+  const L = bank.links || [];
+  return L.find(l=>BANK_LIVE.includes(l.status)) || L[0] || null;
+}
+/** Compte LazySyndic d'un compte bancaire : le choix du syndic, sinon l'IBAN reconnu par le pont. */
+function bankAcctOf(l, a){
+  const m = l.acct_map || {}, v = m[a.hash] ?? m[a.uid];
+  if (v==='skip') return null;
+  if (v==='pay' || v==='res') return v;
+  return a.acct==='pay' || a.acct==='res' ? a.acct : null;
+}
+async function bankLoad(){
+  try { bank.links = await window.LS.db.bankLinks(); bank.error = ''; }
+  catch(e){
+    bank.links = [];
+    bank.error = /ls_bank_links|schema cache|does not exist|relation/i.test(e.message||'') ? 'missing' : (e.message||String(e));
+  }
+}
+const bankStamp = () => new Date().toISOString();
+const bankDay = iso => iso ? new Date(iso).toLocaleDateString('fr-BE') : '—';
+function bankAgo(iso){
+  if (!iso) return 'jamais';
+  const m = Math.round((Date.now()-Date.parse(iso))/60000);
+  if (m < 1) return 'à l’instant';
+  if (m < 60) return `il y a ${m} min`;
+  if (m < 36*60) return `il y a ${Math.round(m/60)} h`;
+  return `le ${bankDay(iso)}`;
+}
+
+/** Les lignes synchronisées arrivent sans catégorie (high vide) : règles, alias et
+ *  copropriétaire, comme pour un relevé déposé. Persisté tout de suite. */
+async function classifyBankDrafts(){
+  if (!canWrite()) return 0;
+  const todo = (state.draftTx||[]).filter(t=>t.bankRef && (t.high==null || t.high===''));
+  for (const t of todo){
+    const c = classifyImported({date:t.date, rawTiers:t.tiers, note:t.note, type:'', amount:t.amount, account:t.account});
+    t.tiers = c.tiers; t.high = c.high; t.sub = c.sub||''; if (c.owner) t.owner = c.owner;
+  }
+  if (todo.length && writeToDb()){
+    for (let i=0; i<todo.length; i+=8){
+      await Promise.all(todo.slice(i, i+8).map(t=>window.LS.db.updateTransaction(t.id, {tiers:t.tiers, high:t.high, sub:t.sub, owner:t.owner||''})
+        .catch(e=>console.warn('classement synchro', e.message||e))));
+    }
+  }
+  return todo.length;
+}
+
+/** Après une connexion ou une synchro : les nouveaux brouillons sont en base, pas encore ici. */
+async function bankReloadData(){
+  try {
+    const fresh = await window.LS.db.loadAll();
+    fresh.draftTx = fresh.draftTx || [];
+    state = fresh;
+    if (state.owners && state.owners.length) OWNERS = state.owners;
+    backfillAppliedByOwner();
+  } catch(e){ console.error(e); showToast('Rechargement impossible : '+(e.message||e), 'err'); return; }
+  await classifyBankDrafts();
+  renderAll();
+}
+
+/** Attend que le pont ait fait sa part (la boîte aux lettres est relue toutes les 3 s). */
+function bankWait(id, done, timeoutMs, then){
+  clearInterval(bank.timer);
+  bank.timeout = false;
+  const t0 = Date.now();
+  bank.timer = setInterval(async ()=>{
+    await bankLoad();
+    const l = (bank.links||[]).find(x=>x.id===id);
+    const ok = !!(l && done(l));
+    if (ok || Date.now()-t0 > timeoutMs){
+      clearInterval(bank.timer); bank.timer = null; bank.busy = '';
+      if (!ok) bank.timeout = true;
+      renderBankCard();
+      if (ok && then) await then(l);
+      return;
+    }
+    renderBankCard();
+  }, 3000);
+}
+
+/** Retour de la banque (banque.html a mis la réponse de côté) : on dépose le code pour le pont. */
+async function bankConsumeCallback(){
+  let cb = null;
+  try { cb = JSON.parse(localStorage.getItem(BANK_CB_KEY)||'null'); localStorage.removeItem(BANK_CB_KEY); } catch(e){}
+  if (!cb || !cb.state || Date.now()-(cb.at||0) > 30*60000) return;
+  const l = (bank.links||[]).find(x=>x.state===cb.state);
+  if (!l){ showToast('Retour de la banque non reconnu : relancez la connexion.', 'err'); return; }
+  if (l.status!=='auth_ready') return;      // déjà traité (page rechargée)
+  try {
+    if (cb.error || !cb.code){
+      const why = String(cb.error_description || cb.error || 'autorisation interrompue').slice(0, 300);
+      await window.LS.db.bankLinkUpdate(l.id, {status:'error', error:`La banque a répondu : ${why}`, updated_at:bankStamp()});
+      await bankLoad();
+      return;
+    }
+    await window.LS.db.bankLinkUpdate(l.id, {status:'code_received', code:cb.code, updated_at:bankStamp()});
+  } catch(e){ showToast('Retour de la banque non enregistré : '+(e.message||e), 'err'); return; }
+  await bankLoad();
+  bank.busy = 'session';
+  bankWait(l.id, x=>x.status!=='code_received', 180000, async x=>{
+    if (x.status==='active'){ showToast(`${x.aspsp_name} connectée — première synchro faite`); await bankReloadData(); }
+  });
+}
+
+async function bankInit(){
+  if (!bankAvailable()){ renderBankCard(); return; }
+  if (await classifyBankDrafts()) renderAll();
+  await bankLoad();
+  await bankConsumeCallback();
+  renderBankCard();
+}
+
+function bankRandomState(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID() + '-' + crypto.randomUUID();
+  const b = new Uint8Array(24); crypto.getRandomValues(b);
+  return [...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+async function bankConnect(name, country, psu){
+  name = String(name||'').trim();
+  if (!name){ showToast('Nom de la banque requis.', 'err'); return; }
+  bank.busy = 'connect'; bank.timeout = false; renderBankCard();
+  try {
+    const row = {status:'requested', aspsp_name:name, aspsp_country:country, psu_type:psu,
+      redirect_url:new URL('banque.html', location.href.split('#')[0]).href, state:bankRandomState()};
+    const {id} = await window.LS.db.bankLinkAdd(row);
+    await bankLoad(); renderBankCard();
+    bankWait(id, l=>l.status!=='requested', 60000, l=>{
+      if (l.status==='auth_ready' && l.auth_url) location.href = l.auth_url;   // chez la banque, puis retour sur banque.html
+    });
+  } catch(e){ bank.busy = ''; showToast('Connexion impossible : '+(e.message||e), 'err'); renderBankCard(); }
+}
+
+async function bankSyncNow(l){
+  if (l.last_sync_at && Date.now()-Date.parse(l.last_sync_at) < 30*60000
+      && !confirm('Dernière synchro '+bankAgo(l.last_sync_at)+'. Sans vous, une banque n’accepte que 4 consultations par jour : synchroniser quand même ?')) return;
+  const asked = bankStamp();
+  bank.busy = 'sync'; bank.timeout = false; renderBankCard();
+  try { await window.LS.db.bankLinkUpdate(l.id, {sync_requested_at:asked}); }
+  catch(e){ bank.busy = ''; showToast('Demande non enregistrée : '+(e.message||e), 'err'); renderBankCard(); return; }
+  bankWait(l.id, x=>x.last_sync_at && Date.parse(x.last_sync_at) >= Date.parse(asked) - 1000, 180000, async x=>{
+    const n = Object.values((x.last_sync||{}).added||{}).reduce((a,b)=>a+b, 0);
+    if (x.last_sync && x.last_sync.error) showToast('Synchro en échec : '+x.last_sync.error, 'err');
+    else showToast(n ? `${n} nouveau(x) mouvement(s) — relevé à valider ci-dessus` : 'Synchro faite — rien de nouveau');
+    if (n) await bankReloadData();
+  });
+}
+
+async function bankSetStatus(l, patch, waitFor){
+  try { await window.LS.db.bankLinkUpdate(l.id, {...patch, updated_at:bankStamp()}); }
+  catch(e){ showToast('Non enregistré : '+(e.message||e), 'err'); return; }
+  await bankLoad(); renderBankCard();
+  if (waitFor){ bank.busy = 'revoke'; bankWait(l.id, waitFor, 60000); }
+}
+
+function renderBankCard(){
+  const box = document.getElementById('bankSync');
+  if (!box) return;
+  if (!bankAvailable()){ box.innerHTML = ''; return; }
+  const wrap = (badge, body) => `<div class="card" style="margin-bottom:16px">
+      <div class="h-row" style="align-items:flex-start;gap:12px">
+        <div><h2 style="margin:0">Synchronisation bancaire</h2>
+          <div class="sub">Les mouvements de la banque arrivent ici d’eux-mêmes, en relevé à valider. Via Enable Banking, en lecture seule.</div></div>
+        ${badge||''}
+      </div>${body}</div>`;
+  const badge = (txt, cls) => `<span class="badge ${cls||''}" style="${cls?'':'background:var(--muted);color:var(--ink-soft)'};white-space:nowrap">${txt}</span>`;
+  const btn = (id, label, kind) => `<button class="btn ${kind||'btn-ghost'}" id="${id}" type="button">${label}</button>`;
+  if (bank.links===null){ box.innerHTML = wrap('', '<div class="sub" style="margin-top:10px">Chargement…</div>'); return; }
+  if (bank.error==='missing'){
+    box.innerHTML = wrap(badge('À installer'), `<div class="alert"><span class="ic">⚠</span><div>La table <b>ls_bank_links</b> n’existe pas encore : relancez <b>supabase/migrations/000_baseline.sql</b> dans Supabase (SQL Editor), puis rechargez la page.</div></div>`);
+    return;
+  }
+  const l = bankCurrent();
+  const timeoutMsg = bank.timeout ? `<div class="alert"><span class="ic">⚠</span><div><b>Le pont de synchro ne répond pas.</b> Il tourne sur le VPS avec <code>EB_APP_ID</code> et <code>EB_KEY_PATH</code> dans <code>bridge/.env</code> (voir bridge/README.md) ; sans lui, rien n’avance.</div></div>` : '';
+  const prevName = (l && l.aspsp_name) || 'Swan', prevCountry = (l && l.aspsp_country) || 'FR', prevPsu = (l && l.psu_type) || 'business';
+  const form = (label) => `
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:12px">
+        <label style="flex:2 1 180px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Banque (nom chez Enable Banking)</div>
+          <input class="fld" id="bkName" value="${escH(prevName)}" style="width:100%;margin-top:4px" autocomplete="off"></label>
+        <label style="flex:1 1 120px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Pays</div>
+          <select class="fld" id="bkCountry" style="width:100%;margin-top:4px">${BANK_COUNTRIES.map(([c,n])=>`<option value="${c}" ${c===prevCountry?'selected':''}>${n}</option>`).join('')}</select></label>
+        <label style="flex:1 1 140px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Type de compte</div>
+          <select class="fld" id="bkPsu" style="width:100%;margin-top:4px"><option value="business" ${prevPsu==='business'?'selected':''}>Professionnel (ACP)</option><option value="personal" ${prevPsu==='personal'?'selected':''}>Particulier</option></select></label>
+        ${btn('bkConnect', bank.busy==='connect' ? 'Préparation…' : label, 'btn-primary')}
+      </div>
+      <div class="sub" style="margin-top:8px">La banque vous demande votre accord (soldes et mouvements, rien d’autre), puis vous ramène ici. L’accord dure jusqu’à 180 jours selon la banque ; LazySyndic vous prévient avant l’échéance.</div>`;
+  const wireForm = () => {
+    const b = box.querySelector('#bkConnect');
+    if (b) b.onclick = ()=>{ if (bank.busy) return; bankConnect(box.querySelector('#bkName').value, box.querySelector('#bkCountry').value, box.querySelector('#bkPsu').value); };
+  };
+
+  // Rien de connecté (ou plus rien) : le formulaire, et la raison si la dernière tentative a échoué.
+  if (!l || !BANK_LIVE.includes(l.status)){
+    const why = l && (l.status==='error' || l.status==='expired') && l.error
+      ? `<div class="alert"><span class="ic">⚠</span><div><b>${l.status==='expired'?'Connexion expirée':'Connexion non aboutie'}.</b> ${escH(l.error)}</div></div>` : '';
+    box.innerHTML = wrap(l && l.status==='expired' ? badge('Expirée','b-late') : badge('Non connectée'), why + timeoutMsg + form(l && l.status==='expired' ? 'Reconnecter la banque' : 'Connecter la banque'));
+    wireForm();
+    return;
+  }
+
+  if (l.status==='requested' || l.status==='auth_ready' || l.status==='code_received'){
+    const what = l.status==='requested' ? `Préparation du lien d’autorisation chez ${escH(l.aspsp_name)}…`
+      : l.status==='auth_ready' ? `Autorisation en attente chez <b>${escH(l.aspsp_name)}</b>.`
+      : `${escH(l.aspsp_name)} a donné son accord : ouverture de la session et première synchro…`;
+    box.innerHTML = wrap(badge(l.status==='code_received' ? 'Connexion…' : 'En attente'), `
+      <div class="sub" style="margin-top:12px;font-size:14px;color:var(--ink)">${what}</div>${timeoutMsg}
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        ${l.status==='auth_ready' && l.auth_url ? `<a class="btn btn-primary" href="${escH(l.auth_url)}">Ouvrir la page de la banque</a>` : ''}
+        ${l.status!=='code_received' || bank.timeout ? btn('bkCancel', 'Annuler') : ''}
+      </div>`);
+    const c = box.querySelector('#bkCancel');
+    if (c) c.onclick = ()=>{ clearInterval(bank.timer); bank.busy=''; bankSetStatus(l, {status:'error', error:'Connexion annulée.'}); };
+    // page rechargée pendant que le pont travaille : on reprend l'attente (une fois, pas en boucle)
+    if (!bank.timer && !bank.timeout && l.status!=='auth_ready') bankWait(l.id, x=>!['requested','code_received'].includes(x.status), 120000, x=>{ if (x.status==='active') bankReloadData(); });
+    return;
+  }
+
+  if (l.status==='revoke_requested'){
+    box.innerHTML = wrap(badge('Déconnexion…'), `<div class="sub" style="margin-top:12px">Fermeture de la session chez ${escH(l.aspsp_name)}…</div>${timeoutMsg}`);
+    if (!bank.timer && !bank.timeout) bankWait(l.id, x=>x.status!=='revoke_requested', 60000);
+    return;
+  }
+
+  // Active.
+  const daysLeft = l.valid_until ? Math.floor((Date.parse(l.valid_until)-Date.now())/86400000) : null;
+  const soon = daysLeft!=null && daysLeft < 14;
+  const accts = (l.accounts||[]).map(a=>{
+    const target = bankAcctOf(l, a), key = a.hash || a.uid;
+    const v = (l.acct_map||{})[key] ?? (target || '');
+    return `<tr>
+      <td><b>…${escH(String(a.iban||'').slice(-4) || '????')}</b> <span class="sub">${escH(a.name||a.product||'')}</span></td>
+      <td><select class="fld bk-acct" data-key="${escH(key)}" style="${target?'':'border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)'}">
+        ${target ? '' : '<option value="" selected>— choisir —</option>'}
+        <option value="pay" ${v==='pay'?'selected':''}>💳 Compte de paiement</option>
+        <option value="res" ${v==='res'?'selected':''}>🏦 Compte de réserve</option>
+        <option value="skip" ${v==='skip'?'selected':''}>Ignorer ce compte</option></select></td>
+      <td class="sub">${a.synced_to ? 'à jour au '+escH(bankDay(a.synced_to)) : (target ? 'première synchro à venir' : 'pas synchronisé')}</td>
+      <td class="num">${a.balance ? eur(a.balance.amount) : '—'}</td></tr>`;
+  }).join('');
+  const ls = l.last_sync || {};
+  const added = Object.values(ls.added||{}).reduce((x,y)=>x+y, 0);
+  const lastLine = l.last_sync_at
+    ? `Dernière synchro ${bankAgo(l.last_sync_at)} : ${ls.error ? '<b style="color:var(--danger)">en échec</b>' : (added ? `<b>${added}</b> nouveau(x) mouvement(s)` : 'rien de nouveau')}${(ls.known||ls.matched) ? ` · ${(ls.known||0)+(ls.matched||0)} déjà connu(s)` : ''}.`
+    : 'Première synchro en cours…';
+  const unmapped = (l.accounts||[]).some(a=>!bankAcctOf(l, a) && (l.acct_map||{})[a.hash||a.uid]!=='skip');
+  box.innerHTML = wrap(soon ? badge(daysLeft<0?'Expirée':`Expire dans ${Math.max(0,daysLeft)} j`,'b-late') : badge('Active','b-ok'), `
+    <div class="sub" style="margin-top:10px"><b>${escH(l.aspsp_name)}</b> (${escH(l.aspsp_country)}) · accord valable jusqu’au <b>${bankDay(l.valid_until)}</b> · synchro automatique toutes les quelques heures</div>
+    ${soon ? `<div class="alert" style="background:var(--warning-soft);border-color:var(--warning);color:var(--warning-ink)"><span class="ic">⏳</span><div><b>L’accord donné à la banque arrive à échéance${daysLeft>=0?` dans ${daysLeft} jour(s)`:''}.</b> Renouvelez-le, sinon plus aucun mouvement n’arrivera.</div></div>` : ''}
+    ${unmapped ? `<div class="alert" style="background:var(--warning-soft);border-color:var(--warning);color:var(--warning-ink)"><span class="ic">⚠</span><div>Un compte n’a pas été reconnu par son IBAN : choisissez où vont ses mouvements. Il n’est pas synchronisé d’ici là.</div></div>` : ''}
+    ${accts ? `<table style="margin-top:10px"><tr><th>Compte</th><th>Dans LazySyndic</th><th>Synchro</th><th class="num">Solde banque</th></tr>${accts}</table>` : '<div class="sub" style="margin-top:10px">Aucun compte dans cette session.</div>'}
+    <div class="sub" style="margin-top:10px">${bank.busy==='sync' ? 'Synchro demandée — le pont s’en charge (moins d’une minute)…' : lastLine}</div>
+    ${ls.error ? `<div class="alert"><span class="ic">⚠</span><div>${escH(ls.error)}</div></div>` : ''}
+    ${(ls.warnings||[]).map(w=>`<div class="sub" style="color:var(--warning-ink)">⚠ ${escH(w)}</div>`).join('')}
+    ${timeoutMsg}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+      ${btn('bkSync', bank.busy==='sync' ? 'Synchro…' : 'Synchroniser maintenant', soon ? 'btn-ghost' : 'btn-primary')}
+      ${btn('bkRenew', 'Renouveler l’accord', soon ? 'btn-primary' : 'btn-ghost')}
+      <button class="btn btn-ghost" id="bkRevoke" type="button" style="color:var(--coral)">Déconnecter</button>
+    </div>`);
+  box.querySelectorAll('.bk-acct').forEach(s=>s.onchange=async ()=>{
+    if (!s.value) return;
+    const map = {...(l.acct_map||{}), [s.dataset.key]: s.value};
+    l.acct_map = map;
+    try { await window.LS.db.bankLinkUpdate(l.id, {acct_map:map, updated_at:bankStamp()}); toastSaved(); }
+    catch(e){ toastError(e.message||e); }
+    renderBankCard();
+  });
+  box.querySelector('#bkSync').onclick = ()=>{ if (!bank.busy) bankSyncNow(l); };
+  box.querySelector('#bkRenew').onclick = ()=>{ if (!bank.busy) bankConnect(l.aspsp_name, l.aspsp_country, l.psu_type); };
+  box.querySelector('#bkRevoke').onclick = ()=>{
+    if (bank.busy) return;
+    if (!confirm(`Déconnecter ${l.aspsp_name} ? La synchro s’arrête ; les mouvements déjà arrivés restent.`)) return;
+    bankSetStatus(l, {status:'revoke_requested'}, x=>x.status!=='revoke_requested');
+  };
 }
 
 /* ============================================================
@@ -3866,6 +4214,7 @@ function renderAll(){
   renderAG();
   renderTimeline();
   renderPendingImports();
+  renderBankCard();
   renderImports();
   animateBars();
 }
@@ -3909,6 +4258,9 @@ async function bootData(preloaded){
   renderAll();
   // Après le rendu seulement : l'écran ciblé et ses filtres doivent exister pour être atteints.
   applyDeepLink();
+  // Synchro bancaire : range les lignes arrivées depuis la dernière visite, puis traite un
+  // éventuel retour de la banque (banque.html). Syndic en ligne seulement ; jamais en démo.
+  bankInit().catch(e=>console.error('synchro bancaire', e));
 }
 
 /* ----- MODE DÉMO ----- */

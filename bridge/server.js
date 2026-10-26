@@ -9,23 +9,15 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRest } from './supabase.js';
 import { buildAlerts, coproStatus } from './alerts.js';
 import { buildDashboard } from './dashboard.js';
+import { loadDotEnv, enableBankingConfig } from './env.js';
+import { createEnableBanking } from './enablebanking.js';
+import { createBankSync } from './banksync.js';
 
 // --- minimal .env loader (KEY=VALUE lines); systemd EnvironmentFile also works ---
-const __dir = path.dirname(fileURLToPath(import.meta.url));
-(function loadDotEnv() {
-  const p = path.join(__dir, '.env');
-  if (!fs.existsSync(p)) return;
-  for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-})();
+loadDotEnv();
 
 const {
   SUPABASE_URL,
@@ -105,6 +97,20 @@ const server = http.createServer(async (req, res) => {
 server.listen(Number(PORT), HOST, () => {
   console.log(`lazysyndic-jarvis-bridge listening on ${HOST}:${PORT} (documents window ${docWindow}d)`);
 });
+
+// --- Optional bank sync (Enable Banking) ---------------------------------------
+// Off unless EB_APP_ID + EB_KEY_PATH are set. Supabase is the mailbox between the app and
+// this loop (ls_bank_links) — no new public endpoint, the private key never leaves the VPS.
+let ebCfg = null;
+try { ebCfg = enableBankingConfig(); }
+catch (err) { console.error('bank sync disabled — private key unreadable:', err?.message || err); }
+if (ebCfg) {
+  const eb = createEnableBanking(ebCfg);
+  const bank = createBankSync({ rest, eb, syncHours: ebCfg.syncHours, redirectAllow: ebCfg.redirectAllow });
+  setInterval(() => { bank.tick().catch((e) => console.error('bank_tick_error', e?.message || e)); }, ebCfg.pollMs).unref();
+  bank.tick().catch((e) => console.error('bank_tick_error', e?.message || e));
+  console.log(`bank sync enabled (Enable Banking app ${ebCfg.appId.slice(0, 8)}…, every ${ebCfg.syncHours} h, mailbox polled every ${ebCfg.pollMs} ms)`);
+}
 
 // --- Optional push: poll and webhook new alerts to Jarvis ---------------------
 const pollMs = Number(POLL_MS) || 0;

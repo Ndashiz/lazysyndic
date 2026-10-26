@@ -24,9 +24,29 @@ export function createRest(url, serviceRoleKey) {
     return res.json();
   }
 
+  async function write(method, table, query, body) {
+    const res = await fetch(`${base}/rest/v1/${table}${query ? `?${query}` : ''}`, {
+      method,
+      headers: { ...headers, 'content-type': 'application/json', prefer: 'return=representation' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`supabase_${table}_${method.toLowerCase()}_http_${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
+    }
+    return res.json();
+  }
+  /** INSERT (une ligne ou un tableau) → les lignes créées. Utilisé par la synchro bancaire. */
+  const insert = (table, rows) => write('POST', table, '', rows);
+  /** UPDATE des lignes qui répondent au filtre PostgREST (ex. "id=eq.…") → les lignes modifiées. */
+  const update = (table, query, patch) => {
+    if (!query) throw new Error('supabase_update_without_filter');
+    return write('PATCH', table, query, patch);
+  };
+
   /** Fetch exactly the columns the alert builder needs, in parallel. */
   async function loadForAlerts() {
-    const [owners, transactions, settingsRows, reminders, timeline] = await Promise.all([
+    const [owners, transactions, settingsRows, reminders, timeline, bankLinks] = await Promise.all([
       select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at,draft&deleted_at=is.null'),
       // `charges` (budgets appliqués) est arrivée après `owner_rules` : sans la colonne, PostgREST
@@ -37,9 +57,12 @@ export function createRest(url, serviceRoleKey) {
       select('ls_reminders', 'select=id,tx,due,done'),
       // ls_timeline is optional (may not be migrated yet) — tolerate a 404-ish empty.
       select('ls_timeline', 'select=id,event_date,title,description,kind').catch(() => []),
+      // Synchro bancaire : optionnelle (table absente tant que le baseline n'est pas relancé).
+      select('ls_bank_links', 'select=id,status,aspsp_name,valid_until,error,last_sync_at,last_ok_at,created_at&order=created_at.desc&limit=10').catch(() => []),
     ]);
     const settings = settingsRows[0] || {};
     return {
+      bankLinks: bankLinks || [],
       owners: (owners || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
       transactions: transactions || [],
       reminders: reminders || [],
@@ -87,5 +110,5 @@ export function createRest(url, serviceRoleKey) {
     };
   }
 
-  return { select, loadForAlerts, loadCoproRows, loadForDashboard };
+  return { select, insert, update, loadForAlerts, loadCoproRows, loadForDashboard };
 }

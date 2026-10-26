@@ -1,7 +1,7 @@
 // Run: node --test  (from bridge/)  — no dependencies.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { norm, detectOwner, ownerLedger, ledgerYear, buildAlerts, coproStatus } from './alerts.js';
+import { norm, detectOwner, ownerLedger, ledgerYear, buildAlerts, coproStatus, bankAlerts } from './alerts.js';
 
 const owners = [
   { id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 900, due_res: 100 }, // due 1000
@@ -213,4 +213,30 @@ test('coproStatus: tolère une table vide ou une réponse inattendue', () => {
     assert.equal(s.unmapped, 0);
     assert.equal(s.lastImportAt, null);
   }
+});
+
+test('bankAlerts : renouveler avant échéance, échec qui dure, synchro arrêtée ; silence sinon', () => {
+  const now = new Date('2026-10-26T10:00:00Z');
+  const day = 86400000;
+  const iso = (ms) => new Date(now.getTime() + ms).toISOString();
+  // active et loin de l'échéance, synchro réussie : rien
+  assert.deepEqual(bankAlerts([{ id: 'a', status: 'active', aspsp_name: 'Swan', valid_until: iso(60 * day), last_ok_at: iso(-day), created_at: iso(-30 * day) }], now), []);
+  // échéance dans 10 jours
+  const renew = bankAlerts([{ id: 'a', status: 'active', aspsp_name: 'Swan', valid_until: iso(10 * day), created_at: iso(-170 * day) }], now);
+  assert.equal(renew.length, 1);
+  assert.equal(renew[0].id, 'bank-renew-a');
+  assert.equal(renew[0].kind, 'notice');
+  assert.equal(renew[0].dueDate, '2026-11-05');
+  assert.match(renew[0].title, /reconnecter Swan avant le 05\/11\/2026/);
+  // erreur passagère (dernière réussite il y a 10 h) : rien ; au-delà de 36 h : un avis
+  assert.deepEqual(bankAlerts([{ id: 'a', status: 'active', valid_until: iso(60 * day), error: 'HTTP 503', last_ok_at: iso(-10 * 3600000), created_at: iso(-30 * day) }], now), []);
+  const err = bankAlerts([{ id: 'a', status: 'active', valid_until: iso(60 * day), error: 'HTTP 503', last_ok_at: iso(-2 * day), created_at: iso(-30 * day) }], now);
+  assert.deepEqual(err.map((a) => a.id), ['bank-error-a']);
+  // expirée, rien d'actif ni en cours : la synchro est arrêtée
+  assert.deepEqual(bankAlerts([{ id: 'x', status: 'expired', aspsp_name: 'Swan' }], now).map((a) => a.id), ['bank-expired-x']);
+  // expirée mais une reconnexion est en cours, ou déconnectée volontairement : rien
+  assert.deepEqual(bankAlerts([{ id: 'n', status: 'auth_ready' }, { id: 'x', status: 'expired' }], now), []);
+  assert.deepEqual(bankAlerts([{ id: 'r', status: 'revoked' }], now), []);
+  // branchée dans buildAlerts
+  assert.ok(buildAlerts({ owners: [], transactions: [], bankLinks: [{ id: 'x', status: 'expired' }] }, { now }).some((a) => a.id === 'bank-expired-x'));
 });

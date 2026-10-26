@@ -35,6 +35,8 @@
 --    §9  ls_invites + trigger             ← auto-provision.sql
 --    §10 RLS (lecture = membres, écriture = syndic) ← schema.sql §6 + ag.sql §1
 --    §11 bucket privé ls-docs + policies  ← ag.sql §3
+--    §12 ls_bank_links (+ ls_transactions.bank_ref) ← NOUVEAU : synchro bancaire Enable Banking
+--                                           (bridge/banksync.js, banque.html) ; syndic seul
 --
 --  Jamais de nom ni d'e-mail réel ici : le dépôt est public. Les exemples
 --  (Alex Martin, Sam Bernard, Lou Petit, EMAIL_ADMIN…) sont fictifs.
@@ -129,7 +131,8 @@ create table if not exists public.ls_transactions (
   owner      text,                         -- copropriétaire attribué à la main (short)
   deleted_at timestamptz,                  -- corbeille (7 jours)
   draft      boolean default false,        -- brouillon d'import, hors grand livre
-  import_v   int                           -- rattache la ligne à son relevé (ls_imports.v)
+  import_v   int,                          -- rattache la ligne à son relevé (ls_imports.v)
+  bank_ref   text                          -- référence de la banque (synchro Enable Banking, §12)
 );
 create index if not exists ls_transactions_date_idx    on public.ls_transactions(tx_date);
 create index if not exists ls_transactions_account_idx on public.ls_transactions(account);
@@ -145,6 +148,11 @@ alter table public.ls_transactions add column if not exists deleted_at timestamp
 alter table public.ls_transactions add column if not exists draft    boolean default false;
 alter table public.ls_transactions add column if not exists import_v int;
 create index if not exists ls_transactions_draft_idx on public.ls_transactions(draft) where draft;
+-- Synchro bancaire (§12) : la référence que la banque donne au mouvement. Une même référence ne
+-- peut entrer deux fois sur un compte, même si deux synchros se croisent.
+alter table public.ls_transactions add column if not exists bank_ref text;
+create unique index if not exists ls_transactions_bank_ref_uq
+  on public.ls_transactions(account, bank_ref) where bank_ref is not null;
 
 -- ============================================================
 --  4. RÈGLES, ALIAS, CONTRATS, RAPPELS
@@ -507,6 +515,53 @@ create policy ls_docs_update on storage.objects for update to authenticated
   with check (bucket_id = 'ls-docs' and (select public.ls_is_admin()));
 create policy ls_docs_delete on storage.objects for delete to authenticated
   using (bucket_id = 'ls-docs' and (select public.ls_is_admin()));
+
+-- ============================================================
+--  12. SYNCHRO BANCAIRE (Enable Banking) — boîte aux lettres app ↔ pont
+--  L'app (syndic) y dépose une demande de connexion, puis le code que la banque
+--  renvoie sur banque.html ; le pont (VPS : service_role + clé privée Enable
+--  Banking) y écrit le lien d'autorisation, la session et l'état de la synchro
+--  (bridge/banksync.js). Les mouvements, eux, arrivent dans ls_transactions en
+--  brouillon, à valider comme un relevé déposé.
+--  Réservée au syndic : un copropriétaire en lecture seule ne la voit pas.
+--  Aucun secret ici : sans la clé privée du VPS, un code ou un session_id ne
+--  permet de rien lire.
+-- ============================================================
+create table if not exists public.ls_bank_links (
+  id                uuid primary key default gen_random_uuid(),
+  status            text not null default 'requested',
+  aspsp_name        text not null,                       -- la banque, nom exact chez Enable Banking (ex. Swan)
+  aspsp_country     text not null,                       -- son pays (FR, BE…)
+  psu_type          text not null default 'business',    -- compte professionnel ou particulier
+  redirect_url      text not null,                       -- …/banque.html, déclarée dans l'application Enable Banking
+  state             text not null,                       -- jeton aléatoire, renvoyé tel quel par la banque
+  auth_url          text,                                -- lien d'autorisation de la banque (pont)
+  code              text,                                -- code renvoyé par la banque (app), effacé à l'échange
+  session_id        text,                                -- session Enable Banking (pont)
+  valid_until       timestamptz,                         -- fin du consentement donné à la banque
+  accounts          jsonb not null default '[]'::jsonb,  -- comptes de la session (pont) : uid, empreinte, IBAN, compte, synchro, solde
+  acct_map          jsonb not null default '{}'::jsonb,  -- choix du syndic : empreinte du compte → pay | res | skip (app)
+  seen              jsonb not null default '{}'::jsonb,  -- références vues sur 60 jours : un relevé écarté ne revient pas
+  sync_requested_at timestamptz,                         -- « Synchroniser maintenant » (app)
+  last_sync_at      timestamptz,                         -- dernière tentative (pont)
+  last_ok_at        timestamptz,                         -- dernière synchro réussie (pont)
+  last_sync         jsonb,                               -- bilan de la dernière synchro : ajoutés, connus, alertes, erreur
+  error             text,
+  created_by        uuid references auth.users(id) default auth.uid(),
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+alter table public.ls_bank_links drop constraint if exists ls_bank_links_status_check;
+alter table public.ls_bank_links add constraint ls_bank_links_status_check check (status in
+  ('requested','auth_ready','code_received','active','expired','error','revoke_requested','revoked','replaced'));
+alter table public.ls_bank_links drop constraint if exists ls_bank_links_psu_type_check;
+alter table public.ls_bank_links add constraint ls_bank_links_psu_type_check check (psu_type in ('business','personal'));
+create unique index if not exists ls_bank_links_state_uq on public.ls_bank_links(state);
+create index if not exists ls_bank_links_status_idx on public.ls_bank_links(status);
+alter table public.ls_bank_links enable row level security;
+drop policy if exists ls_bank_links_admin on public.ls_bank_links;
+create policy ls_bank_links_admin on public.ls_bank_links for all
+  using ((select public.ls_is_admin())) with check ((select public.ls_is_admin()));
 
 -- ============================================================
 --  Terminé. Vérification : coller ../check.sql dans le SQL Editor — aucune ligne
