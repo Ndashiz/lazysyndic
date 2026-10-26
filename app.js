@@ -184,6 +184,7 @@ function freshState(){
     // Relevés importés mais pas encore vérifiés. Volontairement hors de `tx` : tant qu'une ligne
     // est là, elle ne pèse sur aucun solde, aucune réconciliation, aucun appel de fonds.
     draftTx: [],
+    periods: [],   // exercices comptables (supabase/periods.sql) : clôturés = verrouillés
     rules: SEED_RULES.map(r => [...r]),
     aliases: SEED_ALIASES.map(a => [...a]),
     contracts: SEED_CONTRACTS.map(c => ({...c})),
@@ -244,6 +245,22 @@ const sum = arr => arr.reduce((a,b)=>a+b, 0);
 function balance(acct){
   return (state.opening[acct]||0) + sum(txOf(acct).map(t=>t.amount));
 }
+// Solde d'un compte à une date (ISO incluse) : ouverture + mouvements datés jusque-là.
+function balanceAt(acct, toIso){
+  return (state.opening[acct]||0) + sum(txOf(acct).filter(t=>{ const d=parseDate(t.date); return d && d.iso<=toIso; }).map(t=>t.amount));
+}
+/* ---------- Exercices comptables (supabase/periods.sql) ----------
+   Un exercice clôturé fige ses soldes d'ouverture et de clôture, archive le rapport financier
+   tel qu'approuvé, et verrouille ses mouvements : la base (trigger ls_transactions_closed_period)
+   refuse montant, date, compte, catégorie, tiers, attribution, suppression et validation d'un
+   brouillon ; seuls le drapeau et le commentaire restent libres. L'interface masque les gestes,
+   la base les refuse. */
+const periodsOf = () => (state.periods||[]);
+const closedPeriods = () => periodsOf().filter(p=>p.closed_at);
+function closedYearOf(iso){ const p=closedPeriods().find(x=>iso && iso>=x.starts && iso<=x.ends); return p ? +p.year : null; }
+function txLocked(t){ const d=parseDate(t.date); return closedYearOf(d?d.iso:'')!=null; }
+const lockMsg = t => { const d=parseDate(t.date); return `Exercice ${closedYearOf(d?d.iso:'')} clôturé : ce mouvement ne peut plus changer (drapeau et commentaire exceptés).`; };
+const periodsHint = m => /ls_periods|schema cache|relation/i.test(m) ? m+' — lancez supabase/periods.sql dans Supabase (SQL Editor).' : m;
 function receivables(){ // à recevoir = somme des soldes débiteurs des copropriétaires
   return sum(ownerLedger().filter(o=>o.solde<0).map(o=>-o.solde));
 }
@@ -381,6 +398,7 @@ function catPickOptions(high, sub){
 // apprise, puis les vues qui lisent la catégorie. false = annulé ou inchangé.
 function setTxCategory(t, value){
   if(!canWrite()||!t) return false;
+  if(txLocked(t)){ showToast(lockMsg(t), 'err'); return false; }
   let high, sub='';
   if(value==='__new__'){ high=addCategory(prompt('Nouvelle catégorie :','')||''); if(!high) return false; }
   else if(value==='__newsub__'){ high=t.high; sub=addSubcat(high, prompt('Nouvelle sous-catégorie pour « '+high+' » :','')||''); if(!sub) return false; }
@@ -661,7 +679,9 @@ function ensureTxCss(){
     .cat-pick{border:0;font-family:inherit;cursor:pointer;line-height:inherit;min-height:28px}
     .cat-pick .caret{margin-left:4px;font-size:9px;opacity:.45}
     .cat-pick:hover{box-shadow:inset 0 0 0 1.5px currentColor}
-    .cat-pick:hover .caret{opacity:1}`;
+    .cat-pick:hover .caret{opacity:1}
+    .tx-lock{display:inline-grid;place-items:center;width:18px;height:18px;color:var(--ink-faint)}
+    .tx-row.locked .cat{opacity:.9}`;
   document.head.appendChild(s);
 }
 // Bannière « sorties > 10 € à justifier » (compte de réserve — dépenses exceptionnelles).
@@ -696,7 +716,8 @@ function renderTx(acct){
     if (ownerFilter && ownerOfTx(t)!==ownerFilter) return;
     const editing = txEditing.has(t.id);
     const reqMiss = commentMissing(t);
-    const tr=document.createElement('tr'); tr.className='tx-row'+(isFlagged(t)?' flag':'')+(reqMiss?' req':'')+(editing?' editing':'');
+    const locked = txLocked(t);   // exercice clôturé : annotations seulement
+    const tr=document.createElement('tr'); tr.className='tx-row'+(isFlagged(t)?' flag':'')+(reqMiss?' req':'')+(editing?' editing':'')+(locked?' locked':'');
     const catLabel = (t.high==='?'?'À catégoriser':t.high) + (t.sub?(' · '+t.sub):'');
     const amtClass = t.amount>=0 ? 'pos' : 'neg';
     const note = t.note||'';
@@ -707,13 +728,13 @@ function renderTx(acct){
     const picking = catPicking===t && !editing;
     const catCell = (editing || picking)
       ? `<select class="fld tx-catpick${picking?' quick':''}" style="font-size:12px;padding:4px 6px;max-width:240px">${catPickOptions(t.high, t.sub)}</select>`
-      : canWrite()
+      : canWrite() && !locked
         ? `<button class="cat cat-pick ${catClass(t.high)}" title="Changer la catégorie">${catLabel}<span class="caret">▾</span></button>`
         : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
     // colonne notes + marqueur commentaire + actions
     let lastCell;
     if (editing){
-      const ownerEdit = t.amount>0
+      const ownerEdit = t.amount>0 && !locked
         ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner">${ownerOptions(ownerOfTx(t))}</select></div>`
         : '';
       lastCell = `${note?`<div class="sub" style="margin-bottom:4px">${note}</div>`:''}${ownerEdit}
@@ -728,10 +749,11 @@ function renderTx(acct){
             ? `<button class="lk tx-edit" style="margin-top:4px;color:var(--coral);font-weight:700">⚠ Commentaire obligatoire — justifier</button>`
             : `<div class="cmt-req-lbl" style="margin-top:4px">⚠ Commentaire obligatoire (sortie &gt; ${FDR_RULE.minOut} €)</div>`)
         : (canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:'');
-      const splitAction = canWrite() ? ` · <button class="lk tx-split" style="margin-top:4px;color:var(--ink-faint)">✂ splitter</button>` : '';
+      const splitAction = canWrite() && !locked ? ` · <button class="lk tx-split" style="margin-top:4px;color:var(--ink-faint)">✂ splitter</button>` : '';
       lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${editAction}${splitAction}`;
     }
-    tr.innerHTML = `<td class="tx-selcell">${canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
+    const lockMark = `<span class="tx-lock" title="Exercice ${closedYearOf((parseDate(t.date)||{}).iso)} clôturé"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>`;
+    tr.innerHTML = `<td class="tx-selcell">${locked ? lockMark : canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
       <td><button class="flagbtn" title="Marquer « à revoir »">⚑</button></td>
       <td>${t.date}</td>
       <td><b>${t.tiers}</b></td>
@@ -823,6 +845,8 @@ function updateTxToolsCount(){
 function removeTxLocal(ids){ const set=new Set(ids); state.tx=state.tx.filter(t=>!set.has(t.id)); }
 // ----- Corbeille (rétention 7 jours) -----
 function trashTx(ids){
+  const locked=state.tx.filter(t=>ids.includes(t.id) && txLocked(t));
+  if(locked.length){ showToast(lockMsg(locked[0]), 'err'); ids=ids.filter(id=>!locked.some(t=>t.id===id)); if(!ids.length) return; }
   const set=new Set(ids), now=new Date().toISOString();
   const moved=state.tx.filter(t=>set.has(t.id)).map(t=>({...t, deleted_at:now}));
   state.tx=state.tx.filter(t=>!set.has(t.id));
@@ -881,6 +905,7 @@ function deleteAllTx(acct){ resetAccount(acct); }
 // (l'IBAN est conservé). Solde calculé revient à 0,00 €.
 function resetAccount(acct){
   if(!canWrite()){ alert('Lecture seule.'); return; }
+  if(txOf(acct).some(txLocked)){ showToast('Ce compte a des mouvements dans un exercice clôturé : rouvrez l’exercice (Comptabilité › Exercices) avant de réinitialiser.', 'err'); return; }
   const lbl = acct==='res'?'compte de réserve':'compte de paiement';
   const ids = txOf(acct).map(t=>t.id);
   if(!confirm(`Réinitialiser le ${lbl} ?\n\n${ids.length} transaction(s) → corbeille (récupérables 7 jours), solde d'ouverture remis à 0, réconciliation effacée.`)) return;
@@ -1696,6 +1721,8 @@ async function confirmDraftImport(v){
   if(!canWrite()){ alert('Lecture seule : seul le syndic peut valider un relevé.'); return; }
   const rows = draftsOf(v);
   if(!rows.length) return;
+  const lockedRow = rows.find(txLocked);
+  if(lockedRow){ showToast(`Ce relevé contient des mouvements d'un exercice clôturé (${lockedRow.date}) : rouvrez l'exercice avant de le valider, ou écartez-le.`, 'err'); return; }
   const uncat = rows.filter(t=>!t.high || t.high==='?').length;
   if (uncat && !confirm(`${uncat} ligne(s) n'ont pas de catégorie. Valider quand même ? Elles resteront « à trier ».`)) return;
 
@@ -4388,6 +4415,15 @@ function fillReportPeriod(){
     modal.scrollTop = 0;
   }
   window.LazySyndic.openReport = openReport; // debug
+  // Clôture d'exercice : construire le rapport financier d'une année (archivé à la clôture) et
+  // réafficher un rapport archivé tel quel.
+  window.LSReports = { build:buildReport, periodForYear,
+    show(title, body, docTitle){
+      document.getElementById('reportSheet').innerHTML = body;
+      document.getElementById('rtTitle').textContent = title;
+      document.title = docTitle || `LazySyndic — ${title}`;
+      modal.classList.add('open'); document.body.classList.add('report-open'); modal.scrollTop = 0;
+    } };
 
   /* ---- câblage des boutons ---- */
   document.getElementById('repPay')?.addEventListener('click', ()=>openReport('pay'));
@@ -4857,7 +4893,8 @@ function showTxDetail(t){
     ${line('Compte', t.account==='res'?'Compte de réserve':'Compte de paiement')}
     ${line('Tiers', t.tiers)}
     ${line('Montant', `<span class="${t.amount<0?'neg':'pos'}">${signed(t.amount)}</span>`)}
-    ${line('Catégorie', canWrite()
+    ${txLocked(t) ? line('Exercice', `${closedYearOf((parseDate(t.date)||{}).iso)} · clôturé`) : ''}
+    ${line('Catégorie', canWrite() && !txLocked(t)
       ? `<select class="fld txd-cat" style="font-size:12.5px;padding:5px 8px;max-width:250px">${catPickOptions(t.high, t.sub)}</select>`
       : `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}${t.sub?(' · '+t.sub):''}</span>`)}
     ${t.amount>0 ? line('Versé par', ow?ow.n:(owner||'—')) : ''}
@@ -4979,6 +5016,7 @@ function cfBuild(){
 function renderComptabilite(){
   const box=document.getElementById('cfMatrix'); if(!box) return;
   ensureCfCss();
+  renderPeriods();
   const months=cfMonths();
   if(!months.length){ box.innerHTML='<div class="sub" style="padding:20px">Aucune transaction à afficher.</div>';
     const sm=document.getElementById('cfSummary'); if(sm) sm.innerHTML='';
@@ -5017,6 +5055,86 @@ function renderComptabilite(){
     card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]),'',cfSparkline(mkeys.map(k=>D.treso[k])));
   renderCfFlow(D);
   renderExpensePies();
+}
+/* ---------- Exercices : carte « Exercices » de l'écran Comptabilité ---------- */
+function periodYears(){
+  const ys=new Set(periodsOf().map(p=>+p.year));
+  state.tx.forEach(t=>{ const d=parseDate(t.date); if(d) ys.add(d.y); });
+  ys.add(new Date().getFullYear());
+  return [...ys].filter(y=>y>=2000 && y<=2100).sort((a,b)=>a-b);
+}
+// Un exercice se clôture quand l'année est finie, l'exercice précédent clôturé, chaque compte
+// rapproché sur un relevé qui couvre le 31/12, et plus aucun brouillon daté dans l'année.
+function periodReady(y){
+  const end=`${y}-12-31`, reasons=[], lbl=a=>a==='res'?'réserve':'paiement';
+  if (end>=todayISO()) reasons.push(`l'année ${y} n'est pas terminée`);
+  const prev=periodsOf().find(p=>+p.year===y-1);
+  if (periodYears()[0]<y && !(prev&&prev.closed_at)) reasons.push(`l'exercice ${y-1} n'est pas clôturé`);
+  ['pay','res'].forEach(a=>{
+    if(!txOf(a).some(t=>{ const d=parseDate(t.date); return d && d.iso<=end; })) return;
+    const r=(state.recon||{})[a];
+    if(!r || r.closing==null){ reasons.push(`aucun relevé rapproché sur le compte de ${lbl(a)}`); return; }
+    const asOf=(parseDate(r.asOf)||{}).iso||'';
+    if(!asOf || asOf<end) reasons.push(`le dernier relevé du compte de ${lbl(a)} s'arrête ${asOf?'au '+r.asOf:'avant le 31/12'} : il en faut un qui couvre le 31/12/${y}`);
+    const st=reconStatus(a); if(st && !st.ok) reasons.push(`écart de ${eur(Math.abs(st.diff))} sur le compte de ${lbl(a)}`);
+  });
+  if((state.draftTx||[]).some(t=>{ const d=parseDate(t.date); return d && d.iso<=end; })) reasons.push('des lignes importées de cet exercice attendent encore leur validation');
+  return {ok:!reasons.length, reasons};
+}
+async function closePeriod(y){
+  if(!canWrite()) return;
+  const ready=periodReady(y); if(!ready.ok){ showToast(`Clôture ${y} impossible : ${ready.reasons.join(' ; ')}.`, 'err'); return; }
+  const r2=v=>Math.round((+v||0)*100)/100, end=`${y}-12-31`, prevEnd=`${y-1}-12-31`;
+  const ag=(state.ags||[]).find(a=>a.status==='finalisee' && (parseFrDate(a.ag_date)||new Date(0)).getFullYear()===y+1);
+  let html=''; try { if(window.LSReports) html=LSReports.build('ag', LSReports.periodForYear(y)).body||''; } catch(e){ console.error(e); }
+  const row={year:y, starts:`${y}-01-01`, ends:end, closed_at:new Date().toISOString(),
+    opening_pay:r2(balanceAt('pay',prevEnd)), opening_res:r2(balanceAt('res',prevEnd)),
+    closing_pay:r2(balanceAt('pay',end)), closing_res:r2(balanceAt('res',end)),
+    approved_ag_id:ag?ag.id:null, report_html:html};
+  if(!confirm(`Clôturer l'exercice ${y} ?\n\nSoldes au 31/12/${y} : paiement ${eur(row.closing_pay)}, réserve ${eur(row.closing_res)}.\nLes mouvements de ${y} ne pourront plus être modifiés ni supprimés (drapeau et commentaire exceptés) ; le rapport financier ${y} est archivé tel quel.`)) return;
+  state.periods=[...periodsOf().filter(p=>+p.year!==y), row].sort((a,b)=>(+a.year)-(+b.year));
+  saveState();
+  dbWrite(async db=>{ try { await db.periodUpsert(row); } catch(e){ throw new Error(periodsHint(e.message||String(e))); } });
+  logTimeline({title:`Exercice ${y} clôturé`, kind:'manual',
+    description:`Soldes au 31/12/${y} : paiement ${eur(row.closing_pay)}, réserve ${eur(row.closing_res)}. Rapport financier archivé${ag?` ; comptes approuvés par l'AG « ${ag.title||''} »`:''}.`});
+  showToast(`Exercice ${y} clôturé : ses mouvements sont verrouillés.`);
+  renderAll();
+}
+function reopenPeriod(y){
+  if(!canWrite()) return;
+  if(!confirm(`Rouvrir l'exercice ${y} ?\n\nSes mouvements redeviennent modifiables ; ses soldes figés ne font plus foi jusqu'à la prochaine clôture.`)) return;
+  state.periods=periodsOf().map(p=>+p.year===y ? {...p, closed_at:null, closed_by:null} : p);
+  saveState();
+  dbWrite(async db=>{ try { await db.periodUpdate(y, {closed_at:null, closed_by:null}); } catch(e){ throw new Error(periodsHint(e.message||String(e))); } });
+  logTimeline({title:`Exercice ${y} rouvert`, kind:'manual', description:'Ses mouvements sont à nouveau modifiables ; à re-clôturer après correction.'});
+  renderAll();
+}
+function renderPeriods(){
+  const card=document.getElementById('periodsCard'); if(!card) return;
+  const ed=canWrite(), ys=periodYears();
+  const rows=ys.map(y=>{
+    const p=periodsOf().find(x=>+x.year===y), closed=!!(p&&p.closed_at), end=`${y}-12-31`, prevEnd=`${y-1}-12-31`;
+    const op=closed?p.opening_pay:balanceAt('pay',prevEnd), orr=closed?p.opening_res:balanceAt('res',prevEnd);
+    const cp=closed?p.closing_pay:balanceAt('pay',end), cr=closed?p.closing_res:balanceAt('res',end);
+    const ready=closed?null:periodReady(y);
+    const status=closed
+      ? `<span class="badge b-ok">Clôturé</span><div class="sub">le ${fmtDateLong(String(p.closed_at).slice(0,10))}</div>`
+      : ready.ok ? `<span class="badge" style="background:var(--secondary);color:var(--primary)">Prêt à clôturer</span>`
+      : `<span class="badge" style="background:var(--clay-soft);color:var(--warning-ink)">Ouvert</span>`;
+    const why=!closed && !ready.ok ? `<div class="sub" style="white-space:normal;margin-top:4px;max-width:360px">${ready.reasons.map(escH).join(' · ')}</div>` : '';
+    const act=closed
+      ? `<button class="btn btn-ghost per-report" data-y="${y}" ${p.report_html?'':'disabled'}>Rapport archivé</button>${ed?` <button class="lk per-reopen" data-y="${y}">Rouvrir</button>`:''}`
+      : (ed && ready.ok ? `<button class="btn btn-primary per-close" data-y="${y}">Clôturer ${y}</button>` : '');
+    return `<tr><td><b>${y}</b>${why}</td><td>${status}</td>
+      <td class="num">${eur(op||0)}<div class="sub">réserve ${eur(orr||0)}</div></td>
+      <td class="num">${eur(cp||0)}<div class="sub">réserve ${eur(cr||0)}</div></td><td style="white-space:nowrap">${act}</td></tr>`;
+  }).join('');
+  card.innerHTML=`<div class="h-row"><div><h2>Exercices</h2><div class="sub">Un exercice clôturé fige ses soldes et son rapport financier ; ses mouvements ne changent plus (drapeau et commentaire exceptés), la base le garantit. Il se clôture quand l'année est finie, l'exercice précédent clôturé, les deux comptes rapprochés sur un relevé qui couvre le 31/12, et sans brouillon en attente.</div></div></div>
+    <div style="overflow-x:auto"><table><tr><th>Exercice</th><th>Statut</th><th class="num">Ouverture · paiement</th><th class="num">Clôture · paiement</th><th></th></tr>${rows}</table></div>`;
+  card.querySelectorAll('.per-close').forEach(b=>b.onclick=()=>closePeriod(+b.dataset.y));
+  card.querySelectorAll('.per-reopen').forEach(b=>b.onclick=()=>reopenPeriod(+b.dataset.y));
+  card.querySelectorAll('.per-report').forEach(b=>b.onclick=()=>{ const p=periodsOf().find(x=>+x.year===+b.dataset.y);
+    if(p && p.report_html && window.LSReports) LSReports.show(`Rapport financier ${p.year} · archivé à la clôture`, p.report_html, `LazySyndic – rapport ${p.year} archivé`); });
 }
 function exportComptabilite(){
   const months=cfMonths(); if(!months.length){ alert('Rien à exporter.'); return; }
@@ -5269,6 +5387,7 @@ function ensureSplitCss(){
 // Remplace la transaction d'origine par N transactions catégorisées (somme = montant d'origine).
 function splitTransaction(orig, parts){
   if(!canWrite()) return;
+  if(txLocked(orig)){ showToast(lockMsg(orig), 'err'); return; }
   const sign = orig.amount<0 ? -1 : 1;
   const stamp = todayISO();
   const children = parts.map((p,i)=>({

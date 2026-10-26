@@ -6,22 +6,22 @@
 --  Sur une base complète, le résultat doit contenir :
 --    • AUCUNE ligne « TABLE MANQUANTE », « COLONNE MANQUANTE », « BUCKET MANQUANT »,
 --      « FONCTION MANQUANTE », « TRIGGER MANQUANT » ni « RLS DÉSACTIVÉE » ;
---    • section « colonne » : les 14 tables ls_* et leurs colonnes (la liste attendue
+--    • section « colonne » : les 15 tables ls_* et leurs colonnes (la liste attendue
 --      ci-dessous = la définition de 000_baseline.sql, vérifiée par tests/schema.test.mjs) ;
---    • section « policy » : ls_<table>_read + ls_<table>_write pour les 12 tables de données
+--    • section « policy » : ls_<table>_read + ls_<table>_write pour les 13 tables de données
 --      (ls_owners, ls_lots, ls_transactions, ls_rules, ls_aliases, ls_contracts, ls_reminders,
---      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points), ls_members_read seule
+--      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points, ls_periods), ls_members_read seule
 --      (jamais d'écriture côté client), ls_invites_admin, et sur storage.objects :
 --      ls_docs_read / ls_docs_insert / ls_docs_update / ls_docs_delete ;
 --    • section « bucket » : ls-docs, privé, 20971520 o, application/pdf ;
 --    • section « fonction » : ls_is_admin, ls_is_member (boolean), ls_provision_member (trigger) ;
---    • section « trigger » : ls_on_auth_user_created, actif.
+--    • section « trigger » : ls_on_auth_user_created et ls_transactions_closed_period, actifs.
 --  Rien d'autre n'est listé : le projet est partagé, seul le préfixe ls_ nous regarde.
 -- ============================================================
 with attendu_tables(t) as (values
   ('ls_members'), ('ls_owners'), ('ls_lots'), ('ls_transactions'), ('ls_rules'), ('ls_aliases'),
   ('ls_contracts'), ('ls_reminders'), ('ls_settings'), ('ls_imports'), ('ls_timeline'),
-  ('ls_ag'), ('ls_ag_points'), ('ls_invites')
+  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites')
 ),
 attendu_colonnes(t, c) as (values
   ('ls_members','id'), ('ls_members','email'), ('ls_members','full_name'), ('ls_members','owner_short'),
@@ -57,6 +57,9 @@ attendu_colonnes(t, c) as (values
   ('ls_ag_points','id'), ('ls_ag_points','ag_id'), ('ls_ag_points','pos'), ('ls_ag_points','title'),
   ('ls_ag_points','body'), ('ls_ag_points','kind'), ('ls_ag_points','majorite'), ('ls_ag_points','cle'),
   ('ls_ag_points','votes'), ('ls_ag_points','seance_notes'), ('ls_ag_points','decision'), ('ls_ag_points','created_at'),
+  ('ls_periods','year'), ('ls_periods','starts'), ('ls_periods','ends'), ('ls_periods','closed_at'), ('ls_periods','closed_by'),
+  ('ls_periods','opening_pay'), ('ls_periods','opening_res'), ('ls_periods','closing_pay'), ('ls_periods','closing_res'),
+  ('ls_periods','approved_ag_id'), ('ls_periods','report_html'), ('ls_periods','note'), ('ls_periods','created_at'),
   ('ls_invites','email'), ('ls_invites','role'), ('ls_invites','owner_short'), ('ls_invites','full_name')
 ),
 presentes as (

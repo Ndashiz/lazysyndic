@@ -65,13 +65,13 @@
 
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
-    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline'];
+    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline','ls_periods'];
     const res = {};
     await Promise.all(tables.map(async t=>{
       const {data, error} = await sb.from(t).select('*');
       if (error){
         // tables AG optionnelles : tolérer leur absence (schéma pas encore migré)
-        if (t==='ls_ag' || t==='ls_ag_points' || t==='ls_timeline'){ res[t]=[]; return; }
+        if (t==='ls_ag' || t==='ls_ag_points' || t==='ls_timeline' || t==='ls_periods'){ res[t]=[]; return; }
         throw new Error(`${t}: ${error.message}`);
       }
       res[t] = data || [];
@@ -116,6 +116,13 @@
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||''})),
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
+      // Exercices comptables (supabase/periods.sql) : clôturé = closed_at posé, lignes verrouillées par la base.
+      periods: (res.ls_periods||[]).sort((a,b)=>(a.year||0)-(b.year||0)).map(r=>({
+        year:r.year, starts:r.starts, ends:r.ends, closed_at:r.closed_at||null, closed_by:r.closed_by||null,
+        opening_pay:r.opening_pay==null?null:Number(r.opening_pay), opening_res:r.opening_res==null?null:Number(r.opening_res),
+        closing_pay:r.closing_pay==null?null:Number(r.closing_pay), closing_res:r.closing_res==null?null:Number(r.closing_res),
+        approved_ag_id:r.approved_ag_id||null, report_html:r.report_html||'', note:r.note||''
+      })),
       ags: (res.ls_ag||[]).sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||'')).map(a=>({
         id:a.id, title:a.title, ag_date:a.ag_date, lieu:a.lieu, type:a.type||'Ordinaire',
         convocation_date:a.convocation_date, status:a.status||'prep', presence:a.presence||{},
@@ -210,16 +217,16 @@
 
     // Sauvegarde : dump brut de toutes les tables (forme DB, round-trip fidèle).
     async dumpAll(){
-      const tables=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_settings','ls_imports','ls_ag','ls_ag_points'];
+      const tables=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_settings','ls_imports','ls_ag','ls_ag_points','ls_periods'];
       const out={};
       for(const t of tables){ const {data,error}=await sb.from(t).select('*'); if(error) throw new Error(t+': '+error.message); out[t]=data||[]; }
       return out;
     },
     // Restauration : remplace TOUTES les données par celles de la sauvegarde.
     async restore(backup){
-      const delOrder=['ls_ag_points','ls_ag','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_owners'];
+      const delOrder=['ls_periods','ls_ag_points','ls_ag','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_owners'];
       for(const t of delOrder){ const {error}=await sb.from(t).delete().not('id','is',null); if(error) throw new Error('delete '+t+': '+error.message); }
-      const insOrder=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points'];
+      const insOrder=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_periods'];
       for(const t of insOrder){ const rows=(backup[t]||[]); if(rows.length){ const {error}=await sb.from(t).insert(rows); if(error) throw new Error('insert '+t+': '+error.message); } }
       if(backup.ls_settings && backup.ls_settings[0]){ const {id, ...rest}=backup.ls_settings[0]; const {error}=await sb.from('ls_settings').update(rest).eq('id',1); if(error) throw new Error('settings: '+error.message); }
     },
@@ -231,6 +238,10 @@
     async agPointAdd(row){ const {data,error}=await T('ls_ag_points').insert(row).select().single(); if(error)throw error; return data; },
     async agPointUpdate(id, patch){ const {error}=await T('ls_ag_points').update(patch).eq('id',id); if(error)throw error; },
     async agPointDelete(id){ const {error}=await T('ls_ag_points').delete().eq('id',id); if(error)throw error; },
+
+    // --- Exercices comptables (supabase/periods.sql) ---
+    async periodUpsert(row){ const {data,error}=await T('ls_periods').upsert(row).select().single(); if(error)throw error; return data; },
+    async periodUpdate(year, patch){ const {error}=await T('ls_periods').update(patch).eq('year',year); if(error)throw error; },
 
     // --- PV d'AG : bucket privé ls-docs (supabase/ag.sql) ---
     async docUpload(path, bytes){

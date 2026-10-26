@@ -144,6 +144,23 @@ Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (c
 `ls_settings.charges`). Code : `charges.js` (calcul pur) ; tests :
 `node --test tests/charges.test.mjs` (aucune dépendance).
 
+## Exercices comptables
+
+Écran **Comptabilité** › carte « Exercices » : une ligne par année civile, avec les soldes
+d'ouverture et de clôture des deux comptes. Un exercice se clôture quand l'année est finie,
+l'exercice précédent clôturé, les deux comptes rapprochés sur un relevé qui couvre le 31/12, et
+sans brouillon en attente ; la carte dit sinon ce qui manque. « Clôturer » fige les soldes,
+archive le rapport financier de l'année tel quel (consultable ensuite par « Rapport archivé »)
+et note l'AG qui a approuvé les comptes. Les mouvements de l'exercice sont alors **verrouillés
+par la base** (trigger `ls_transactions_closed_period`) : montant, date, compte, catégorie, tiers,
+attribution, suppression et validation d'un brouillon sont refusés ; seuls le drapeau et le
+commentaire restent libres. L'interface masque ces gestes (cadenas dans la liste) et refuse
+d'avance ; « Rouvrir » lève le verrou pour corriger, puis on re-clôture.
+
+Prérequis : lancer [`supabase/periods.sql`](supabase/periods.sql) à la main (table `ls_periods`,
+fonction et trigger ; repris dans `migrations/000_baseline.sql`). Sans lui, la carte s'affiche mais
+la clôture échoue avec le message « lancez supabase/periods.sql ».
+
 ## Documents PDF — design system
 
 Tous les documents imprimés parlent le même langage : jetons, formats et composants dans
