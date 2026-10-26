@@ -8,7 +8,24 @@ magique, app sur `https://ndashiz.be/lazysyndic/`.
 > ne touche rien de LazyPO. Les identifiants sont déjà dans `config.js`
 > (clé publique). Tu n'as donc **pas** de clé à me transmettre.
 
-## Étape 1 — Créer les tables (≈ 2 min)
+## Base neuve ou base existante : un seul script
+
+1. **SQL Editor → New query** : colle tout [`migrations/000_baseline.sql`](migrations/000_baseline.sql)
+   → **Run**. Idempotent : il crée ce qui manque (tables, colonnes, fonctions, trigger, RLS,
+   bucket `ls-docs`) et ne touche à rien de ce qui existe déjà — relançable à volonté, sur une
+   base vide comme sur la prod. Remplace d'abord les e-mails d'exemple (`EMAIL_ADMIN`…) dans le
+   bloc `ls_invites` si tu veux pré-déclarer les copropriétaires ; tels quels, ils sont ignorés.
+2. Colle ensuite [`check.sql`](check.sql) → **Run** : aucune ligne « MANQUANT » ne doit sortir
+   (le commentaire en tête dit ce qu'une base complète renvoie).
+3. `node --test tests/schema.test.mjs` vérifie, sans base, que chaque colonne utilisée par
+   `db.js` / `app.js` existe dans le baseline — à relancer dès qu'une colonne apparaît dans le code.
+
+Les scripts par fonctionnalité (`schema.sql`, `ag.sql`, `auto-provision.sql`, `budget.sql`,
+`charges.sql`, `releve.sql`) restent comme **historique** : tout leur contenu est repris dans le
+baseline, il n'y a plus à les lancer un par un. Les étapes ci-dessous datent de la mise en place
+initiale ; l'étape 1 est remplacée par le baseline, les étapes 2 à 4 restent valables.
+
+## Étape 1 — Créer les tables (historique : remplacé par le baseline)
 
 Supabase (projet LazyPO) → **SQL Editor → New query** → colle tout
 [`schema.sql`](schema.sql) → **Run**. Crée `ls_members`, `ls_owners`,
