@@ -281,10 +281,9 @@ function monthlyData(acct){
   return {labels, in:inA, out:outA, bal:balA};
 }
 
-// Qui paie quoi. « dû » = provision annuelle attendue (issue du budget, plus tard).
-// « versé » : tant qu'on n'a pas un exercice complet importé, on s'appuie sur les
-// contributions suivies dans l'état (state.contrib). Dès qu'un import réel couvre
-// l'exercice, on bascule sur le calcul dérivé des transactions (verseFromTx).
+// Qui paie quoi. « dû » = provision annuelle attendue, posée par « Appliquer aux provisions »
+// (Budget › Calcul des charges) ou saisie dans Provisions ; « versé » = entrées attribuées au
+// copropriétaire, bornées à l'exercice du dû (ownerLedger, plus bas).
 let OWNERS = [
   // Provisions 2026 (Annexe 4) : dû annuel paiement + réserve (mensuel ×12).
   {n:'Alex Martin', short:'Alex', q:500, c:'#2F6B53', due_pay:952.63, due_res:240.00},
@@ -405,15 +404,56 @@ function ownerOfTx(t){ return (t.owner!==undefined && t.owner!=='') ? t.owner : 
 function ownerOptions(sel){
   return '<option value="">—</option>' + ownersOf().map(o=>`<option value="${o.short}" ${o.short===sel?'selected':''}>${o.n}</option>`).join('');
 }
-// Versé = somme des entrées attribuées au copro, sur un compte (ou tous).
-function verseFromTx(o, acct){
-  return sum(state.tx.filter(t => t.amount>0 && (!acct||t.account===acct) && ownerOfTx(t)===o.short).map(t=>t.amount));
+// Versé = somme des entrées attribuées au copro, sur un compte (ou tous), entre deux dates ISO
+// incluses (facultatives). Une entrée sans date lisible compte comme antérieure à tout.
+function verseFromTx(o, acct, from, to){
+  return sum(state.tx.filter(t => {
+    if (!(t.amount>0 && (!acct||t.account===acct) && ownerOfTx(t)===o.short)) return false;
+    if (!from && !to) return true;
+    const d = parseDate(t.date), iso = d ? d.iso : '';
+    return (!from || iso>=from) && (!to || iso<=to);
+  }).map(t=>t.amount));
 }
+// L'exercice du dû : celui du dernier budget appliqué aux provisions (le dû de chacun en vient),
+// sinon l'année civile. Le dû est annuel ; le versé doit l'être aussi.
+function appliedYears(){
+  return Object.keys(state.charges||{}).filter(y=>/^\d{4}$/.test(y) && (state.charges[y]||{}).applied).map(Number).sort((a,b)=>a-b);
+}
+function ledgerYear(){ const ys=appliedYears(); return ys.length ? ys[ys.length-1] : new Date().getFullYear(); }
+// Dû d'un copropriétaire pour un exercice appliqué : figé à l'application (applied.byOwner), sinon
+// recalculé depuis le budget de l'époque (budgets appliqués avant que byOwner n'existe).
+function appliedDue(o, y){
+  const b=(state.charges||{})[y]; if(!b||!b.applied) return 0;
+  const key=o.id||o.short||o.n, bo=b.applied.byOwner||{};
+  if (bo[key]) return (+bo[key].pay||0)+(+bo[key].res||0);
+  try { const s=budgetSplit(y), i=chargesOwners().findIndex(x=>x.key===key); return i>=0 ? s.total[i] : 0; } catch(e){ return 0; }
+}
+// Les budgets appliqués avant que l'application ne fige la part de chacun (applied.byOwner) la
+// reçoivent une fois, pour que le bridge Jarvis, qui n'a pas charges.js, lise le même dû.
+function backfillAppliedByOwner(){
+  if (!canWrite()) return;
+  let changed=false;
+  appliedYears().forEach(y=>{
+    const b=state.charges[y]; if (b.applied.byOwner) return;
+    try { const s=budgetSplit(y); b.applied.byOwner=Object.fromEntries(chargesOwners().map((o,i)=>[o.key, {pay:s.charges[i].annual, res:s.res[i].reserve}])); changed=true; } catch(e){}
+  });
+  if (changed) dbWrite(db=>db.updateSettings({charges: state.charges}));
+}
+// Le grand livre par copropriétaire, borné à l'exercice du dû. Avant, le versé cumulait toutes les
+// entrées depuis le premier relevé contre un dû annuel : dès le deuxième budget appliqué, chacun
+// paraissait créditeur de ses versements des années d'avant, et plus aucun retard ne se voyait.
+//   report = versements d'avant l'exercice − dû des exercices appliqués d'avant
+//   solde  = report + versé de l'exercice − dû de l'exercice
+// Sans budget appliqué avant l'exercice, les versements antérieurs comptent entiers (rien ne dit
+// ce qui était dû) : c'est l'ancien calcul, à l'identique. Même règle dans bridge/alerts.js.
 function ownerLedger(){
+  const y=ledgerYear(), from=`${y}-01-01`, to=`${y}-12-31`, prior=appliedYears().filter(k=>k<y);
   return ownersOf().map(o => {
     const duePay = +(o.due_pay||0), dueRes = +(o.due_res||0), due = duePay+dueRes;
-    const versePay = verseFromTx(o,'pay'), verseRes = verseFromTx(o,'res'), verse = versePay+verseRes;
-    return {...o, duePay, dueRes, due, versePay, verseRes, verse, solde: verse-due};
+    const versePay = verseFromTx(o,'pay',from,to), verseRes = verseFromTx(o,'res',from,to), verse = versePay+verseRes;
+    const before = verseFromTx(o, null, null, `${y-1}-12-31`);
+    const report = Math.round((before - sum(prior.map(k=>appliedDue(o,k))))*100)/100;
+    return {...o, year:y, duePay, dueRes, due, versePay, verseRes, verse, report, solde: Math.round((report+verse-due)*100)/100};
   });
 }
 
@@ -478,15 +518,16 @@ function renderDashboard(){
   // qui paie quoi
   const tbl = document.getElementById('ownersTbl');
   if (tbl){
-    const ledger = ownerLedger();
-    tbl.innerHTML = '<tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû</th><th class="num">Versé</th><th class="num">Solde</th><th></th></tr>' +
+    const ledger = ownerLedger(), ly = ledger.length ? ledger[0].year : '';
+    tbl.innerHTML = `<tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû ${ly}</th><th class="num">Versé ${ly}</th><th class="num">Solde</th><th></th></tr>` +
       ledger.map(o=>{
         const late = o.solde < -0.005;
+        const rep = Math.abs(o.report)>=0.005 ? `<div class="sub" style="font-size:11px">report ${o.report<0?'−':'+'}${eur(Math.abs(o.report))}</div>` : '';
         return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${o.short[0]}</span> ${o.n}</div></td>
           <td class="num">${o.q}</td>
           <td class="num">${eur(o.due)}</td>
           <td class="num">${eur(o.verse)}</td>
-          <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td>
+          <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}${rep}</td>
           <td><span class="badge ${late?'b-late':'b-ok'}">${late?'En retard':'À jour'}</span></td></tr>`;
       }).join('');
   }
@@ -3444,7 +3485,8 @@ async function applyCharges(y){
     catch(e){ console.error(e); ow.forEach((o,i)=>{ o.due_pay=before[i].pay; o.due_res=before[i].res; }); toastError(e.message||e); renderProvisions(); renderCharges(); return; }
   }
   const totPay=Math.round(sum(pay)*100)/100, totRes=Math.round(sum(res)*100)/100;
-  saveCharges(y, b.postes, {applied:{at:new Date().toISOString(), total:totPay, reserve:totRes}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
+  saveCharges(y, b.postes, {applied:{at:new Date().toISOString(), total:totPay, reserve:totRes,
+    byOwner:Object.fromEntries(ow.map((o,i)=>[o.id||o.short||o.n, {pay:pay[i], res:res[i]}]))}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
   logTimeline({title:`Budget ${y} appliqué aux provisions`, kind:'manual',
     description:`Charges courantes ${eur(totPay)} et fonds de réserve ${eur(totRes)} répartis : `+ow.map((o,i)=>`${o.short||o.n} ${eur(b.total[i])}`).join(', ')});
   renderProvisions(); renderDashboard();
@@ -3829,6 +3871,7 @@ async function bootData(preloaded){
       state.draftTx = state.draftTx || [];
       if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
       if (state.owners && state.owners.length) OWNERS = state.owners;
+      backfillAppliedByOwner();
     } catch(e){
       console.error(e);
       alert('Chargement des données impossible : '+(e.message||e));
@@ -4156,17 +4199,19 @@ setTimeout(boot, 0);
       <div class="r-sub" style="margin-top:8px">Résultat de l'exercice : <b class="${res>=0?'pos':'neg'}">${res>=0?'Excédent ':'Déficit '}${eur(Math.abs(res))}</b></div>`;
   }
   function ownersSection(){
-    const led = ownerLedger();
+    const led = ownerLedger(), ly = led.length ? led[0].year : '';
+    const sg = v => `${v<0?'−':''}${eur(Math.abs(v))}`;
     const rows = led.map(o=>`<tr><td>${o.n}</td><td class="num">${o.q}/1000</td>
-      <td class="num">${eur(o.due)}</td><td class="num">${eur(o.verse)}</td>
-      <td class="num ${o.solde<0?'neg':'pos'}">${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td>
+      <td class="num">${sg(o.report)}</td><td class="num">${eur(o.due)}</td><td class="num">${eur(o.verse)}</td>
+      <td class="num ${o.solde<0?'neg':'pos'}">${sg(o.solde)}</td>
       <td>${o.solde<-0.005?'En retard':'À jour'}</td></tr>`).join('');
-    const tDue=sum(led.map(o=>o.due)), tVer=sum(led.map(o=>o.verse));
-    return `<h2>Récapitulatif par copropriétaire</h2>
-      <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Dû</th><th class="num">Versé</th><th class="num">Solde</th><th>Statut</th></tr>
+    const tRep=sum(led.map(o=>o.report)), tDue=sum(led.map(o=>o.due)), tVer=sum(led.map(o=>o.verse)), tSol=sum(led.map(o=>o.solde));
+    return `<h2>Récapitulatif par copropriétaire — exercice ${ly}</h2>
+      <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Report</th><th class="num">Dû ${ly}</th><th class="num">Versé ${ly}</th><th class="num">Solde</th><th>Statut</th></tr>
         ${rows}
-        <tr class="tot"><td>Total</td><td class="num">1000/1000</td><td class="num">${eur(tDue)}</td><td class="num">${eur(tVer)}</td><td class="num">${eur(tVer-tDue)}</td><td></td></tr>
-      </table>`;
+        <tr class="tot"><td>Total</td><td class="num">1000/1000</td><td class="num">${sg(tRep)}</td><td class="num">${eur(tDue)}</td><td class="num">${eur(tVer)}</td><td class="num">${sg(tSol)}</td><td></td></tr>
+      </table>
+      <div class="r-sub" style="margin-top:6px">Report = versements antérieurs à l'exercice, moins le dû des exercices déjà appliqués. Solde = report + versé − dû.</div>`;
   }
   function annexeTxSection(acct, p, title){
     const s = acctSummary(acct, p);
@@ -4656,10 +4701,11 @@ function renderMySituation(){
       <div><h2 style="margin:0">Ma situation — ${led.n}</h2><div class="sub">${led.q} millièmes${m.role!=='admin'?' · vue copropriétaire':''}</div></div></div>
       <span class="badge ${late?'b-late':'b-ok'}">${late?'En retard':'À jour'}</span></div>
     <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
-      <div class="kpi"><div class="l">Dû (charges + réserve)</div><div class="v">${eur(led.due)}</div></div>
-      <div class="kpi"><div class="l">Versé</div><div class="v" style="color:var(--green)">${eur(led.verse)}</div></div>
+      <div class="kpi"><div class="l">Dû ${led.year} (charges + réserve)</div><div class="v">${eur(led.due)}</div></div>
+      <div class="kpi"><div class="l">Versé ${led.year}</div><div class="v" style="color:var(--green)">${eur(led.verse)}</div></div>
       <div class="kpi"><div class="l">Solde</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${led.solde<0?'−':''}${eur(Math.abs(led.solde))}</div></div>
     </div>
+    ${Math.abs(led.report)>=0.005 ? `<div class="sub" style="margin-top:8px">Report des exercices précédents : ${led.report<0?'−':'+'}${eur(Math.abs(led.report))}</div>` : ''}
     ${histo}</div>`;
 }
 

@@ -29,7 +29,11 @@ export function createRest(url, serviceRoleKey) {
     const [owners, transactions, settingsRows, reminders, timeline] = await Promise.all([
       select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at,draft&deleted_at=is.null'),
-      select('ls_settings', 'select=owner_rules&id=eq.1'),
+      // `charges` (budgets appliqués) est arrivée après `owner_rules` : sans la colonne, PostgREST
+      // répond 400 sur toute la requête, on retombe sur les règles seules.
+      select('ls_settings', 'select=owner_rules,charges&id=eq.1').catch(() =>
+        select('ls_settings', 'select=owner_rules&id=eq.1'),
+      ),
       select('ls_reminders', 'select=id,tx,due,done'),
       // ls_timeline is optional (may not be migrated yet) — tolerate a 404-ish empty.
       select('ls_timeline', 'select=id,event_date,title,description,kind').catch(() => []),
@@ -43,6 +47,8 @@ export function createRest(url, serviceRoleKey) {
         id: r.id, date: r.event_date, title: r.title, description: r.description, kind: r.kind || 'manual',
       })),
       ownerRules: settings.owner_rules || {},
+      // Les budgets appliqués : le versé se borne à l'exercice du dû (alerts.js ownerLedger).
+      charges: settings.charges || {},
     };
   }
 
@@ -63,9 +69,9 @@ export function createRest(url, serviceRoleKey) {
       // `copro_name` a été ajoutée après coup : sur un déploiement qui n'a pas la colonne,
       // PostgREST répond 400 sur toute la requête. On retombe sur les colonnes du schéma
       // d'origine plutôt que de faire échouer la page entière pour un titre.
-      select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name&id=eq.1').catch(() =>
-        select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules&id=eq.1'),
-      ),
+      select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name,charges&id=eq.1')
+        .catch(() => select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name&id=eq.1'))
+        .catch(() => select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules&id=eq.1')),
       select('ls_reminders', 'select=id,tx,due,done,sort'),
     ]);
     const settings = (settingsRows || [])[0] || {};

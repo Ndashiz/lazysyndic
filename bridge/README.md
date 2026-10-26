@@ -14,7 +14,7 @@ implementing the pull contract in Jarvis's `docs/08-lazysyndic-bridge.md`.
 
 | Jarvis alert `kind` | Source | Logic |
 |---|---|---|
-| `overdue_payment` | `ls_owners` + `ls_transactions` | Ported from `app.js` `ownerLedger()`: `due = due_pay + due_res`, `verse = Σ` positive tx attributed to the owner (explicit `owner` col, else `detectOwner` heuristic). Late when `solde = verse − due < 0`. |
+| `overdue_payment` | `ls_owners` + `ls_transactions` | Ported from `app.js` `ownerLedger()`: `due = due_pay + due_res`, `verse = Σ` positive tx attributed to the owner (explicit `owner` col, else `detectOwner` heuristic). The verse is bounded to the exercise of the due (last applied budget in `ls_settings.charges`, else the calendar year); earlier payments net of earlier applied dues become a `report`. Late when `solde = report + verse − due < 0`. |
 | `notice` | `ls_reminders` | Open reminders (`done = false`). |
 | `document` | `ls_timeline` | Manual entries newer than `DOCUMENT_WINDOW_DAYS` (heuristic — tune or disable). |
 

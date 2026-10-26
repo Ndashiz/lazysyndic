@@ -102,16 +102,20 @@ export function buildDashboard(data = {}) {
 
   // app.js:357 ownerLedger — le pont le partage déjà avec les alertes « impayé », donc la
   // ligne rouge du tableau et l'alerte du même copropriétaire ne peuvent pas diverger.
-  const ledger = ownerLedger(owners, transactions, ownerRules);
+  const ledger = ownerLedger(owners, transactions, ownerRules, settings.charges || {});
   const ownerRows = ledger.map((o) => {
     const balanceCts = cents(o.solde);
     return {
+      /** L'exercice du dû (dernier budget appliqué, sinon l'année civile) : le versé est le sien. */
+      year: o.year,
       short: String(o.short || ''),
       name: String(o.name || o.short || ''),
       quotite: Number(o.quotite || 0),
       color: String(o.color || '#2F6B53'),
       dueCents: cents(o.due),
       paidCents: cents(o.verse),
+      /** Report des exercices précédents (versements d'avant − dû déjà appliqué d'avant). */
+      carryCents: cents(o.report),
       balanceCents: balanceCts,
       // app.js:430 — le seuil est en euros là-bas (−0,005), soit un demi-centime ici.
       late: balanceCts < 0,

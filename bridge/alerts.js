@@ -46,22 +46,53 @@ export function ownerOfTx(t, owners, ownerRules) {
   return t.owner !== undefined && t.owner !== '' ? t.owner : detectOwner(t, owners, ownerRules);
 }
 
+/** app.js appliedYears — les exercices dont le budget a été appliqué aux provisions. */
+function appliedYears(charges) {
+  return Object.keys(charges || {})
+    .filter((y) => /^\d{4}$/.test(y) && charges[y] && charges[y].applied)
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+/** app.js ledgerYear — l'exercice du dû : le dernier budget appliqué, sinon l'année civile. */
+export function ledgerYear(charges, now = new Date()) {
+  const ys = appliedYears(charges);
+  return ys.length ? ys[ys.length - 1] : now.getFullYear();
+}
+/** app.js appliedDue — la part de chacun figée à l'application (`applied.byOwner`, clé = id du
+ *  copropriétaire). L'app recalcule un budget appliqué avant cette colonne ; ici, sans charges.js,
+ *  il compte 0 jusqu'à ce qu'un admin rouvre l'app (backfillAppliedByOwner). */
+function appliedDue(o, b) {
+  const bo = (b && b.applied && b.applied.byOwner) || {};
+  const r = bo[o.id] || bo[o.short];
+  return r ? Number(r.pay || 0) + Number(r.res || 0) : 0;
+}
+const round2 = (n) => Math.round(n * 100) / 100;
+
 /**
- * app.js:357 ownerLedger — per-owner due (persisted provisions) vs verse
- * (sum of positive transactions attributed to them). solde = verse − due.
- * @returns Array<{short,name,due,verse,solde,...}>
+ * app.js ownerLedger — le grand livre par copropriétaire, borné à l'exercice du dû (kept 1:1).
+ *   report = versements d'avant l'exercice − dû des exercices appliqués d'avant
+ *   solde  = report + versé de l'exercice − dû de l'exercice
+ * Sans budget appliqué avant l'exercice, les versements antérieurs comptent entiers (rien ne dit
+ * ce qui était dû) : c'est l'ancien calcul « versé cumulé − dû », à l'identique.
+ * @param {Record<string, any>} [charges]  ls_settings.charges (budgets par exercice)
+ * @returns Array<{short,name,year,due,verse,report,solde,...}>
  */
-export function ownerLedger(owners, transactions, ownerRules) {
+export function ownerLedger(owners, transactions, ownerRules, charges = {}, now = new Date()) {
   // Les brouillons sont exclus : un relevé déposé mais pas encore validé n'est pas de l'argent
   // reçu. Le compter effacerait l'alerte « impayé » d'un copropriétaire sur la foi d'un import
   // que le syndic peut encore écarter.
   const alive = transactions.filter((t) => !t.deleted_at && !t.draft);
+  const y = ledgerYear(charges, now), from = `${y}-01-01`, to = `${y}-12-31`, prevEnd = `${y - 1}-12-31`;
+  const prior = appliedYears(charges).filter((k) => k < y);
+  const total = (rows) => rows.reduce((a, t) => a + Number(t.amount), 0);
   return owners.map((o) => {
     const due = Number(o.due_pay || 0) + Number(o.due_res || 0);
-    const verse = alive
-      .filter((t) => Number(t.amount) > 0 && ownerOfTx(t, owners, ownerRules) === o.short)
-      .reduce((a, t) => a + Number(t.amount), 0);
-    return { ...o, due, verse, solde: verse - due };
+    const mine = alive.filter((t) => Number(t.amount) > 0 && ownerOfTx(t, owners, ownerRules) === o.short);
+    // tx_date vide : antérieure à tout, comme dans l'app (parseDate qui échoue → iso '').
+    const verse = total(mine.filter((t) => { const d = String(t.tx_date || ''); return d >= from && d <= to; }));
+    const before = total(mine.filter((t) => String(t.tx_date || '') <= prevEnd));
+    const report = round2(before - prior.reduce((a, k) => a + appliedDue(o, charges[k]), 0));
+    return { ...o, year: y, due, verse, report, solde: round2(report + verse - due) };
   });
 }
 
@@ -79,24 +110,24 @@ function toIsoDate(v) {
 
 /**
  * Build the alert list Jarvis expects (docs/08-lazysyndic-bridge.md §1).
- * @param {{owners:any[], transactions:any[], reminders?:any[], timeline?:any[], ownerRules?:Record<string,string>}} data
+ * @param {{owners:any[], transactions:any[], reminders?:any[], timeline?:any[], ownerRules?:Record<string,string>, charges?:Record<string,any>}} data
  * @param {{now?:Date, documentWindowDays?:number}} [opts]
  * @returns Array<{id,kind,title,detail?,amountCents?,dueDate?}>
  */
 export function buildAlerts(data, opts = {}) {
-  const { owners = [], transactions = [], reminders = [], timeline = [], ownerRules = {} } = data;
+  const { owners = [], transactions = [], reminders = [], timeline = [], ownerRules = {}, charges = {} } = data;
   const now = opts.now || new Date();
   const documentWindowDays = opts.documentWindowDays ?? 60;
   const alerts = [];
 
   // 1) Impayés — late owners (solde < −0.005), one stable alert per owner.
-  for (const o of ownerLedger(owners, transactions, ownerRules)) {
+  for (const o of ownerLedger(owners, transactions, ownerRules, charges, now)) {
     if (o.solde < -0.005) {
       alerts.push({
         id: `pay-${o.id || o.short}`,
         kind: 'overdue_payment',
         title: `Impayé — ${o.name || o.short} : ${eur(-o.solde)} en attente`,
-        detail: `Dû ${eur(o.due)} · versé ${eur(o.verse)}`,
+        detail: `Exercice ${o.year} · dû ${eur(o.due)} · versé ${eur(o.verse)}${Math.abs(o.report) >= 0.005 ? ` · report ${o.report < 0 ? '−' : '+'}${eur(Math.abs(o.report))}` : ''}`,
         amountCents: Math.round(-o.solde * 100),
       });
     }

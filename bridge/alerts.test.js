@@ -1,7 +1,7 @@
 // Run: node --test  (from bridge/)  — no dependencies.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { norm, detectOwner, ownerLedger, buildAlerts, coproStatus } from './alerts.js';
+import { norm, detectOwner, ownerLedger, ledgerYear, buildAlerts, coproStatus } from './alerts.js';
 
 const owners = [
   { id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 900, due_res: 100 }, // due 1000
@@ -32,19 +32,50 @@ test('detectOwner: explicit rule > name match > none', () => {
 });
 
 test('ownerLedger: verse from explicit owner + heuristic, solde = verse - due', () => {
+  const now = new Date('2026-06-15');
   const tx = [
-    { amount: 600, owner: 'Alex' },                 // explicit
-    { amount: 300, tiers: 'Alex Martin' },          // heuristic → Alex
-    { amount: 500, owner: 'Sam' },                  // Sam fully paid
-    { amount: -50, owner: 'Alex' },                 // outflow ignored
-    { amount: 200, owner: 'Alex', deleted_at: '2026-01-01' }, // soft-deleted ignored
+    { amount: 600, owner: 'Alex', tx_date: '2026-01-05' },                 // explicit
+    { amount: 300, tiers: 'Alex Martin', tx_date: '2026-02-05' },          // heuristic → Alex
+    { amount: 500, owner: 'Sam', tx_date: '2026-03-05' },                  // Sam fully paid
+    { amount: -50, owner: 'Alex', tx_date: '2026-03-06' },                 // outflow ignored
+    { amount: 200, owner: 'Alex', deleted_at: '2026-01-01', tx_date: '2026-04-01' }, // soft-deleted ignored
   ];
-  const led = ownerLedger(owners, tx);
+  const led = ownerLedger(owners, tx, {}, {}, now);
   const alex = led.find((o) => o.short === 'Alex');
   const sam = led.find((o) => o.short === 'Sam');
+  assert.equal(alex.year, 2026);            // aucun budget appliqué : l'année civile
   assert.equal(alex.verse, 900);            // 600 + 300
+  assert.equal(alex.report, 0);
   assert.equal(alex.solde, -100);           // 900 - 1000
   assert.equal(sam.solde, 0);               // 500 - 500
+});
+
+// app.js ownerLedger : le dû est annuel, le versé l'est aussi. Ce qui précède l'exercice devient un
+// report, net du dû des exercices déjà appliqués ; sans budget appliqué avant, l'ancien calcul.
+test('ownerLedger: le versé se borne à l’exercice du dû, le reste devient un report', () => {
+  const now = new Date('2026-06-15');
+  const charges = {
+    2025: { applied: { at: '2025-01-02', byOwner: { Alex: { pay: 700, res: 100 }, Sam: { pay: 400, res: 100 } } } },
+    2026: { applied: { at: '2026-01-02', byOwner: {} } },
+  };
+  const tx = [
+    { amount: 800, owner: 'Alex', tx_date: '2025-06-01' },   // 2025, couvert par le dû 2025 (800)
+    { amount: 300, owner: 'Alex', tx_date: '2026-02-01' },   // exercice 2026
+    { amount: 600, owner: 'Sam', tx_date: '2025-06-01' },    // 2025 : 100 de trop
+    { amount: 400, owner: 'Sam', tx_date: '2026-02-01' },
+    { amount: 50, owner: 'Sam' },                            // sans date : antérieur à tout
+  ];
+  const led = ownerLedger(owners, tx, {}, charges, now);
+  const alex = led.find((o) => o.short === 'Alex'), sam = led.find((o) => o.short === 'Sam');
+  assert.equal(alex.year, 2026);
+  assert.deepEqual([alex.verse, alex.report, alex.solde], [300, 0, -700]);
+  assert.deepEqual([sam.verse, sam.report, sam.solde], [400, 150, 50]);   // 150 + 400 − 500
+  // Sans budget appliqué avant l'exercice : versé cumulé − dû, comme avant.
+  const legacy = ownerLedger(owners, tx, {}, { 2026: { applied: { at: '2026-01-02' } } }, now);
+  assert.equal(legacy.find((o) => o.short === 'Alex').solde, 800 + 300 - 1000);
+  // Le dernier budget appliqué fixe l'exercice, même à venir ; sinon l'année civile.
+  assert.equal(ledgerYear({ 2027: { applied: {} } }, now), 2027);
+  assert.equal(ledgerYear({}, now), 2026);
 });
 
 test('buildAlerts: one overdue_payment per late owner, correct amountCents', () => {
