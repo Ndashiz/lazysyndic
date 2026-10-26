@@ -123,6 +123,42 @@
     const ag = (state.ags || []).find(a => a.status !== 'finalisee');
     if (ag) out.push({ic:'calendar', info:true, t: ag.title || 'Assemblée générale',
       d: [ag.ag_date || 'Date à fixer', (typeof AG_STATUS !== 'undefined' && AG_STATUS[ag.status]) || ''].filter(Boolean).join(' · '), go:'ag'});
+    try { budgetAlerts(ag).forEach(x => out.push(x)); } catch(e){}
+    return out;
+  }
+  // Le cycle du budget (Budget › Calcul des charges), dérivé de l'état : préparer en fin d'année,
+  // publier avant l'AG, appliquer aux provisions une fois l'exercice commencé ; et, pour tout le
+  // monde, le dépassement de l'année en cours. Rien n'est stocké, tout se recalcule à l'ouverture.
+  function budgetAlerts(ag){
+    const out = [], all = state.charges || {}, now = new Date(), Y = now.getFullYear();
+    const admin = typeof canWrite === 'function' && canWrite();
+    const years = Object.keys(all).filter(y => /^\d{4}$/.test(y));
+    const has = y => !!all[y] && (((all[y].postes || []).length) || ((all[y].reserve || []).length));
+    const pub = y => typeof LSCharges !== 'undefined' && LSCharges.isPublished(all[y]);
+    if (admin){
+      // octobre → décembre sans budget N+1 : c'est le moment de le préparer
+      if (now.getMonth() >= 9 && !has(Y + 1))
+        out.push({ic:'file', t:`Préparez le budget ${Y + 1}`, d:`L'exercice ${Y} touche à sa fin : proposez les postes depuis le réel ${Y}.`, go:'budget'});
+      // un brouillon et une AG dans les 15 jours : à publier avant la séance
+      const dl = ag && typeof convocationDelay === 'function' ? convocationDelay(ag) : null;
+      if (dl && dl.days <= 15) years.filter(y => has(y) && !pub(y) && +y >= Y).forEach(y =>
+        out.push({ic:'file', t:`Publiez le budget ${y} avant l'AG`, d: dl.days < 0 ? 'La séance est passée et le budget est toujours en brouillon.' : `Séance dans ${plural(dl.days, 'jour')} : les copropriétaires ne voient qu'un budget publié.`, go:'budget'}));
+      // publié mais pas appliqué, alors que son exercice a commencé
+      years.filter(y => pub(y) && !all[y].applied && +y <= Y).forEach(y =>
+        out.push({ic:'file', t:`Appliquez le budget ${y} aux provisions`, d:'Le suivi des paiements se fie encore à l’ancien dû.', go:'budget'}));
+    }
+    // l'année en cours, budget publié : le réel à ce jour projeté sur 12 mois contre la prévision (marge comprise)
+    const b = all[Y];
+    if (b && pub(Y) && (b.postes || []).length && typeof chargesTx === 'function' && typeof LSCharges !== 'undefined'){
+      const tx = chargesTx(), cov = LSCharges.coverage(tx, Y), marge = LSCharges.cleanMarge(b.marge) / 100;
+      if (cov.months >= 3){
+        let proj = 0, forecast = 0;
+        (b.postes || []).forEach(p => { if (!p || !p.cat) return;
+          const r = LSCharges.reference(tx, p.cat, Y, cov); proj += Math.max(0, r.total) * 12 / cov.months; forecast += Number(p.forecast) || 0; });
+        if (proj > forecast * (1 + marge) + 0.005)
+          out.push({ic:'file', t:`Budget ${Y} en dépassement`, d:`Réel projeté sur 12 mois : ${eur(proj)} pour ${eur(forecast)} prévus, marge de ${Math.round(marge * 100)} % comprise (${plural(cov.months, 'mois')} de relevés).`, go:'budget'});
+      }
+    }
     return out;
   }
   function renderBell(pe){
