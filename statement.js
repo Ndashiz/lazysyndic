@@ -79,8 +79,9 @@ const SUBST = {'−':'-','–':'-','‑':'-','‐':'-','→':'->','←':'<-','�
 async function buildStatementPdf(PDFLib, d){
   const {PDFDocument, StandardFonts, rgb} = PDFLib;
   const doc = await PDFDocument.create();
-  const F = { r: await doc.embedFont(StandardFonts.Helvetica), b: await doc.embedFont(StandardFonts.HelveticaBold),
-              i: await doc.embedFont(StandardFonts.HelveticaOblique) };
+  // Pas d'italique (charte) : deux graisses suffisent. Hanken Grotesk n'est pas encore embarquée
+  // (pdf-lib + fontkit, police vendorisée) : Helvetica, et safe() replie les signes hors WinAnsi.
+  const F = { r: await doc.embedFont(StandardFonts.Helvetica), b: await doc.embedFont(StandardFonts.HelveticaBold) };
   const cs = new Set(F.r.getCharacterSet());
   const NB = cs.has(0xA0) ? ' ' : ' ';                  // espace insécable : un montant ne se coupe pas
   const safe = t => [...String(t==null ? '' : t).replace(/\r/g,'')].map(ch => {
@@ -92,8 +93,14 @@ async function buildStatementPdf(PDFLib, d){
     if (base && [...base].every(c => cs.has(c.codePointAt(0)))) return base;
     return /\s/.test(ch) ? ' ' : '?';
   }).join('');
-  const C = { ink:rgb(.125,.145,.122), soft:rgb(.40,.43,.40), faint:rgb(.56,.58,.55), line:rgb(.85,.86,.84),
-              zebra:rgb(.967,.971,.965), green:rgb(0,.373,.271), greenSoft:rgb(.91,.95,.925), deep:rgb(.129,.314,.239) };
+  // Les couleurs du design system des documents (pdf.js, LSPdf.tokens.rgb) : le relevé parle la
+  // même langue que l'Annexe 4 et les rapports. Repli sur les mêmes valeurs si pdf.js n'est pas là
+  // (tests Node du relevé seul).
+  const TK = root.LSPdf && root.LSPdf.tokens && root.LSPdf.tokens.rgb, tk = k => rgb(...TK[k]);
+  const C = TK
+    ? { ink:tk('ink'), soft:tk('soft'), faint:tk('faint'), line:tk('line'), zebra:tk('tint'), green:tk('green'), greenSoft:tk('greenSoft'), deep:tk('greenDeep') }
+    : { ink:rgb(.125,.145,.122), soft:rgb(.361,.38,.325), faint:rgb(.541,.561,.502), line:rgb(.89,.906,.882),
+        zebra:rgb(.957,.969,.957), green:rgb(.129,.314,.239), greenSoft:rgb(.886,.925,.89), deep:rgb(.086,.227,.173) };
   const W = 595.28, H = 841.89, M = 40, CW = W - 2*M, BOTTOM = M + 24;
   const copro = d.copro || {}, coproName = String(copro.name||'').trim() || 'Copropriété';
   const accounts = d.accounts || [];
@@ -160,7 +167,7 @@ async function buildStatementPdf(PDFLib, d){
     if (!zebra && !top) hline(y, {t:.35});
   }
   function drawHead(cols){
-    const cells = cols.map((c,k) => cell(cols, k, [{t:c.label.toUpperCase(), font:F.b, size:6.9, color:C.soft}]));
+    const cells = cols.map((c,k) => cell(cols, k, [{t:c.label.toUpperCase(), font:F.b, size:7.5, color:C.soft}]));
     const h = Math.max(...cells.map(cellH)) + 2*PAD;
     if (y - h - 20 < BOTTOM) newPage(cur);
     let x = M;
@@ -203,7 +210,7 @@ async function buildStatementPdf(PDFLib, d){
     accounts.forEach(a => drawRow(cols, [
       cell(cols,0,[{t:a.label, font:F.b}]), cell(cols,1,[{t:a.holder||'Non renseigné'}]),
       cell(cols,2,[{t:fmtIban(a.iban)||'Non renseigné'}]),
-      cell(cols,3,[{t:money(a.closing), font:F.b}, {t:'au ' + frDate(a.toIso), size:7, color:C.soft}]),
+      cell(cols,3,[{t:money(a.closing), font:F.b}, {t:'au ' + frDate(a.toIso), size:7.5, color:C.soft}]),
     ]));
     const tot = add(accounts.map(a => cents(a.closing)))/100;
     drawRow(cols, [cell(cols,0,[{t:'Total disponible', font:F.b}]), [], [], cell(cols,3,[{t:money(tot), font:F.b, color:C.green}])], {top:true});
@@ -219,7 +226,7 @@ async function buildStatementPdf(PDFLib, d){
       let rowH = 0;
       cells.slice(r*2, r*2+2).forEach(([lbl, val], k) => {
         const x = M + k*colW;
-        text(lbl.toUpperCase(), x, y - 7, {font:F.b, size:6.9, color:C.soft});
+        text(lbl.toUpperCase(), x, y - 7, {font:F.b, size:7.5, color:C.soft});
         const lines = wrap(val, F.r, 10, colW - 12);
         lines.forEach((l, j) => page.drawText(l, {x, y:y - 20 - j*12.5, size:10, font:F.r, color:C.ink}));
         rowH = Math.max(rowH, 22 + lines.length*12.5);
@@ -241,7 +248,7 @@ async function buildStatementPdf(PDFLib, d){
       const w = unit*b.w;
       page.drawRectangle({x, y:y-BH, width:w, height:BH, color: b.strong ? C.greenSoft : undefined,
         borderColor: b.strong ? C.green : C.line, borderWidth: b.strong ? 1 : .7});
-      text(b.lbl.toUpperCase(), x + 9, y - 14, {font:F.b, size:6.7, color: b.strong ? C.green : C.soft});
+      text(b.lbl.toUpperCase(), x + 9, y - 14, {font:F.b, size:7.5, color: b.strong ? C.green : C.soft});
       text(b.val, x + 9, y - 36, {font:F.b, size: b.strong ? 15 : 12.5, color: b.strong ? C.green : (b.color || C.ink)});
       x += w + GAP;
     });
@@ -267,13 +274,13 @@ async function buildStatementPdf(PDFLib, d){
   function txTable(a){
     const head = () => drawHead(TX);
     head();
-    drawRow(TX, [cell(TX,0,[{t:frDate(a.fromIso)}]), cell(TX,1,[{t:'Solde au début de la période', font:F.i, color:C.soft}]), [], [], [],
+    drawRow(TX, [cell(TX,0,[{t:frDate(a.fromIso)}]), cell(TX,1,[{t:'Solde au début de la période', font:F.r, color:C.soft}]), [], [], [],
                  cell(TX,5,[{t:money(a.opening), font:F.b}])], {onBreak:head, keep: a.rows.length ? 0 : 2*KEEP});
     if (!a.rows.length)
-      drawRow(TX, [[], cell(TX,1,[{t:'Aucun mouvement sur la période.', font:F.i, color:C.soft}]), [], [], [], []], {onBreak:head, keep:KEEP});
+      drawRow(TX, [[], cell(TX,1,[{t:'Aucun mouvement sur la période.', font:F.r, color:C.soft}]), [], [], [], []], {onBreak:head, keep:KEEP});
     a.rows.forEach((r, i) => drawRow(TX, [
       cell(TX,0,[{t:frDate(r.iso)}]),
-      cell(TX,1,[{t:r.label}, r.detail && {t:r.detail, size:7.4, color:C.soft}, r.comment && {t:'Note : ' + r.comment, font:F.i, size:7.4, color:C.soft}]),
+      cell(TX,1,[{t:r.label}, r.detail && {t:r.detail, size:7.5, color:C.soft}, r.comment && {t:'Note : ' + r.comment, size:7.5, color:C.soft}]),
       cell(TX,2,[{t:r.category, size:7.6, color: r.category === 'À catégoriser' ? C.faint : C.soft}]),
       cell(TX,3,[r.amount < 0 && {t:money(-r.amount)}]),
       cell(TX,4,[r.amount > 0 && {t:money(r.amount), color:C.green}]),
@@ -288,7 +295,7 @@ async function buildStatementPdf(PDFLib, d){
     y -= 20;
   }
 
-  if (!accounts.length){ newPage(null); docHeader(); text('Aucun compte sélectionné.', M, y, {font:F.i, color:C.soft}); }
+  if (!accounts.length){ newPage(null); docHeader(); text('Aucun compte sélectionné.', M, y, {font:F.r, color:C.soft}); }
   accounts.forEach((a, k) => {
     cur = a; newPage(a); docHeader();
     if (k === 0 && accounts.length > 1) synthesis();
@@ -302,9 +309,9 @@ async function buildStatementPdf(PDFLib, d){
   pages.forEach(({page:pg, acct}, i) => {
     const left = safe(`${coproName} · Relevé de compte${acct ? ' · ' + acct.label : ''} · extrait le ${extracted}`);
     pg.drawLine({start:{x:M, y:M-4}, end:{x:W-M, y:M-4}, thickness:.4, color:C.line});
-    pg.drawText(left, {x:M, y:M-15, size:7.4, font:F.r, color:C.faint});
+    pg.drawText(left, {x:M, y:M-15, size:7.5, font:F.r, color:C.soft});
     const r = safe(`page ${i+1} / ${pages.length}`);
-    pg.drawText(r, {x:W-M-tw(r, F.r, 7.4), y:M-15, size:7.4, font:F.r, color:C.faint});
+    pg.drawText(r, {x:W-M-tw(r, F.r, 7.5), y:M-15, size:7.5, font:F.r, color:C.soft});
   });
   const when = new Date(d.extractedAt || Date.now());
   const p0 = accounts[0];

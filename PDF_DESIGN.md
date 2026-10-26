@@ -86,9 +86,9 @@ restent avec le tableau.
 | Document | Moteur | État |
 |---|---|---|
 | Budget prévisionnel (Annexe 4) | HTML | **migré** : `annexModel` + composants, synthèse, trois parties, pagination testée sur 2, 5 et 7 pages |
-| Rapport financier d'AG (`ag`) | HTML | en-tête et pied migrés ; sections `soldesSection`, `resultatSection`, `ownersSection`, `annexeTxSection`, `chronoSection`, `signatures` encore en classes anciennes (stylées par `pdf.css`) — prochain candidat : `annexeTxSection` → `LSPdf.table` |
+| Rapport financier d'AG (`ag`) | HTML | en-tête, pied, `soldesSection` et `annexeTxSection` migrés (`LSPdf.section` + `LSPdf.table`) ; `resultatSection`, `ownersSection`, `chronoSection`, `signatures` encore en classes anciennes (stylées par `pdf.css`) — prochain candidat : `resultatSection` |
 | Compte de paiement (`pay`), Compte de résultats (`res`) | HTML | idem : en-tête et pied migrés |
-| Relevé de compte | pdf-lib (`statement.js`) | palette propre proche des jetons ; à brancher sur `LSPdf.tokens.rgb` et `tokens.font.pt` |
+| Relevé de compte | pdf-lib (`statement.js`) | couleurs sur `LSPdf.tokens.rgb`, plus d'italique, rien sous 7,5 pt, pied en `soft` ; police Helvetica tant que Hanken Grotesk n'est pas embarquée (fontkit + TTF vendorisée), d'où « - » et « du … au … » à la place de « − » et « → » |
 | Procès-verbal d'AG | pdf-lib (`signature.js`) | idem |
 | Convocation | pdf-lib (`convocation.js`) | idem ; le fichier n'était pas suivi par git |
 

@@ -83,7 +83,7 @@
 .pdf-tot td,.report-sheet tr.tot td{font-weight:700;background:var(--pdf-tint2);border-top:1.5px solid var(--pdf-rule);border-bottom:none}
 .pdf-sub-row td,.report-sheet tr.r-month td{color:var(--pdf-soft);font-size:11px;border-bottom:none;padding-top:4px}
 .pdf-empty{color:var(--pdf-soft);font-style:italic}
-.report-sheet .pos{color:#2F6B53}.report-sheet .neg{color:var(--pdf-danger)}
+.report-sheet .pos{color:var(--pdf-green)}.report-sheet .neg{color:var(--pdf-danger)}
 .report-sheet tr.r-group td{padding:8px 8px 3px;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--pdf-soft);border-bottom:1px solid var(--pdf-line)}
 .report-sheet table.r-wide{font-size:11px}
 .report-sheet table.r-wide th,.report-sheet table.r-wide td{padding:4px 6px}

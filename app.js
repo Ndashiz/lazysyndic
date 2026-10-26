@@ -4210,17 +4210,14 @@ function fillReportPeriod(){
     return LSPdf.head({ title, chip:o.chip || title, copro:COPRO(), status:o.status,
       meta:[...(o.meta || []), ...(p && p.label && !o.noPeriod ? [{label:'Période', value:p.label}] : []), {label:'Édité le', value:LSPdf.fmt.dateLong(new Date())}] });
   }
+  // Soldes par compte, sur les composants du design system (PDF_DESIGN.md) : une colonne qui engage.
   function soldesSection(accts, p){
-    const rows = accts.map(a=>{
-      const s = acctSummary(a.key, p);
-      return `<tr><td><b>${a.label}</b></td>
-        <td class="num">${eur(s.opening)}</td>
-        <td class="num pos">+${eur(s.rec)}</td>
-        <td class="num neg">−${eur(s.dep)}</td>
-        <td class="num"><b>${eur(s.closing)}</b></td></tr>`;
-    }).join('');
-    return `<h2>Soldes — ouverture / clôture</h2>
-      <table><tr><th>Compte</th><th class="num">Ouverture</th><th class="num">Recettes</th><th class="num">Dépenses</th><th class="num">Clôture</th></tr>${rows}</table>`;
+    const F = LSPdf.fmt;
+    const rows = accts.map(a=>{ const s = acctSummary(a.key, p);
+      return [{html:`<b>${escH(a.label)}</b>`}, F.eur(s.opening), F.signed(s.rec), `−${F.eur(s.dep)}`, F.eur(s.closing)]; });
+    return LSPdf.section('Soldes : ouverture et clôture', {sub:`Période ${p.label} · ouverture + recettes − dépenses = clôture`})
+      + LSPdf.table({label:'Soldes par compte', rows,
+          cols:[{label:'Compte'}, {label:'Ouverture', align:'right'}, {label:'Recettes', align:'right'}, {label:'Dépenses', align:'right'}, {label:'Clôture', align:'right', emph:true}]});
   }
   function resultatSection(txList, p, label){
     const by = catBreakdown(txList);
@@ -4259,15 +4256,15 @@ function fillReportPeriod(){
       </table>
       <div class="r-sub" style="margin-top:6px">Report = versements antérieurs à l'exercice, moins le dû des exercices déjà appliqués. Solde = report + versé − dû.</div>`;
   }
+  // Mouvements d'un compte sur la période (annexes 2 et 3), sur LSPdf.table : en-tête répété à
+  // chaque page, montant signé « − », total qui reste avec le tableau.
   function annexeTxSection(acct, p, title){
-    const s = acctSummary(acct, p);
-    const rows = s.tx.map(t=>`<tr><td>${t.date}</td><td>${t.tiers}</td>
-      <td>${t.high}${t.sub?(' · '+t.sub):''}</td>
-      <td class="num ${t.amount>=0?'pos':'neg'}">${signed(t.amount)}</td>
-      <td>${t.note||''}</td></tr>`).join('') || '<tr><td colspan="5" class="r-sub">Aucune transaction sur la période.</td></tr>';
-    return `<h2>${title}</h2>
-      <div class="r-sub">Ouverture ${eur(s.opening)} · ${s.tx.length} mouvement(s) · clôture ${eur(s.closing)}</div>
-      <table><tr><th>Date</th><th>Tiers</th><th>Catégorie</th><th class="num">Montant</th><th>Communication</th></tr>${rows}</table>`;
+    const s = acctSummary(acct, p), F = LSPdf.fmt;
+    const rows = s.tx.map(t=>[F.date(t.date), t.tiers, (t.high==='?'?'À catégoriser':t.high)+(t.sub?(' · '+t.sub):''), F.signed(t.amount), t.note||'']);
+    return LSPdf.section(title, {sub:`Ouverture ${F.eur(s.opening)} · ${s.tx.length} mouvement${s.tx.length>1?'s':''} · clôture ${F.eur(s.closing)}`})
+      + LSPdf.table({label:title, rows, cls:'pdf-dense', empty:'Aucune transaction sur la période.',
+          cols:[{label:'Date', w:'78px'}, {label:'Tiers'}, {label:'Catégorie'}, {label:'Montant', align:'right', emph:true}, {label:'Communication'}],
+          totals:[{label:`Total de la période`, cells:['', '', F.signed(s.rec - s.dep), '']}]});
   }
   // Annexe 4 = le budget du module « Calcul des charges » dès qu'il a des postes pour l'exercice
   // affiché ; sinon, l'ancienne estimation (toutes les dépenses + 4 %).
