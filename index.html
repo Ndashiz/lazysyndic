@@ -315,7 +315,9 @@
   td select,td select.fld{padding-right:26px;background-position:right 7px center}
   /* liens d'action (« modifier », « splitter »…) : app.js ne pose ce style qu'à la première
      ouverture d'un aperçu d'import ; sans lui ce sont des boutons natifs */
-  .lk{all:unset;cursor:pointer;font-size:12px;font-weight:600;color:var(--primary)}
+  .lk{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;min-height:32px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:600;color:var(--primary)}
+  .lk:hover{background:var(--secondary)}
+  .lk:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
   .lk.del{color:var(--danger)}
   .lk:hover{text-decoration:underline;text-underline-offset:3px}
   .lk:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:2px}

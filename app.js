@@ -468,6 +468,7 @@ document.querySelectorAll('.nav button[data-s]').forEach(b=>{
     const s=b.dataset.s; if(s==='dash2') return;
     document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));
     document.getElementById(s).classList.add('on');
+    window.scrollTo({top:0});   // un écran s'ouvre par le haut, pas là où le précédent avait défilé
     if(s==='cpta') renderComptabilite();
     animateBars();
   };
@@ -657,7 +658,7 @@ function ensureTxCss(){
       border:1px solid oklch(.88 .05 30);border-radius:11px;padding:9px 14px;font-size:13px;font-weight:600;margin-bottom:10px}
     .fdr-warn .lk{color:var(--coral);text-decoration:underline;font-weight:700;margin-left:auto;cursor:pointer}
     .lk.tx-edit:hover,.lk.tx-done:hover{text-decoration:underline}
-    .cat-pick{border:0;font-family:inherit;cursor:pointer;line-height:inherit}
+    .cat-pick{border:0;font-family:inherit;cursor:pointer;line-height:inherit;min-height:28px}
     .cat-pick .caret{margin-left:4px;font-size:9px;opacity:.45}
     .cat-pick:hover{box-shadow:inset 0 0 0 1.5px currentColor}
     .cat-pick:hover .caret{opacity:1}`;
@@ -1452,7 +1453,6 @@ function ensurePreviewCss(){
     .pv-row.dup>td:first-child{box-shadow:inset 3px 0 0 var(--coral)}
     .pv-row.skip>td{opacity:.4}
     .pv-orig{font-size:11.5px;color:var(--coral);margin-top:3px;display:flex;align-items:center;gap:5px}
-    .lk{all:unset;cursor:pointer;font-size:12px;font-weight:600;color:var(--green)}
     .lk.del{color:var(--coral)} .lk:hover{text-decoration:underline}`;
   document.head.appendChild(s);
 }
@@ -3109,7 +3109,7 @@ function ensureChargesCss(){
   const s=document.createElement('style'); s.id='chgCss';
   s.textContent=`
     .chg-year{display:flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums;font-size:15px}
-    .chg-year .lk{font-size:20px;line-height:1;padding:2px 8px}
+    .chg-year .lk{font-size:20px;line-height:1;min-width:36px;min-height:36px;justify-content:center;padding:0}
     #chgTable td{vertical-align:top}
     #chgTable th,#chgTable td{padding-left:8px;padding-right:8px}
     #chgTable th:first-child,#chgTable td:first-child{padding-left:20px}
@@ -3128,8 +3128,9 @@ function ensureChargesCss(){
     .chg-head-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
     .chg-marge{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
     .chg-marge .fld{width:62px;text-align:right;font-size:13px;padding:6px 8px}
-    #chgTable tr.chg-editor td{background:var(--muted);padding:12px 20px 16px;white-space:normal}
-    .chg-fx{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;max-width:860px;font-weight:400}
+    .chg-editor{background:var(--muted);padding:12px 20px 16px;margin:0 0 10px;border-radius:8px;white-space:normal}
+    @media (max-width:640px){ .chg-editor{padding:12px 14px 14px} }
+    .chg-fx{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;max-width:860px;font-weight:400}
     .chg-fx .sub{white-space:normal}
     .chg-fx-row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
     .chg-fx-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-faint)}
@@ -3192,7 +3193,7 @@ function formulaEditorRow(p, which, y, ref, cols){
     return `<option value="${escH(k)}">${escH(l)} · ${k==='marge'?num(v*100)+' %':k==='mois couverts'?v:eur(v)}</option>`; }).join('');
   const res = LSCharges.evalFormula(cur, c.fields);
   const what = isFc ? `de l'estimation ${y}` : `du réel ${ref}`;
-  return `<tr class="chg-editor"><td colspan="${cols}"><div class="chg-fx" role="dialog" aria-label="Formule ${escH(what)} · ${escH(p.label||'poste')}">
+  return `<div class="chg-editor"><div class="chg-fx" role="group" aria-label="Formule ${escH(what)} · ${escH(p.label||'poste')}">
       <div class="h-row" style="align-items:baseline"><b>Formule ${what} · ${escH(p.label||'poste')}</b><span class="sub">Comme dans un tableur : des champs entre crochets et + − × ÷ ( ) %. Le même éditeur sert au réel et à l'estimation.</span></div>
       <div class="chg-fx-row">
         <label>Insérer un champ de la comptabilité<select class="fld" id="chgFxField" aria-label="Champ de la comptabilité à insérer"><option value="">Choisir un champ…</option>${opts}</select></label>
@@ -3200,7 +3201,7 @@ function formulaEditorRow(p, which, y, ref, cols){
       </div>
       <div class="chg-fx-foot"><span id="chgFxOut">${res.value!=null?`= <b>${eur(res.value)}</b>`:`<span class="chg-warn">${escH(res.error||'')}</span>`}</span>
         <span class="chg-actions" style="margin:0"><button class="btn btn-ghost" id="chgFxStd">Revenir au calcul standard</button><button class="btn btn-ghost" id="chgFxCancel">Annuler</button><button class="btn btn-primary" id="chgFxApply">Appliquer</button></span></div>
-    </div></td></tr>`;
+    </div></div>`;
 }
 function renderCharges(){
   const card=document.getElementById('chgCard'); if(!card || typeof LSCharges==='undefined') return;
@@ -3254,8 +3255,12 @@ function renderCharges(){
         <div>${chip(p,'fc', fcLabel)}</div>
         ${ed?`<input class="fld chg-note" data-i="${i}" value="${escH(p.fcNote||'')}" placeholder="Explication du calcul" aria-label="Explication du calcul">`:(p.fcNote?`<div class="chg-sub" style="white-space:normal">${escH(p.fcNote)}</div>`:'')}</td>
       ${ed?`<td><button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button></td>`:''}
-    </tr>` + (ed && chgEdit && chgEdit.id===p.id ? formulaEditorRow(p, chgEdit.which, y, ref, cols) : '');
+    </tr>`;
   };
+  // L'éditeur de formule vit sous le tableau, pas dans une ligne : dans le tableau défilant, à
+  // 390 px, ses boutons partaient hors champ à droite.
+  const edited = ed && chgEdit ? postes.find(p=>p.id===chgEdit.id) : null;
+  const editor = edited ? formulaEditorRow(edited, chgEdit.which, y, ref, cols) : '';
   const rows = LSCharges.groupPostes(postes).map(g=>`<tr class="chg-group"><td colspan="${cols}">${escH(g.label||'Sans catégorie')}</td></tr>` + g.items.map(({p,i})=>row(p,i)).join('')).join('');
   const table = postes.length ? `<div class="table-wrap"><table id="chgTable">
       <tr><th>Poste</th><th>Bénéficiaire</th><th>Clé de répartition</th><th class="num">Estimé pour ${ref}</th><th class="num">Réel ${ref}</th><th class="num">Delta ${ref}</th><th class="num">Estimation ${y}</th>${ed?'<th></th>':''}</tr>
@@ -3265,7 +3270,7 @@ function renderCharges(){
         <td class="num">${hasReal?eur(totReal):'—'}<div class="chg-sub">${hasReal&&cov.months<12?'ramené à 12 mois':''}</div></td>
         <td class="num">${deltaCell(totDelta)}<div class="chg-sub">${deltaTxt(totDelta)}</div></td>
         <td class="num">${eur(totF)}<div class="chg-sub">soit ${eur(totF/12)} / mois</div></td>${ed?'<td></td>':''}</tr>
-    </table></div>`
+    </table></div>${editor}`
     : `<div class="chg-empty">Aucun poste de dépense pour ${y}.${ed?'':' Le syndic n’a pas encore préparé ce budget.'}</div>`;
   const seedable = cov.months>0 && LSCharges.seed(tx, ref, cov).some(n=>!postes.some(p=>LSCharges.overlaps(p.cat, n.cat)));
   const actions = !ed ? '' : `<div class="chg-actions">
@@ -3489,12 +3494,17 @@ function renderProvisions(){
   const t=document.getElementById('provTable'); if(!t) return;
   const ed=canWrite(); const led=ownerLedger();
   if(!led.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
-  t.innerHTML='<tr><th>Propriétaire</th><th class="num">Dû — paiement</th><th class="num">Dû — réserve</th><th class="num">Total dû</th><th class="num">Versé</th><th class="num">Solde</th></tr>'
+  const num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});   // 952,63 comme partout, relu par parseAmount
+  const ly=led[0].year;
+  t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Versé ${ly}</th><th class="num">Solde</th></tr>`
     + led.map(o=>{
       const late=o.solde<-0.005;
+      const cell=(cls, v, lbl)=> ed
+        ? `<input class="fld ${cls}" data-id="${o.id||''}" value="${num(v)}" inputmode="decimal" aria-label="${escH(lbl)} de ${escH(o.n)}" style="width:92px;text-align:right">`
+        : eur(v);
       return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td>
-        <td class="num"><input class="fld prov-pay" ${ed?'':'disabled'} data-id="${o.id||''}" value="${(o.due_pay||0).toFixed(2)}" style="width:92px;text-align:right"></td>
-        <td class="num"><input class="fld prov-res" ${ed?'':'disabled'} data-id="${o.id||''}" value="${(o.due_res||0).toFixed(2)}" style="width:92px;text-align:right"></td>
+        <td class="num">${cell('prov-pay', o.due_pay, 'Dû paiement')}</td>
+        <td class="num">${cell('prov-res', o.due_res, 'Dû réserve')}</td>
         <td class="num">${eur(o.due)}</td>
         <td class="num">${eur(o.verse)}</td>
         <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td></tr>`;
@@ -5211,7 +5221,9 @@ function ensureToastCss(){
      box-shadow:0 8px 26px rgba(33,40,30,.24);opacity:0;pointer-events:none;
      transition:opacity .25s ease,transform .25s cubic-bezier(.2,.7,.2,1)}
    .ls-toast.show{opacity:1;transform:translate(-50%,0)}
-   .ls-toast.err{background:var(--coral)}
+   .ls-toast.err{background:var(--coral);pointer-events:auto}
+   .ls-toast .x{all:unset;cursor:pointer;margin-left:4px;padding:0 8px;min-height:28px;display:inline-flex;align-items:center;font-weight:700;border-radius:14px}
+   .ls-toast .x:hover,.ls-toast .x:focus-visible{background:rgba(255,255,255,.18)}
    .ls-toast .ic{display:inline-grid;place-items:center;width:19px;height:19px;border-radius:50%;
      background:rgba(255,255,255,.22);font-size:11px;flex:0 0 auto}`;
   document.head.appendChild(s);
@@ -5219,11 +5231,13 @@ function ensureToastCss(){
 function showToast(msg, kind){
   ensureToastCss();
   let el=document.getElementById('lsToast');
-  if(!el){ el=document.createElement('div'); el.id='lsToast'; document.body.appendChild(el); }
-  el.innerHTML=`<span class="ic">${kind==='err'?'!':'✓'}</span><span>${msg}</span>`;
+  if(!el){ el=document.createElement('div'); el.id='lsToast'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite'); document.body.appendChild(el); }
+  el.innerHTML=`<span class="ic">${kind==='err'?'!':'✓'}</span><span>${msg}</span>${kind==='err'?'<button class="x" type="button" aria-label="Fermer">✕</button>':''}`;
   el.className='ls-toast'+(kind==='err'?' err':'')+' show';   // affichage synchrone (animation CSS pour l'entrée)
   clearTimeout(_toastHide);
-  _toastHide=setTimeout(()=>el.classList.remove('show'), kind==='err'?4500:2000);
+  // Une erreur reste affichée jusqu'à sa fermeture : en 4,5 s on n'a pas le temps de la lire.
+  if(kind==='err') el.querySelector('.x').onclick=()=>el.classList.remove('show');
+  else _toastHide=setTimeout(()=>el.classList.remove('show'), 2000);
 }
 // Sauvegardes groupées (ex. catégorie + apprentissage de la règle) → une seule bannière.
 function toastSaved(){
