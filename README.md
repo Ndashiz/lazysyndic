@@ -122,7 +122,10 @@ se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait d
 « Proposer les postes depuis le réel » crée un poste par catégorie dépensée l'année
 précédente. Les dépenses qu'aucun poste ne reprend sont signalées sous le tableau. La
 prévision est répartie par copropriétaire au centime près, et « Appliquer aux provisions »
-en fait le « dû — paiement » de chacun : le suivi des paiements et des retards s'y fie.
+en fait le « dû — paiement » de chacun : le suivi des paiements et des retards s'y fie. Le dû
+est annuel, le versé l'est aussi : le suivi compare le dû de l'exercice (celui du dernier
+budget appliqué, sinon l'année civile) aux versements datés de cet exercice, et reporte ce qui
+précède, net du dû des exercices déjà appliqués (`ownerLedger`, même règle dans le bridge).
 L'Annexe 4 du rapport d'AG reprend ce budget dès qu'il a des postes.
 
 **Fonds de réserve** (même écran, carte suivante) : des postes à constituer sur le compte
@@ -131,8 +134,10 @@ partir de janvier de l'exercice) et une clé. L'appel de l'année = montant ÷ d
 couverts dans l'année ; la somme des années redonne le montant au centime. « Reprendre le
 budget » d'un exercice précédent recopie les postes de réserve encore en cours. Une ligne
 automatique « Contribution minimum légale » complète l'appel de chaque copropriétaire
-jusqu'à 5 % de ses charges courantes de l'année, et baisse quand les autres postes
-appellent déjà plus. « Appliquer aux provisions » remplit alors le dû du compte de
+jusqu'à 5 % de ses charges communes ordinaires de **l'exercice précédent** (art. 3.86 §3 :
+le réel N-1 de chaque poste ramené à 12 mois, réparti selon la clé du poste ; la prévision N
+sert de base tant qu'il n'y a pas de réel, et l'Annexe 4 le dit), et baisse quand les autres
+postes appellent déjà plus. « Appliquer aux provisions » remplit alors le dû du compte de
 paiement et celui du compte de réserve.
 
 Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (colonne
