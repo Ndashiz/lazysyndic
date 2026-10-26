@@ -148,6 +148,18 @@ Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (c
 `ls_settings.charges`). Code : `charges.js` (calcul pur) ; tests :
 `node --test tests/charges.test.mjs` (aucune dépendance).
 
+## Rapprochement bancaire
+
+Fiche du compte (écran **Comptes bancaires**) : le solde calculé **à la date du dernier relevé
+validé** est comparé à la clôture que ce relevé annonce ; un mouvement plus récent que le relevé
+n'est jamais un écart (il est compté à part). Quand il y a un écart, la fiche dit ce qui peut
+l'expliquer : une ligne en trop du montant exact (« Voir »), deux lignes identiques (un relevé importé
+deux fois), une ligne du montant manquant qui attend sa validation ou qui est à la corbeille
+(« Restaurer »), un solde d'ouverture qui s'écarte de l'ouverture du premier relevé. La chaîne des
+relevés validés (fichiers déposés et synchros bancaires) est vérifiée : chacun doit s'ouvrir là où le
+précédent s'est fermé, sinon un relevé manque entre les deux. Le bilan affiché à la validation d'un
+relevé reprend les mêmes explications. Code : `recon.js` (pur) ; tests : `node --test tests/recon.test.mjs`.
+
 ## Appels de fonds
 
 Écran **Budget & copropriétaires** › Calcul des charges › « Provisions attendues par copropriétaire »,

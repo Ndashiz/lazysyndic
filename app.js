@@ -685,6 +685,8 @@ function ensureTxCss(){
     .cat-pick .caret{margin-left:4px;font-size:9px;opacity:.45}
     .cat-pick:hover{box-shadow:inset 0 0 0 1.5px currentColor}
     .cat-pick:hover .caret{opacity:1}
+    .recon-why{flex-basis:100%;margin:4px 0 0;padding-left:18px;font-size:12.5px;color:var(--ink);display:grid;gap:4px;line-height:1.45}
+    .recon-why .lk{font-size:12px;min-height:24px;padding:0 4px}
     .tx-lock{display:inline-grid;place-items:center;width:18px;height:18px;color:var(--ink-faint)}
     .tx-row.locked .cat{opacity:.9}
     #txtable .tx-cell b{max-width:360px;font-weight:600}
@@ -931,13 +933,39 @@ function refreshAccountChrome(){
 }
 
 // Statut de réconciliation : solde calculé vs clôture du dernier relevé.
+// Le rapprochement d'un compte : le solde calculé À LA DATE du dernier relevé validé contre la
+// clôture qu'il annonce. Avant, c'était le solde total : une saisie ou un relevé plus récent que le
+// dernier rapproché, ou un relevé ancien validé après un récent, donnait un faux « déséquilibre ».
 function reconStatus(acct){
   const r = (state.recon||{})[acct];
   if (!r || r.closing===undefined || r.closing===null) return null;
-  if (txOf(acct).length===0) return null;   // aucune transaction → réconciliation sans objet
-  const diff = +(balance(acct) - Number(r.closing)).toFixed(2);
-  return {closing:Number(r.closing), asOf:r.asOf||'', diff, ok:Math.abs(diff)<0.01};
+  if (txOf(acct).length===0) return null;   // aucune transaction → rapprochement sans objet
+  const asOfIso = (parseDate(r.asOf)||{}).iso || '';
+  const bal = asOfIso ? balanceAt(acct, asOfIso) : balance(acct);
+  const diff = +(bal - Number(r.closing)).toFixed(2);
+  const after = asOfIso ? txOf(acct).filter(t=>{ const d=parseDate(t.date); return d && d.iso>asOfIso; }).length : 0;
+  return {closing:Number(r.closing), asOf:r.asOf||'', asOfIso, balanceAt:bal, diff, ok:Math.abs(diff)<0.01, after};
 }
+const reconRow = t => { const d=parseDate(t.date); return {id:t.id, iso:d?d.iso:'', amount:+t.amount||0, tiers:t.tiers||'', date:t.date, t}; };
+// Ce qui peut expliquer un écart (recon.js) : une ligne en trop, un doublon, une ligne du montant
+// manquant en attente ou à la corbeille, un solde d'ouverture qui s'écarte du premier relevé.
+function reconExplain(acct){
+  const rs = reconStatus(acct); if (!rs || rs.ok || typeof LSRecon==='undefined') return null;
+  const first = reconChain(acct).statements[0];
+  return LSRecon.reconcile({ closing:rs.closing, asOfIso:rs.asOfIso, balanceAtAsOf:rs.balanceAt,
+    opening:(state.opening||{})[acct]||0, firstOpening: first && first.opening!=null ? first.opening : null,
+    tx:txOf(acct).map(reconRow), drafts:(state.draftTx||[]).filter(t=>t.account===acct).map(reconRow),
+    trash:(state.trash||[]).filter(t=>t.account===acct).map(reconRow) });
+}
+// Les relevés validés du compte (fichiers déposés et synchros bancaires), dans l'ordre : chacun doit
+// s'ouvrir là où le précédent s'est fermé, sinon un relevé manque entre les deux.
+function reconChain(acct){
+  const sts=(state.imports||[]).filter(im=>im.stmt && im.stmt.acct===acct && !im.pending).map(im=>({
+    v:im.v, label:im.label, opening:im.stmt.opening, closing:im.stmt.closing, from:im.stmt.from||'', asOf:im.stmt.asOf||'',
+    fromIso:(parseDate(im.stmt.from)||{}).iso||'', asOfIso:(parseDate(im.stmt.asOf)||{}).iso||'' }));
+  return typeof LSRecon!=='undefined' ? LSRecon.chain(sts) : {statements:sts, gaps:[]};
+}
+let reconCands = [];   // les candidats affichés dans la fiche du compte (en démo les ids sont null : on les garde par index)
 // Titulaire du compte, pour le relevé PDF : saisi dans la fiche du compte, sinon lu sur le
 // dernier relevé bancaire validé, sinon le nom de la copropriété (une ACP est titulaire de ses comptes).
 function acctHolder(acct){
@@ -960,12 +988,23 @@ function renderAcctInfo(acct){
   const holder = acctHolder(acct);
   const open = (state.opening&&state.opening[acct])||0;
   const bal = balance(acct);
-  const rs = reconStatus(acct);
+  const rs = reconStatus(acct), ex = rs && !rs.ok ? reconExplain(acct) : null, ch = reconChain(acct);
+  reconCands = ex ? ex.candidates : [];
+  const txLabel = t => `${escH(t.date)} · ${escH(t.tiers)} · ${signed(t.amount)}`;
+  const why = !ex ? '' : (ex.candidates.length ? ex.candidates.map((c, i) =>
+      c.kind==='extra' ? `<li>Une ligne en trop ? <b>${txLabel(c.t)}</b>, le montant exact de l'écart. <button class="lk recon-see" data-i="${i}">Voir</button></li>`
+    : c.kind==='dup' ? `<li>Deux lignes identiques : <b>${txLabel(c.t)}</b>, un relevé importé deux fois ? <button class="lk recon-see" data-i="${i}">Voir</button></li>`
+    : c.kind==='draft' ? `<li>Une ligne du montant manquant attend sa validation : <b>${txLabel(c.t)}</b>. <button class="lk recon-drafts">Voir les relevés à valider</button></li>`
+    : c.kind==='trash' ? `<li>Une ligne du montant manquant est à la corbeille : <b>${txLabel(c.t)}</b>.${ed?` <button class="lk recon-restore" data-i="${i}">Restaurer</button>`:''}</li>`
+    : `<li>Le solde d'ouverture du compte (${eur(c.opening)}) s'écarte de l'ouverture annoncée par le premier relevé (${eur(c.firstOpening)}), du montant de l'écart.</li>`).join('')
+    : `<li>Aucune ligne isolée n'explique l'écart : plusieurs lignes manquent ou sont en trop, ou le solde d'ouverture est faux.</li>`);
+  const gaps = ch.gaps.map(g => `<li>Le relevé « ${escH(g.next.label||('v'+g.next.v))} » s'ouvre à ${eur(g.next.opening)} alors que le précédent se fermait à ${eur(g.prev.closing)} : un relevé manque entre le ${escH(g.prev.asOf)} et le ${escH(g.next.from||g.next.asOf)} (${g.diff>0?'+':'−'}${eur(Math.abs(g.diff))}).</li>`).join('');
+  const afterTxt = rs && rs.after ? ` · ${rs.after} mouvement${rs.after>1?'s':''} plus récent${rs.after>1?'s':''} que le relevé, hors rapprochement` : '';
   const reconHtml = rs
     ? (rs.ok
-        ? `<span class="badge b-ok">✓ Réconcilié</span> <span class="sub">solde calculé = clôture du relevé (${eur(rs.closing)}${rs.asOf?' au '+rs.asOf:''})</span>`
-        : `<span class="badge b-late">⚠ Déséquilibre ${rs.diff>0?'+':''}${eur(rs.diff)}</span> <span class="sub">calculé ${eur(bal)} ≠ clôture du relevé ${eur(rs.closing)}${rs.asOf?' au '+rs.asOf:''} — transaction manquante ou en trop ?</span>`)
-    : '<span class="sub">Aucun relevé importé pour ce compte — pas encore de réconciliation.</span>';
+        ? `<span class="status success">Réconcilié${rs.asOf?' au '+escH(rs.asOf):''}</span> <span class="sub">solde calculé à cette date ${eur(rs.balanceAt)} = clôture du relevé${afterTxt}</span>${gaps?`<ul class="recon-why">${gaps}</ul>`:''}`
+        : `<span class="status danger">Écart ${rs.diff>0?'+':'−'}${eur(Math.abs(rs.diff))}${rs.asOf?' au '+escH(rs.asOf):''}</span> <span class="sub">solde calculé à cette date ${eur(rs.balanceAt)} ≠ clôture du relevé ${eur(rs.closing)}${afterTxt}</span><ul class="recon-why">${why}${gaps}</ul>`)
+    : '<span class="sub">Aucun relevé importé pour ce compte — pas encore de rapprochement.</span>';
   box.innerHTML = `
     <div class="grid" style="grid-template-columns:1.3fr 1.3fr 1fr 1fr;gap:14px;align-items:end">
       <div><div class="l" style="font-size:12px;color:var(--ink-faint)">IBAN du ${acct==='res'?'compte de réserve':'compte de paiement'}</div>
@@ -983,6 +1022,9 @@ function renderAcctInfo(acct){
       <span class="sub">cible fixée en AG — pilote la jauge de l'accueil</span></div>` : ''}
     <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}<span style="margin-left:auto;display:flex;gap:14px;flex-wrap:wrap"><button class="lk" id="acctStmt">Relevé de compte (PDF)</button>${ed?`<button class="lk" id="acctReset" style="color:var(--coral)">↺ Réinitialiser ce compte</button>`:''}</span></div>`;
   box.querySelector('#acctStmt')?.addEventListener('click', ()=>window.LazySyndic.openStatement && window.LazySyndic.openStatement(acct));
+  box.querySelectorAll('.recon-see').forEach(b=>b.onclick=()=>{ const c=reconCands[+b.dataset.i]; if(c && c.t && c.t.t) showTxDetail(c.t.t); });
+  box.querySelectorAll('.recon-restore').forEach(b=>b.onclick=()=>{ const c=reconCands[+b.dataset.i]; if(c && c.t && c.t.id) restoreTrash([c.t.id]); });
+  box.querySelectorAll('.recon-drafts').forEach(b=>b.onclick=()=>goToScreen('imp'));
   if (ed){
     const ib=box.querySelector('#acctIban');
     ib.onchange=()=>{ const v=ib.value.trim(); state.ibans=state.ibans||{}; state.ibans[acct]=v;
@@ -1798,11 +1840,20 @@ async function confirmDraftImport(v){
     const rs = reconStatus(acct);
     const label = acct==='res'?'compte de réserve':'compte de paiement';
     if (rs && !rs.ok){
-      msg += `\n\n⚠ DÉSÉQUILIBRE sur le ${label} : solde calculé ${eur(balance(acct))} ≠ clôture du relevé `
-        + `${eur(rs.closing)} (écart ${rs.diff>0?'+':''}${eur(rs.diff)}).`
-        + `\nVérifiez une transaction manquante, en double, ou un solde d'ouverture erroné.`;
+      const ex = reconExplain(acct);
+      const lines = ex && ex.candidates.length ? ex.candidates.map(c =>
+          c.kind==='extra' ? `une ligne en trop ? ${c.t.date} · ${c.t.tiers} · ${signed(c.t.amount)}, le montant exact de l'écart`
+        : c.kind==='dup' ? `deux lignes identiques : ${c.t.date} · ${c.t.tiers} · ${signed(c.t.amount)}, un relevé importé deux fois ?`
+        : c.kind==='draft' ? `une ligne du montant manquant attend sa validation : ${c.t.date} · ${c.t.tiers}`
+        : c.kind==='trash' ? `une ligne du montant manquant est à la corbeille : ${c.t.date} · ${c.t.tiers}`
+        : `le solde d'ouverture (${eur(c.opening)}) s'écarte de l'ouverture du premier relevé (${eur(c.firstOpening)})`)
+        : ['aucune ligne isolée n\'explique l\'écart : plusieurs lignes manquent ou sont en trop, ou le solde d\'ouverture est faux'];
+      msg += `\n\n⚠ Écart sur le ${label} au ${rs.asOf} : solde calculé à cette date ${eur(rs.balanceAt)} ≠ clôture du relevé ${eur(rs.closing)} (${rs.diff>0?'+':''}${eur(rs.diff)}).\n`
+        + lines.map(l=>'• '+l).join('\n') + `\nLe détail reste dans la fiche du compte (écran Comptes).`;
+      const gaps = reconChain(acct).gaps;
+      if (gaps.length) msg += `\n• ${gaps.length} trou${gaps.length>1?'s':''} dans la chaîne des relevés : un relevé s'ouvre ailleurs que là où le précédent se fermait.`;
     } else if (rs && rs.ok){
-      msg += `\n\n✓ Réconcilié sur le ${label} : le solde calculé correspond à la clôture du relevé.`;
+      msg += `\n\n✓ Réconcilié sur le ${label} au ${rs.asOf} : le solde calculé à cette date correspond à la clôture du relevé.`;
     }
   }
   const needJust = rows.filter(commentRequired).length;
