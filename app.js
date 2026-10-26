@@ -4766,30 +4766,59 @@ function renderPaymentTracking(){
     ${relance}</div>`;
   box.querySelectorAll('.relance-btn').forEach(b=>b.onclick=()=>relanceOwner(b.dataset.short));
 }
-function relanceOwner(short){
+// Rappel de paiement : un brouillon .eml (X-Unsent) adressé au copropriétaire, aux couleurs du
+// design comme la convocation, avec le détail de l'exercice et le compte de paiement à créditer ;
+// tracé dans la chronologie. L'envoi reste le geste du syndic, depuis sa messagerie.
+async function relanceOwner(short){
   const o=ownerLedger().find(x=>(x.short||x.n)===short); if(!o) return;
   const cn=(state.coproName||'').trim()||'la copropriété';
   const m=(window.LS&&window.LS.member)||{};
   const syndic=(m.full_name||'').trim()||'Le syndic';
-  const syndicEmail=m.userEmail||m.email||'syndic@exemple.be';
-  const eml=`From: ${syndic} (Syndic) <${syndicEmail}>
-To: 
-Subject: Rappel de paiement de charges - ${cn}
-MIME-Version: 1.0
-Content-Type: text/plain; charset="utf-8"
+  const syndicEmail=String(m.userEmail||m.email||'').trim();
+  const to=String(o.email||'').trim();                       // ls_owners.email, comme la convocation et le relevé
+  const iban=String((state.ibans||{}).pay||'').trim();
+  const ibanTxt=iban && window.LSStatement ? LSStatement.fmtIban(iban) : iban;
+  const sg=v=>`${v<0?'−':''}${eur(Math.abs(v))}`;
+  const amount=eur(Math.abs(o.solde)), hasRep=Math.abs(o.report)>=0.005;
+  const subject=`Rappel de paiement de charges · ${cn}`;
+  const text=`Bonjour ${o.n},
 
-Bonjour ${o.n},
+Sauf erreur de notre part, votre compte présente un solde en attente de ${amount} au titre des charges de ${cn}, exercice ${o.year} : dû ${eur(o.due)}, versé ${eur(o.verse)}${hasRep?`, report des exercices précédents ${sg(o.report)}`:''}.
 
-Sauf erreur de notre part, votre compte presente un solde en attente de ${eur(Math.abs(o.solde))} au titre des charges de ${cn} (du ${eur(o.due)}, verse ${eur(o.verse)}).
-
-Merci de bien vouloir regulariser des que possible. Si un versement a deja ete effectue, n'en tenez pas compte et n'hesitez pas a me le signaler.
+Merci de régulariser dès que possible${ibanTxt?` sur le compte de paiement de la copropriété, ${ibanTxt}`:''}. Si un versement a déjà été effectué, n'en tenez pas compte et n'hésitez pas à me le signaler.
 
 Cordialement,
-${syndic} - Syndic, ${cn}
+${syndic}, syndic de ${cn}
 `;
+  const T=LSConvocation.T, base="font-family:'Hanken Grotesk','Segoe UI',Helvetica,Arial,sans-serif;";
+  const row=(l,v,b)=>`<tr><td style="${base}font-size:13px;line-height:20px;color:${T.muted};padding:4px 0">${escH(l)}</td><td align="right" style="${base}font-size:13px;line-height:20px;color:${T.ink};padding:4px 0${b?';font-weight:700':''}">${escH(v)}</td></tr>`;
+  const html=`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.bg}" style="background-color:${T.bg};margin:0;padding:0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.card}" style="width:560px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:10px">
+<tr><td style="padding:18px 28px;border-bottom:1px solid ${T.line}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td valign="middle" style="width:34px;padding-right:10px"><img src="cid:logo@lazysyndic" width="34" height="34" alt="" style="display:block;width:34px;height:34px;border:0;border-radius:8px"></td>
+<td valign="middle" style="${base}font-size:17px;line-height:22px;color:${T.deep}"><span style="font-weight:800">Lazy</span><span style="font-weight:600">Syndic</span></td>
+<td valign="middle" align="right" style="${base}font-size:12px;line-height:18px;color:${T.muted};white-space:nowrap">Rappel de paiement · ${escH(fmtDateLong(todayISO()))}</td></tr></table></td></tr>
+<tr><td bgcolor="${T.primary}" style="background-color:${T.primary};padding:24px 28px">
+<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${T.mint}">${escH(cn)} · exercice ${o.year}</div>
+<div style="${base}font-size:26px;line-height:32px;font-weight:800;color:#FFFFFF;margin-top:6px">${escH(amount)} en attente</div></td></tr>
+<tr><td style="padding:24px 28px 8px;${base}color:${T.ink}">
+<p style="margin:0 0 14px;${base}font-size:15px;line-height:22px;font-weight:700;color:${T.ink}">Bonjour ${escH(o.n)},</p>
+<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Sauf erreur de notre part, votre compte présente un solde en attente de <b>${escH(amount)}</b> au titre des charges de <b>${escH(cn)}</b>.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid ${T.line};border-bottom:1px solid ${T.line};margin:0 0 14px">
+${row(`Dû ${o.year} (charges et réserve)`, eur(o.due))}${row(`Versé ${o.year}`, eur(o.verse))}${hasRep?row('Report des exercices précédents', sg(o.report)):''}${row('Solde', sg(o.solde), true)}</table>
+${ibanTxt?`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.secondary}" style="background-color:${T.secondary};border-radius:8px;margin:0 0 14px"><tr><td style="padding:12px 14px;border-left:3px solid ${T.clay}"><div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${T.deep}">Compte de paiement de la copropriété</div><div style="${base}font-size:16px;line-height:22px;font-weight:700;color:${T.ink};margin-top:3px">${escH(ibanTxt)}</div></td></tr></table>`:''}
+<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Merci de régulariser dès que possible. Si un versement a déjà été effectué, n'en tenez pas compte et n'hésitez pas à me le signaler.</p>
+<p style="margin:0 0 20px;${base}font-size:14px;line-height:22px;color:${T.ink}">Cordialement,<br><b>${escH(syndic)}</b>, syndic de ${escH(cn)}</p></td></tr>
+<tr><td style="padding:12px 28px 16px;border-top:1px solid ${T.line};${base}font-size:11px;line-height:16px;color:${T.muted}">Message préparé avec LazySyndic.</td></tr>
+</table></td></tr></table>`;
+  const logo=await brandMarkPng();
+  const eml=LSConvocation.eml({from:syndicEmail||undefined, fromName:syndic, to:to?[to]:[], subject, text, html, logo:logo?{bytes:logo, cid:'logo@lazysyndic'}:null});
   const blob=new Blob([eml],{type:'message/rfc822'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`relance-${short}.eml`;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`rappel-${sansAccents(short).replace(/[^A-Za-z0-9_-]+/g,'_')}-${o.year}.eml`;
   document.body.appendChild(a); a.click(); a.remove();
+  logTimeline({title:`Rappel de paiement préparé pour ${o.n}`, kind:'manual',
+    description:`${amount} en attente, exercice ${o.year} (dû ${eur(o.due)}, versé ${eur(o.verse)}). Brouillon .eml ${to?`adressé à ${to}`:'sans destinataire : e-mail du copropriétaire à renseigner dans Copropriétaires & lots'}.`});
+  showToast(to ? `Brouillon de rappel prêt pour ${o.n} (${to}) : il s'ouvre dans votre messagerie.` : `Brouillon prêt, sans destinataire : ${o.n} n'a pas d'e-mail dans Copropriétaires & lots.`, to?'':'err');
 }
 
 /* ============================================================
