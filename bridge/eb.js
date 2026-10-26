@@ -71,6 +71,13 @@ async function main() {
       if (l.last_sync) console.log(`    dernière synchro ${String(l.last_sync_at || '').slice(0, 16).replace('T', ' ')} : ${JSON.stringify(l.last_sync.added || {})}${l.last_sync.error ? ` · ERREUR ${l.last_sync.error}` : ''}`);
       if (l.error) console.log(`    erreur : ${l.error}`);
     }
+    const syncs = await rest.select('ls_bank_syncs', 'select=at,cause,ok,added_pay,added_res,known,matched,error&order=at.desc&limit=10').catch(() => null);
+    if (syncs) {
+      console.log(`\nDernières synchros (${syncs.length}) :`);
+      for (const s of syncs) {
+        console.log(`  ${String(s.at).slice(0, 16).replace('T', ' ')}  ${String(s.cause).padEnd(8)} ${s.ok ? 'ok    ' : 'ÉCHEC '} +${s.added_pay} paiement · +${s.added_res} réserve · ${s.known + s.matched} déjà connu(s)${s.error ? ` · ${s.error}` : ''}`);
+      }
+    }
     return;
   }
 

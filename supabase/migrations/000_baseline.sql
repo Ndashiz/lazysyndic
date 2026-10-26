@@ -35,8 +35,8 @@
 --    §9  ls_invites + trigger             ← auto-provision.sql
 --    §10 RLS (lecture = membres, écriture = syndic) ← schema.sql §6 + ag.sql §1
 --    §11 bucket privé ls-docs + policies  ← ag.sql §3
---    §12 ls_bank_links (+ ls_transactions.bank_ref) ← NOUVEAU : synchro bancaire Enable Banking
---                                           (bridge/banksync.js, banque.html) ; syndic seul
+--    §12 ls_bank_links, ls_bank_syncs (+ ls_transactions.bank_ref) ← NOUVEAU : synchro bancaire
+--                                           Enable Banking (bridge/banksync.js, banque.html) ; syndic seul
 --
 --  Jamais de nom ni d'e-mail réel ici : le dépôt est public. Les exemples
 --  (Alex Martin, Sam Bernard, Lou Petit, EMAIL_ADMIN…) sont fictifs.
@@ -562,6 +562,39 @@ alter table public.ls_bank_links enable row level security;
 drop policy if exists ls_bank_links_admin on public.ls_bank_links;
 create policy ls_bank_links_admin on public.ls_bank_links for all
   using ((select public.ls_is_admin())) with check ((select public.ls_is_admin()));
+
+-- Historique des synchros : une ligne par passage du pont, réussi ou non, même quand rien n'est
+-- arrivé (sinon une synchro « rien de nouveau » ne laisse aucune trace). Écrite par le pont seul
+-- (service_role) ; le syndic la lit dans la carte « Synchronisation bancaire ».
+create table if not exists public.ls_bank_syncs (
+  id         uuid primary key default gen_random_uuid(),
+  link_id    uuid references public.ls_bank_links(id) on delete set null,
+  at         timestamptz not null default now(),
+  cause      text not null default 'auto',     -- auto (planifiée) | manual (bouton) | connect (1re) | cli (eb.js)
+  ok         boolean not null default true,
+  added_pay  int not null default 0,           -- mouvements ajoutés au relevé à valider
+  added_res  int not null default 0,
+  known      int not null default 0,           -- déjà synchronisés
+  matched    int not null default 0,           -- déjà présents par un relevé déposé
+  balances   jsonb not null default '{}'::jsonb,  -- solde de la banque par compte : {pay, res}
+  warnings   jsonb not null default '[]'::jsonb,
+  error      text
+);
+create index if not exists ls_bank_syncs_at_idx on public.ls_bank_syncs(at desc);
+alter table public.ls_bank_syncs enable row level security;
+drop policy if exists ls_bank_syncs_read on public.ls_bank_syncs;
+create policy ls_bank_syncs_read on public.ls_bank_syncs for select
+  using ((select public.ls_is_admin()));
+-- La synchro faite avant cette table n'est connue que par la connexion : on la reprend une fois.
+insert into public.ls_bank_syncs (link_id, at, cause, ok, added_pay, added_res, known, matched, warnings, error)
+select l.id, l.last_sync_at, 'connect', l.last_sync->>'error' is null,
+       coalesce((l.last_sync->'added'->>'pay')::int, 0), coalesce((l.last_sync->'added'->>'res')::int, 0),
+       coalesce((l.last_sync->>'known')::int, 0), coalesce((l.last_sync->>'matched')::int, 0),
+       coalesce(l.last_sync->'warnings', '[]'::jsonb), l.last_sync->>'error'
+from public.ls_bank_links l
+where l.last_sync_at is not null
+  and not exists (select 1 from public.ls_bank_syncs s where s.link_id = l.id)
+on conflict do nothing;
 
 -- ============================================================
 --  Terminé. Vérification : coller ../check.sql dans le SQL Editor — aucune ligne

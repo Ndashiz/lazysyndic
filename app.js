@@ -2038,7 +2038,7 @@ function renderImports(){
 const BANK_CB_KEY = 'ls:bankCallback';    // posé par banque.html, consommé une fois ici
 const BANK_COUNTRIES = [['FR','France'],['BE','Belgique'],['NL','Pays-Bas'],['DE','Allemagne'],['ES','Espagne'],['IT','Italie'],['LU','Luxembourg']];
 const BANK_LIVE = ['requested','auth_ready','code_received','active','revoke_requested'];
-const bank = { links:null, error:'', busy:'', timeout:false, timer:null };
+const bank = { links:null, error:'', busy:'', timeout:false, timer:null, syncs:null, syncsMissing:false, historyOpen:false };
 
 const bankAvailable = () => writeToDb() && canWrite();
 /** La connexion qui compte : celle en cours ou active, sinon la plus récente. */
@@ -2059,6 +2059,40 @@ async function bankLoad(){
     bank.links = [];
     bank.error = /ls_bank_links|schema cache|does not exist|relation/i.test(e.message||'') ? 'missing' : (e.message||String(e));
   }
+  // Historique : table arrivée après ls_bank_links. Absente, la carte le dit au lieu d'échouer.
+  try { bank.syncs = await window.LS.db.bankSyncs(); bank.syncsMissing = false; }
+  catch(e){ bank.syncs = []; bank.syncsMissing = /ls_bank_syncs|schema cache|does not exist|relation/i.test(e.message||''); }
+}
+
+/** Historique des synchros (ls_bank_syncs) : une ligne par passage du pont, réussi ou non. */
+const BANK_CAUSE = {auto:'Automatique', manual:'À la demande', connect:'Connexion', cli:'Outil (VPS)'};
+function bankHistoryHtml(){
+  if (bank.syncsMissing) return `<div class="sub" style="margin-top:12px">Historique des synchros : la table <b>ls_bank_syncs</b> manque — relancez le SQL de la synchro bancaire (baseline §12).</div>`;
+  const list = bank.syncs || [];
+  if (!list.length) return '';
+  const when = iso => new Date(iso).toLocaleString('fr-BE', {day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit'});
+  const rows = list.map(s=>{
+    const added = (s.added_pay||0) + (s.added_res||0), known = (s.known||0) + (s.matched||0);
+    const parts = [s.added_pay ? `${s.added_pay} paiement` : '', s.added_res ? `${s.added_res} réserve` : ''].filter(Boolean).join(' · ');
+    const result = !s.ok ? '<b style="color:var(--danger)">Échec</b>'
+      : added ? `<b>${added} nouveau(x)</b> <span class="sub">${parts}</span>` : '<span class="sub">rien de nouveau</span>';
+    const bal = s.balances || {};
+    const balTxt = ['pay','res'].filter(k=>bal[k]!=null).map(k=>`${k==='pay'?'💳':'🏦'} ${eur(Number(bal[k]))}`).join('<br>');
+    return `<tr><td style="white-space:nowrap">${when(s.at)}</td><td>${BANK_CAUSE[s.cause]||escH(s.cause)}</td>
+      <td>${result}${s.error?`<div class="cmt" style="color:var(--danger)">${escH(s.error)}</div>`:''}${(s.warnings||[]).map(w=>`<div class="cmt">⚠ ${escH(w)}</div>`).join('')}</td>
+      <td class="num">${known||'—'}</td><td class="num" style="white-space:nowrap">${balTxt||'—'}</td></tr>`;
+  }).join('');
+  const failed = list.filter(s=>!s.ok).length;
+  const arrived = list.reduce((n,s)=>n+(s.added_pay||0)+(s.added_res||0), 0);
+  return `<details id="bkHistory" style="margin-top:12px"${bank.historyOpen?' open':''}>
+      <summary class="summary-btn">Historique des synchros · ${list.length} dernière(s) · ${arrived} mouvement(s) arrivé(s)${failed?` · <span style="color:var(--danger)">${failed} échec(s)</span>`:''}</summary>
+      <table style="margin-top:6px"><tr><th>Quand</th><th>Déclenchée</th><th>Résultat</th><th class="num">Déjà connus</th><th class="num">Soldes banque</th></tr>${rows}</table>
+    </details>`;
+}
+// la liste se redessine toutes les 3 s pendant une attente : elle garde son état déplié
+function wireBankHistory(box){
+  const d = box.querySelector('#bkHistory');
+  if (d) d.ontoggle = ()=>{ bank.historyOpen = d.open; };
 }
 const bankStamp = () => new Date().toISOString();
 const bankDay = iso => iso ? new Date(iso).toLocaleDateString('fr-BE') : '—';
@@ -2238,8 +2272,9 @@ function renderBankCard(){
   if (!l || !BANK_LIVE.includes(l.status)){
     const why = l && (l.status==='error' || l.status==='expired') && l.error
       ? `<div class="alert"><span class="ic">⚠</span><div><b>${l.status==='expired'?'Connexion expirée':'Connexion non aboutie'}.</b> ${escH(l.error)}</div></div>` : '';
-    box.innerHTML = wrap(l && l.status==='expired' ? badge('Expirée','b-late') : badge('Non connectée'), why + timeoutMsg + form(l && l.status==='expired' ? 'Reconnecter la banque' : 'Connecter la banque'));
+    box.innerHTML = wrap(l && l.status==='expired' ? badge('Expirée','b-late') : badge('Non connectée'), why + timeoutMsg + form(l && l.status==='expired' ? 'Reconnecter la banque' : 'Connecter la banque') + bankHistoryHtml());
     wireForm();
+    wireBankHistory(box);
     return;
   }
 
@@ -2301,7 +2336,9 @@ function renderBankCard(){
       ${btn('bkSync', bank.busy==='sync' ? 'Synchro…' : 'Synchroniser maintenant', soon ? 'btn-ghost' : 'btn-primary')}
       ${btn('bkRenew', 'Renouveler l’accord', soon ? 'btn-primary' : 'btn-ghost')}
       <button class="btn btn-ghost" id="bkRevoke" type="button" style="color:var(--coral)">Déconnecter</button>
-    </div>`);
+    </div>
+    ${bankHistoryHtml()}`);
+  wireBankHistory(box);
   box.querySelectorAll('.bk-acct').forEach(s=>s.onchange=async ()=>{
     if (!s.value) return;
     const map = {...(l.acct_map||{}), [s.dataset.key]: s.value};

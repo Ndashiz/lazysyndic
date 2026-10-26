@@ -220,6 +220,10 @@ validation du syndic, exactement comme pour un fichier déposé.
   est déposé après une synchro. Un relevé synchronisé puis écarté ne revient pas.
 - **Rapprochement** : le solde donné par la banque sert de clôture au relevé ; la validation le
   compare au solde calculé.
+- **Historique** : sous la carte, « Historique des synchros » liste les 50 dernières, avec ce qui
+  les a déclenchées (automatique, à la demande, connexion, outil du VPS), le résultat (mouvements
+  arrivés par compte, rien de nouveau, échec et son message), les lignes déjà connues et les soldes
+  de la banque. Une synchro sans nouveauté y figure aussi (table `ls_bank_syncs`, écrite par le pont).
 
 Le navigateur ne détient aucun secret : la clé privée Enable Banking vit sur le VPS, dans le pont
 ([`bridge/README.md`](bridge/README.md#bank-sync-enable-banking) : mise en place, outil `eb.js`).

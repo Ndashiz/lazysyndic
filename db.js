@@ -198,6 +198,14 @@
       if (error) throw error;
       return data || [];
     },
+    /** Historique des synchros (ls_bank_syncs), écrit par le pont seul ; le plus récent d'abord. */
+    async bankSyncs(limit=50){
+      const {data, error} = await T('ls_bank_syncs')
+        .select('id,link_id,at,cause,ok,added_pay,added_res,known,matched,balances,warnings,error')
+        .order('at', {ascending:false}).limit(limit);
+      if (error) throw error;
+      return data || [];
+    },
     async bankLinkAdd(row){ const {data,error}=await T('ls_bank_links').insert(row).select('id').single(); if(error)throw error; return data; },
     async bankLinkUpdate(id, patch){ const {error}=await T('ls_bank_links').update(patch).eq('id',id); if(error)throw error; },
 

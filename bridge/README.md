@@ -133,6 +133,11 @@ opens nothing: every Enable Banking call is signed with an RS256 JWT (`kid` = ap
 - one pending `ls_imports` row per account (`stmt.source = 'bank'`) that grows with each sync until
   validated; `stmt.closing` is the bank's balance, so validation reconciles against it.
 - a timeline entry when something arrived.
+- one `ls_bank_syncs` row per sync, success or failure, even when nothing arrived: cause
+  (`auto` / `manual` / `connect` / `cli`), added per account, already known, bank balances,
+  warnings, error. The app lists them under the card; `eb.js status` prints the last ten. Written
+  only by the bridge (the table has a read policy for the syndic, no write policy); a missing table
+  never blocks a sync.
 
 **Duplicates.** Window = last sync (else last ledger line, else 89 days) minus 5 days. Skipped: a
 known `bank_ref` (deleted rows included), a ref already seen by an earlier sync (a discarded synced

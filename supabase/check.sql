@@ -6,13 +6,13 @@
 --  Sur une base complète, le résultat doit contenir :
 --    • AUCUNE ligne « TABLE MANQUANTE », « COLONNE MANQUANTE », « BUCKET MANQUANT »,
 --      « FONCTION MANQUANTE », « TRIGGER MANQUANT » ni « RLS DÉSACTIVÉE » ;
---    • section « colonne » : les 16 tables ls_* et leurs colonnes (la liste attendue
+--    • section « colonne » : les 17 tables ls_* et leurs colonnes (la liste attendue
 --      ci-dessous = la définition de 000_baseline.sql, vérifiée par tests/schema.test.mjs) ;
 --    • section « policy » : ls_<table>_read + ls_<table>_write pour les 13 tables de données
 --      (ls_owners, ls_lots, ls_transactions, ls_rules, ls_aliases, ls_contracts, ls_reminders,
 --      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points, ls_periods), ls_members_read seule
 --      (jamais d'écriture côté client), ls_invites_admin, ls_bank_links_admin (syndic seul,
---      lecture comprise), et sur storage.objects :
+--      lecture comprise), ls_bank_syncs_read (syndic, lecture seule : seul le pont écrit), et sur storage.objects :
 --      ls_docs_read / ls_docs_insert / ls_docs_update / ls_docs_delete ;
 --    • section « bucket » : ls-docs, privé, 20971520 o, application/pdf ;
 --    • section « fonction » : ls_is_admin, ls_is_member (boolean), ls_provision_member (trigger) ;
@@ -22,7 +22,7 @@
 with attendu_tables(t) as (values
   ('ls_members'), ('ls_owners'), ('ls_lots'), ('ls_transactions'), ('ls_rules'), ('ls_aliases'),
   ('ls_contracts'), ('ls_reminders'), ('ls_settings'), ('ls_imports'), ('ls_timeline'),
-  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites'), ('ls_bank_links')
+  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites'), ('ls_bank_links'), ('ls_bank_syncs')
 ),
 attendu_colonnes(t, c) as (values
   ('ls_members','id'), ('ls_members','email'), ('ls_members','full_name'), ('ls_members','owner_short'),
@@ -67,7 +67,10 @@ attendu_colonnes(t, c) as (values
   ('ls_bank_links','code'), ('ls_bank_links','session_id'), ('ls_bank_links','valid_until'), ('ls_bank_links','accounts'),
   ('ls_bank_links','acct_map'), ('ls_bank_links','seen'), ('ls_bank_links','sync_requested_at'), ('ls_bank_links','last_sync_at'),
   ('ls_bank_links','last_ok_at'), ('ls_bank_links','last_sync'), ('ls_bank_links','error'), ('ls_bank_links','created_by'),
-  ('ls_bank_links','created_at'), ('ls_bank_links','updated_at')
+  ('ls_bank_links','created_at'), ('ls_bank_links','updated_at'),
+  ('ls_bank_syncs','id'), ('ls_bank_syncs','link_id'), ('ls_bank_syncs','at'), ('ls_bank_syncs','cause'),
+  ('ls_bank_syncs','ok'), ('ls_bank_syncs','added_pay'), ('ls_bank_syncs','added_res'), ('ls_bank_syncs','known'),
+  ('ls_bank_syncs','matched'), ('ls_bank_syncs','balances'), ('ls_bank_syncs','warnings'), ('ls_bank_syncs','error')
 ),
 presentes as (
   select table_name::text as t, column_name::text as c, data_type::text as data_type,

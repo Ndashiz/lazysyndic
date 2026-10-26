@@ -48,7 +48,7 @@ function filterRows(rows, query) {
   return limit ? out.slice(0, limit) : out;
 }
 function fakeRest(seed = {}) {
-  const db = { ls_bank_links: [], ls_transactions: [], ls_imports: [], ls_timeline: [], ls_settings: [{ id: 1 }], ...seed };
+  const db = { ls_bank_links: [], ls_transactions: [], ls_imports: [], ls_timeline: [], ls_bank_syncs: [], ls_settings: [{ id: 1 }], ...seed };
   let n = 0;
   return {
     db,
@@ -341,5 +341,47 @@ test('un mouvement d’un exercice clôturé n’est pas importé (il bloquerait
   // sans table ls_periods (base pas encore migrée), rien n'est écarté
   const two = setup({ ls_settings: [settings], ls_bank_links: [request({ status: 'code_received', code: 'good-code' })] });
   await two.sync.tick();
+  assert.equal(two.rest.db.ls_transactions.length, 4);
+});
+
+test('historique : une ligne par synchro, avec sa cause — connexion, planifiée, bouton, outil, échec', async () => {
+  const { rest, state, sync, at } = setup({ ls_settings: [settings], ls_bank_links: [request({ status: 'code_received', code: 'good-code' })] });
+  await sync.tick();
+  const h = () => rest.db.ls_bank_syncs;
+  assert.equal(h().length, 1);
+  assert.deepEqual(
+    { cause: h()[0].cause, ok: h()[0].ok, pay: h()[0].added_pay, res: h()[0].added_res, link: h()[0].link_id, balances: h()[0].balances, error: h()[0].error },
+    { cause: 'connect', ok: true, pay: 3, res: 1, link: 'L1', balances: { pay: 1215.88, res: 871.14 }, error: null });
+
+  await sync.tick();
+  assert.equal(h().length, 1, 'pas due : aucune ligne');
+
+  const l = rest.db.ls_bank_links[0];
+  l.sync_requested_at = new Date(NOW + 60e3).toISOString();
+  at(NOW + 120e3);
+  await sync.tick();
+  assert.equal(h()[1].cause, 'manual');
+  assert.equal(h()[1].added_pay + h()[1].added_res, 0);
+  assert.equal(h()[1].ok, true, 'rien de nouveau, mais la synchro est notée');
+  assert.deepEqual(h()[1].balances, { pay: 1215.88, res: 871.14 });
+
+  at(NOW + 9 * 3600e3);
+  await sync.tick();
+  assert.equal(h()[2].cause, 'auto');
+
+  await sync.tick({ force: true });
+  assert.equal(h()[3].cause, 'cli');
+
+  state.failTx = new EnableBankingError('GET /accounts/u-pay/transactions', 503, '{"error":"ASPSP_ERROR"}');
+  at(NOW + 18 * 3600e3);
+  await sync.tick();
+  assert.equal(h()[4].ok, false);
+  assert.match(h()[4].error, /503/);
+
+  // sans la table (SQL pas encore lancé), la synchro se fait quand même
+  const two = setup({ ls_settings: [settings], ls_bank_links: [request({ status: 'code_received', code: 'good-code' })] });
+  delete two.rest.db.ls_bank_syncs;
+  await two.sync.tick();
+  assert.equal(two.rest.db.ls_bank_links[0].status, 'active');
   assert.equal(two.rest.db.ls_transactions.length, 4);
 });

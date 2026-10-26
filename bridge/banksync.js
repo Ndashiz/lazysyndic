@@ -32,7 +32,9 @@ const short = (e) => String(e?.message || e).slice(0, 400);
  */
 export function createBankSync({ rest, eb, log = console, syncHours = 8, redirectAllow = [], now = () => Date.now() }) {
   let running = null;
-  let quietUntil = 0;
+  let quietUntil = 0, quietHistoryUntil = 0;
+  // « Synchroniser maintenant » posé depuis l'app après la dernière synchro
+  const manualAsked = (l) => !!l.sync_requested_at && Date.parse(l.sync_requested_at) > (l.last_sync_at ? Date.parse(l.last_sync_at) : 0);
   const stamp = () => new Date(now()).toISOString();
   const patchLink = (id, patch) => rest.update('ls_bank_links', `id=eq.${id}`, { ...patch, updated_at: stamp() });
 
@@ -69,7 +71,7 @@ export function createBankSync({ rest, eb, log = console, syncHours = 8, redirec
           return { id: link.id, status: 'expired' };
         }
         if (!force && !syncDue(link, now(), syncHours)) return { id: link.id, status: 'idle' };
-        return syncLink(link);
+        return syncLink(link, force ? 'cli' : manualAsked(link) ? 'manual' : 'auto');
       default: return { id: link.id, status: link.status };
     }
   }
@@ -128,7 +130,7 @@ export function createBankSync({ rest, eb, log = console, syncHours = 8, redirec
       await patchLink(p.id, { status: 'replaced' });
       if (p.session_id) await eb.deleteSession(p.session_id).catch(() => {});
     }
-    return syncLink({ ...link, status: 'active', session_id: s.session_id, accounts, seen, acct_map: acctMap, valid_until: validUntil, last_sync_at: null });
+    return syncLink({ ...link, status: 'active', session_id: s.session_id, accounts, seen, acct_map: acctMap, valid_until: validUntil, last_sync_at: null }, 'connect');
   }
 
   /* ---------- 3. déconnexion demandée depuis l'app ---------- */
@@ -143,7 +145,29 @@ export function createBankSync({ rest, eb, log = console, syncHours = 8, redirec
   }
 
   /* ---------- 4. synchro ---------- */
-  async function syncLink(link) {
+  /**
+   * Une ligne d'historique par synchro (ls_bank_syncs), réussie ou non, même sans nouveauté :
+   * c'est ce que le syndic relit dans la carte. Jamais bloquant : sans la table (SQL pas encore
+   * lancé), la synchro continue et un message par heure le signale.
+   */
+  async function logSync(link, cause, result, accounts) {
+    const balances = {};
+    for (const a of accounts) {
+      const acct = effectiveAcct(a, link.acct_map || {});
+      if (acct && a.balance) balances[acct] = a.balance.amount;
+    }
+    await rest.insert('ls_bank_syncs', {
+      link_id: link.id, at: result.at, cause, ok: !result.error,
+      added_pay: result.added.pay || 0, added_res: result.added.res || 0,
+      known: result.known || 0, matched: result.matched || 0,
+      balances, warnings: result.warnings || [], error: result.error || null,
+    }).catch((e) => {
+      if (now() > quietHistoryUntil) { log.error('bank: historique non écrit —', short(e)); quietHistoryUntil = now() + 3600e3; }
+    });
+  }
+
+  /** @param {'auto'|'manual'|'connect'|'cli'} cause  ce qui a déclenché la synchro (historique) */
+  async function syncLink(link, cause = 'auto') {
     const today = isoDay(now());
     const seen = { ...(link.seen || {}) };
     const accounts = (link.accounts || []).map((a) => ({ ...a }));
@@ -168,14 +192,17 @@ export function createBankSync({ rest, eb, log = console, syncHours = 8, redirec
         const s = await eb.getSession(link.session_id).catch(() => null);
         if (s && s.status && s.status !== 'AUTHORIZED') {
           await patchLink(link.id, { ...base, status: s.status === 'REVOKED' ? 'revoked' : 'expired', error: `Session ${s.status} côté banque : reconnectez la banque.` });
+          await logSync(link, cause, { ...result, error: `Session ${s.status} côté banque : ${result.error}` }, accounts);
           return { id: link.id, status: 'expired', error: result.error };
         }
       }
       await patchLink(link.id, base);   // last_sync_at posé : pas de nouvel essai avant la prochaine échéance
+      await logSync(link, cause, result, accounts);
       log.error('bank: synchro en échec —', result.error);
       return { id: link.id, status: 'active', ...result };
     }
     await patchLink(link.id, { accounts, seen: trimSeen(seen, today), last_sync_at: result.at, last_ok_at: result.at, last_sync: result, error: null });
+    await logSync(link, cause, result, accounts);
     const n = Object.values(result.added).reduce((x, y) => x + y, 0);
     log.log(`bank: synchro faite — ${n} nouveau(x) mouvement(s), ${result.known + result.matched} déjà connu(s)`);
     return { id: link.id, status: 'active', ...result };
