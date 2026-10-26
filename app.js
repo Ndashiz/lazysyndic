@@ -306,15 +306,11 @@ const BUILTIN_RULES = [
 ];
 // OWNER-DETECT-BEGIN — bloc pur (ni DOM ni réseau), extrait tel quel par tests/owner.test.mjs
 // qui fournit norm, state et ownersOf. Ne rien mettre d'autre entre les deux marqueurs.
-// Libellé (normalisé) → copropriétaire (nom court). Appliqué seulement si ce
-// copropriétaire existe réellement. « Charge rdc et garage » = Simon, etc.
-const BUILTIN_OWNERS = [
-  ['charge rdc et garage','Simon'],
-  ['charge garage','Simon'],   // « Charge garage + rdc »
-  ['charge retard','Simon'],
-  
-  
-];
+// Libellé (normalisé) → copropriétaire (nom court), appliqué seulement si ce copropriétaire
+// existe. Vide volontairement : les libellés propres à une copropriété (« Charge rdc et
+// garage », un nom de jeune fille…) vivent dans ls_settings.owner_rules, appris dans l'app
+// (attribution à la main) ou posés en SQL. Rien de nominatif dans le code : le dépôt est public.
+const BUILTIN_OWNERS = [];
 
 // Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
 // Dans l'ordre : 1. la règle apprise sur ce libellé exact (une attribution faite à la
@@ -322,8 +318,8 @@ const BUILTIN_OWNERS = [
 // complet, en mot entier dans le libellé ou la note ; 3. les règles apprises par
 // sous-chaîne ; 4. les libellés intégrés. Une règle vers un copropriétaire qui n'existe
 // plus est ignorée.
-// Les règles apprises passaient en premier : « fond de reserve » → Simon, apprise sur
-// une ligne de Simon, attrapait aussi « FOND DE RESERVE - AUDE ». Le nom l'emporte
+// Les règles apprises passaient en premier : « fond de reserve » → Alex, apprise sur
+// une ligne d'Alex, attrapait aussi « FOND DE RESERVE - LOU ». Le nom l'emporte
 // désormais sur une règle plus courte que lui ; seule une règle posée sur le libellé
 // entier le bat.
 function detectOwner(t){

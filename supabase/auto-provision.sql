@@ -22,7 +22,8 @@ drop policy if exists ls_invites_admin on public.ls_invites;
 create policy ls_invites_admin on public.ls_invites for all
   using (public.ls_is_admin()) with check (public.ls_is_admin());
 
--- 2) Pré-déclarer les copropriétaires  ⬅️ REMPLACE LES EMAILS
+-- 2) Pré-déclarer les copropriétaires  ⬅️ REMPLACE LES EMAILS ET LES NOMS
+--    (exemples fictifs, les mêmes que schema.sql §7 ; owner_short = ls_owners.short)
 insert into public.ls_invites (email, role, owner_short, full_name) values
   ('EMAIL_ADMIN',     'admin', 'Alex', 'Alex Martin'),
   ('EMAIL_LECTEUR_1', 'read',  'Sam',  'Sam Bernard'),
@@ -50,8 +51,8 @@ create trigger ls_on_auth_user_created
   after insert on auth.users
   for each row execute function public.ls_provision_member();
 
--- 4) Rattrapage : provisionne aussi ceux DÉJÀ inscrits (si des copropriétaires ont
---    déjà un compte). À lancer après l'étape 2.
+-- 4) Rattrapage : provisionne aussi ceux DÉJÀ inscrits (si des copropriétaires
+--    ont déjà un compte). À lancer après l'étape 2.
 insert into public.ls_members (id, email, full_name, role, owner_short)
 select u.id, u.email, coalesce(i.full_name, u.email), i.role, i.owner_short
 from auth.users u

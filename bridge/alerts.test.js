@@ -13,12 +13,12 @@ test('norm lowercases and collapses whitespace', () => {
 });
 
 test('detectOwner: an owner name in the label beats a shorter learned rule (app.js OWNER-DETECT)', () => {
-  const copro = [{ short: 'Simon', name: 'Simon Dupont' }, { short: 'Aude', name: 'Aude Martin' }];
-  const rules = { 'fond de reserve': 'Simon' };                       // learned on one of Simon's lines
-  assert.equal(detectOwner({ tiers: 'Fond de reserve' }, copro, rules), 'Simon');            // exact label → the rule
-  assert.equal(detectOwner({ tiers: 'FOND DE RESERVE - AUDE' }, copro, rules), 'Aude');      // Aude's name wins
-  assert.equal(detectOwner({ tiers: 'Fond de reserve', note: 'juin' }, copro, rules), 'Simon'); // substring, no name
-  assert.equal(detectOwner({ tiers: 'FOND DE RESERVE - AUDE' }, copro, { 'fond de reserve - aude': 'Simon' }), 'Simon'); // rule on the whole label
+  const copro = [{ short: 'Alex', name: 'Alex Martin' }, { short: 'Lou', name: 'Lou Petit' }];
+  const rules = { 'fond de reserve': 'Alex' };                       // learned on one of Alex's lines
+  assert.equal(detectOwner({ tiers: 'Fond de reserve' }, copro, rules), 'Alex');            // exact label → the rule
+  assert.equal(detectOwner({ tiers: 'FOND DE RESERVE - LOU' }, copro, rules), 'Lou');      // Lou's name wins
+  assert.equal(detectOwner({ tiers: 'Fond de reserve', note: 'juin' }, copro, rules), 'Alex'); // substring, no name
+  assert.equal(detectOwner({ tiers: 'FOND DE RESERVE - LOU' }, copro, { 'fond de reserve - lou': 'Alex' }), 'Alex'); // rule on the whole label
   assert.equal(detectOwner({ tiers: 'Total charges' }, [{ short: 'Al', name: 'Al Petit' }]), '');   // whole words only
   assert.equal(detectOwner({ tiers: 'Fond de reserve' }, copro, { 'fond de reserve': 'Zoé' }), ''); // rule to a vanished owner
 });

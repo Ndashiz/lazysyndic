@@ -17,38 +17,40 @@ function detector(owners, ownerRules){
   return f({ ownerRules: ownerRules || {} }, () => owners);
 }
 const COPRO = [
-  { short:'Simon', n:'Simon Dupont' },
-  { short:'Aude',  n:'Aude Martin' },
-  { short:'Peng',  n:'Peng Bernard' },
+  { short:'Alex', n:'Alex Martin' },
+  { short:'Lou',  n:'Lou Petit' },
+  { short:'Sam',  n:'Sam Bernard' },
 ];
 const tx = (tiers, note) => ({ tiers, note: note || '' });
 
-test('sans règle apprise : nom du copro, puis libellés intégrés, sinon rien', () => {
+test('sans règle apprise : le nom du copro, sinon rien (aucun libellé intégré dans le code)', () => {
   const d = detector(COPRO);
-  assert.equal(d(tx('FOND DE RESERVE - AUDE')), 'Aude');        // nom court
-  assert.equal(d(tx('Simon Goffin reseve')), 'Simon');
-  assert.equal(d(tx('Virement', 'de la part de Peng Bernard')), 'Peng');   // nom complet, dans la note
-  
-  assert.equal(d(tx('Charge rdc et garage')), 'Simon');
+  assert.equal(d(tx('FOND DE RESERVE - LOU')), 'Lou');          // nom court
+  assert.equal(d(tx('Alex Martin reserve')), 'Alex');
+  assert.equal(d(tx('Virement', 'de la part de Sam Bernard')), 'Sam');   // nom complet, dans la note
+  assert.equal(d(tx('Transfer from X Y')), '');                   // libellé propre à une copro : pas dans le code
+  assert.equal(d(tx('Charge rdc et garage')), '');                // idem, il vit dans owner_rules…
+  assert.equal(detector(COPRO, { 'charge rdc et garage': 'Alex' })(tx('Charge rdc et garage')), 'Alex');   // …appris
   assert.equal(d(tx('Fond de reserve')), '');                    // aucun nom, aucune règle
+  assert.deepEqual(/const BUILTIN_OWNERS = \[\];/.test(block[1]), true, 'BUILTIN_OWNERS doit rester vide : rien de nominatif dans un dépôt public');
 });
 
 test('le nom du copro l’emporte sur une règle apprise plus courte que le libellé', () => {
-  const d = detector(COPRO, { 'fond de reserve': 'Simon' });     // apprise sur une ligne de Simon
-  assert.equal(d(tx('Fond de reserve')), 'Simon');               // libellé exact → la règle
-  assert.equal(d(tx('FOND DE RESERVE - AUDE')), 'Aude');         // le nom d'Aude bat la règle
-  assert.equal(d(tx('Fond de reserve', 'virement mensuel')), 'Simon');   // sous-chaîne, sans nom
+  const d = detector(COPRO, { 'fond de reserve': 'Alex' });     // apprise sur une ligne de Alex
+  assert.equal(d(tx('Fond de reserve')), 'Alex');               // libellé exact → la règle
+  assert.equal(d(tx('FOND DE RESERVE - LOU')), 'Lou');         // le nom d'Lou bat la règle
+  assert.equal(d(tx('Fond de reserve', 'virement mensuel')), 'Alex');   // sous-chaîne, sans nom
 });
 
 test('une règle posée sur le libellé entier bat le nom', () => {
-  const d = detector(COPRO, { 'fond de reserve - aude': 'Simon' });   // attribution faite à la main
-  assert.equal(d(tx('FOND DE RESERVE - AUDE')), 'Simon');
-  assert.equal(d(tx('FOND DE RESERVE - AUDE', 'juillet')), 'Simon');  // la note ne change pas le libellé
+  const d = detector(COPRO, { 'fond de reserve - lou': 'Alex' });   // attribution faite à la main
+  assert.equal(d(tx('FOND DE RESERVE - LOU')), 'Alex');
+  assert.equal(d(tx('FOND DE RESERVE - LOU', 'juillet')), 'Alex');  // la note ne change pas le libellé
 });
 
 test('règle apprise par sous-chaîne quand aucun nom ne figure', () => {
-  const d = detector(COPRO, { 'reserve retard': 'Simon' });
-  assert.equal(d(tx('Reserve retard fev mars')), 'Simon');
+  const d = detector(COPRO, { 'reserve retard': 'Alex' });
+  assert.equal(d(tx('Reserve retard fev mars')), 'Alex');
 });
 
 test('le nom se lit en mot entier, pas en morceau d’un autre mot', () => {
@@ -61,10 +63,10 @@ test('le nom se lit en mot entier, pas en morceau d’un autre mot', () => {
 });
 
 test('une règle vers un copro qui n’existe plus est ignorée', () => {
-  const d = detector(COPRO, { 'fond de reserve': 'Zoé', 'fond de reserve - aude': 'Zoé' });
+  const d = detector(COPRO, { 'fond de reserve': 'Zoé', 'fond de reserve - lou': 'Zoé' });
   assert.equal(d(tx('Fond de reserve')), '');
-  assert.equal(d(tx('FOND DE RESERVE - AUDE')), 'Aude');
-  assert.equal(detector([{ short:'Alex', n:'Alex Martin' }])(tx('FOND DE RESERVE - AUDE')), '');   // intégré « aude » sans Aude
+  assert.equal(d(tx('FOND DE RESERVE - LOU')), 'Lou');
+  assert.equal(detector([{ short:'Alex', n:'Alex Martin' }])(tx('FOND DE RESERVE - LOU')), '');   // intégré « aude » sans Lou
 });
 
 test('un nom avec un caractère spécial de regex ne casse pas la détection', () => {

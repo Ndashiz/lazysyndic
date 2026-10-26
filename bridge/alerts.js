@@ -9,22 +9,18 @@ export const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').tr
 /** Display euro amount, fr-BE style, deterministic (no ICU dependency). */
 export const eur = (n) => `${(Math.round(n * 100) / 100).toFixed(2).replace('.', ',')} €`;
 
-// app.js:303 — built-in label→owner hints (only applied if that owner exists).
-const BUILTIN_OWNERS = [
-  ['charge rdc et garage', 'Simon'],
-  ['charge garage', 'Simon'],
-  ['charge retard', 'Simon'],
-  
-  
-];
+// app.js OWNER-DETECT — built-in label→owner hints (only applied if that owner exists). Kept
+// empty on purpose: labels specific to one building live in ls_settings.owner_rules (learned in
+// the app or set in SQL), never in code — the repo is public.
+const BUILTIN_OWNERS = [];
 
 /**
  * app.js detectOwner (bloc OWNER-DETECT) — heuristic owner attribution from a transaction's
  * tiers+note, used only when the tx has no explicit `owner`. Order: 1. learned rule on the
  * exact label (a manual attribution); 2. an owner's short or full name as a whole word in the
  * label or note; 3. learned rules by substring; 4. built-in labels. A rule pointing at an owner
- * that no longer exists is ignored. Learned rules used to come first: « fond de reserve » → Simon
- * also caught « FOND DE RESERVE - AUDE »; the name now beats any rule shorter than the label.
+ * that no longer exists is ignored. Learned rules used to come first: « fond de reserve » → Alex
+ * also caught « FOND DE RESERVE - LOU »; the name now beats any rule shorter than the label.
  * @param {{tiers?:string, note?:string}} t
  * @param {Array<{short:string, name?:string}>} owners
  * @param {Record<string,string>} ownerRules  normalized-label → owner short
