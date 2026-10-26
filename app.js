@@ -1319,10 +1319,14 @@ function interpret(){
     // sous-catégorie indique le pot. Ancienne catégorie top-level « Fonds de
     // réserve » → normalisée vers Charges › Fonds de réserve.
     if (t.high==='Fonds de réserve'){ t.high='Charges'; t.sub='Fonds de réserve'; }
-    // Entrée (montant positif) → par défaut une Charge ; on attribue le copropriétaire.
+    // Entrée (montant positif) : on attribue le copropriétaire, et une entrée dont on reconnaît
+    // le copropriétaire est une « Charge » (sa contribution). Une entrée sans copropriétaire
+    // reconnu reste « à catégoriser » : un remboursement de fournisseur, un versement d'assureur
+    // ou de notaire n'est pas une recette de charges. Forcée en « Charges », elle sortait du
+    // filtre « À catégoriser » et gonflait le compte de résultats sans que personne ne la voie.
     if (amount>0){
       const det=detectOwner(t); if(det) t.owner=det;
-      if (t.high==='?'){ t.high='Charges'; t.sub=''; }
+      if (t.high==='?' && det){ t.high='Charges'; t.sub=''; }
     }
     // Sous-catégorie par défaut d'une Charge selon le compte :
     //   paiement → « Compte de paiement » · réserve → « Fonds de réserve »

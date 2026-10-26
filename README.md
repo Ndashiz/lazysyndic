@@ -39,7 +39,8 @@ Un virement entrant est rattaché à un copropriétaire dans cet ordre : la règ
 sur son libellé exact (une attribution faite à la main), puis le nom d'un copropriétaire,
 court ou complet, en mot entier dans le libellé ou la note, puis les règles apprises par
 sous-chaîne, puis les libellés intégrés. Un nom dans le libellé l'emporte donc sur une
-règle plus courte que lui. Code : bloc `OWNER-DETECT` d'`app.js` ; tests :
+règle plus courte que lui. Une entrée dont aucun copropriétaire n'est reconnu reste « à catégoriser »
+au lieu de devenir une recette de charges : un remboursement ou un versement d'un tiers se voit. Code : bloc `OWNER-DETECT` d'`app.js` ; tests :
 `node --test tests/owner.test.mjs` (aucune dépendance).
 
 ## Assemblées générales et signature des PV
