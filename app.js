@@ -646,7 +646,6 @@ document.getElementById('remAddInput')?.addEventListener('keydown',e=>{ if(e.key
 let curAcct = 'pay';
 let flagOnly = false;
 let catFilter='', dirFilter='', ownerFilter='';
-let txEditing = new Set();   // ids des transactions en mode édition (sinon figées)
 let catPicking = null;       // transaction (l'objet : en démo les ids sont null) dont on change la catégorie depuis son badge
 const ownerDisp = sh => { const o=ownersOf().find(x=>(x.short||x.n)===sh); return o?o.n:(sh||''); };
 function populateTxFilters(){
@@ -681,7 +680,15 @@ function ensureTxCss(){
     .cat-pick:hover{box-shadow:inset 0 0 0 1.5px currentColor}
     .cat-pick:hover .caret{opacity:1}
     .tx-lock{display:inline-grid;place-items:center;width:18px;height:18px;color:var(--ink-faint)}
-    .tx-row.locked .cat{opacity:.9}`;
+    .tx-row.locked .cat{opacity:.9}
+    #txtable .tx-cell b{max-width:360px;font-weight:600}
+    #txtable .tx-cell small.tx-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;margin-top:4px;font-size:11.5px}
+    #txtable .tx-note{color:var(--muted-foreground);min-width:0}
+    #txtable .tx-date{white-space:nowrap}
+    #txtable .flagbtn,#txtable .tx-more{width:32px;height:32px;color:var(--ink-faint)}
+    #txtable .flagbtn.on{color:var(--warning-ink)}
+    #txtable .flagbtn.on svg{fill:currentColor}
+    #txtable .cmt-mark{margin-top:0}`;
   document.head.appendChild(s);
 }
 // Bannière « sorties > 10 € à justifier » (compte de réserve — dépenses exceptionnelles).
@@ -698,6 +705,11 @@ function renderFdrWarn(acct){
     const ff=document.getElementById('flagFilter'); if(ff && !ff.classList.contains('on')) ff.click();
   };
 }
+let txSelectMode = false;   // mode « Sélectionner » : des cases à cocher pour la corbeille, rien d'autre
+// La liste des mouvements, sur le gabarit du design (.tx-cell) : état · mouvement (tiers, catégorie,
+// communication, versé par, commentaire) · date · montant · statut · détail. Tout ce qui s'édite
+// (catégorie, attribution, commentaire, drapeau, scission, corbeille) vit dans la fiche (⋯), sauf
+// le badge de catégorie, cliquable sur place.
 function renderTx(acct){
   curAcct = acct;
   ensureTxCss();
@@ -708,79 +720,43 @@ function renderTx(acct){
     const da=parseDate(a.date), db=parseDate(b.date);
     return (db?db.iso:'').localeCompare(da?da.iso:'');
   });
+  const esc = s => String(s||'').replace(/"/g,'&quot;');
+  const short = (s, n) => { s=String(s||'').trim(); return s.length>n ? s.slice(0,n-1)+'…' : s; };
+  const lockSvg = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  const flagSvg = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-7.333-2A6 6 0 0 0 4 15"/></svg>';
+  const moreSvg = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>';
   rows.forEach(t=>{
     if (flagOnly && !isFlagged(t)) return;
     if (catFilter && (catFilter==='?'? t.high!=='?' : t.high!==catFilter)) return;
     if (dirFilter==='in'  && t.amount<0) return;
     if (dirFilter==='out' && t.amount>0) return;
     if (ownerFilter && ownerOfTx(t)!==ownerFilter) return;
-    const editing = txEditing.has(t.id);
-    const reqMiss = commentMissing(t);
-    const locked = txLocked(t);   // exercice clôturé : annotations seulement
-    const tr=document.createElement('tr'); tr.className='tx-row'+(isFlagged(t)?' flag':'')+(reqMiss?' req':'')+(editing?' editing':'')+(locked?' locked':'');
+    const reqMiss = commentMissing(t), locked = txLocked(t), hasC = !!(t.comment && t.comment.trim());
+    const tr=document.createElement('tr'); tr.className='tx-row'+(isFlagged(t)?' flag':'')+(reqMiss?' req':'')+(locked?' locked':'');
     const catLabel = (t.high==='?'?'À catégoriser':t.high) + (t.sub?(' · '+t.sub):'');
-    const amtClass = t.amount>=0 ? 'pos' : 'neg';
-    const note = t.note||'';
-    const hasC = !!(t.comment && t.comment.trim());
-    const esc = s => String(s||'').replace(/"/g,'&quot;');
-    // colonne catégorie : sélecteur (ligne en édition, ou badge cliqué), badge
-    // cliquable pour l'admin, badge simple en lecture seule
-    const picking = catPicking===t && !editing;
-    const catCell = (editing || picking)
-      ? `<select class="fld tx-catpick${picking?' quick':''}" style="font-size:12px;padding:4px 6px;max-width:240px">${catPickOptions(t.high, t.sub)}</select>`
-      : canWrite() && !locked
+    const picking = catPicking===t;
+    const catCell = picking
+      ? `<select class="fld tx-catpick quick" style="font-size:12px;padding:4px 6px;max-width:240px">${catPickOptions(t.high, t.sub)}</select>`
+      : canWrite() && !locked && !txSelectMode
         ? `<button class="cat cat-pick ${catClass(t.high)}" title="Changer la catégorie">${catLabel}<span class="caret">▾</span></button>`
         : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
-    // colonne notes + marqueur commentaire + actions
-    let lastCell;
-    if (editing){
-      const ownerEdit = t.amount>0 && !locked
-        ? `<div class="cmt" style="font-style:normal"><span style="color:var(--ink-faint)">Versé par :</span> <select class="tx-owner">${ownerOptions(ownerOfTx(t))}</select></div>`
-        : '';
-      lastCell = `${note?`<div class="sub" style="margin-bottom:4px">${note}</div>`:''}${ownerEdit}
-        ${reqMiss?`<div class="cmt-req-lbl">⚠ Commentaire obligatoire — sortie &gt; ${FDR_RULE.minOut} € (compte de réserve)</div>`:''}
-        <input class="fld tx-comment${reqMiss?' req':''}" placeholder="${reqMiss?'Justification OBLIGATOIRE…':'Commentaire (revue AG)…'}" value="${esc(t.comment)}" style="width:100%;font-size:12px;margin-top:6px">
-        <button class="lk tx-done" style="margin-top:6px">✓ Terminer</button>`;
-    } else {
-      const ownerFrozen = t.amount>0 ? `<div class="sub" style="margin-top:2px">Versé par : <b>${ownerDisp(ownerOfTx(t))||'—'}</b></div>` : '';
-      const mark = hasC ? `<div class="cmt-mark" title="${esc(t.comment)}">💬 ${t.comment.length>44?t.comment.slice(0,44)+'…':t.comment}</div>` : '';
-      const editAction = reqMiss
-        ? (canWrite()
-            ? `<button class="lk tx-edit" style="margin-top:4px;color:var(--coral);font-weight:700">⚠ Commentaire obligatoire — justifier</button>`
-            : `<div class="cmt-req-lbl" style="margin-top:4px">⚠ Commentaire obligatoire (sortie &gt; ${FDR_RULE.minOut} €)</div>`)
-        : (canWrite()?`<button class="lk tx-edit" style="margin-top:4px;color:var(--ink-faint)">✎ modifier</button>`:'');
-      const splitAction = canWrite() && !locked ? ` · <button class="lk tx-split" style="margin-top:4px;color:var(--ink-faint)">✂ splitter</button>` : '';
-      lastCell = `${note?`<div>${note}</div>`:''}${ownerFrozen}${mark}${editAction}${splitAction}`;
-    }
-    const lockMark = `<span class="tx-lock" title="Exercice ${closedYearOf((parseDate(t.date)||{}).iso)} clôturé"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>`;
-    tr.innerHTML = `<td class="tx-selcell">${locked ? lockMark : canWrite()?`<input type="checkbox" class="tx-sel" data-id="${t.id}">`:''}</td>
-      <td><button class="flagbtn" title="Marquer « à revoir »">⚑</button></td>
-      <td>${t.date}</td>
-      <td><b>${t.tiers}</b></td>
-      <td>${catCell}</td>
-      <td class="num ${amtClass}">${signed(t.amount)}</td>
-      <td>${lastCell}</td>`;
-    tr.querySelector('.flagbtn').onclick=()=>{
-      if(!canWrite()) return;
-      t.flag = !t.flag; saveState(); renderTx(acct);
-      dbWrite(db=>db.updateTransaction(t.id, {flag:t.flag}));
-    };
-    // entrer / sortir du mode édition
-    const editBtn = tr.querySelector('.tx-edit');
-    if (editBtn) editBtn.onclick = ()=>{ if(!canWrite())return; txEditing.add(t.id); renderTx(acct); };
-    const splitBtn = tr.querySelector('.tx-split');
-    if (splitBtn) splitBtn.onclick = ()=>{ if(!canWrite())return; openSplitModal(t); };
-    const doneBtn = tr.querySelector('.tx-done');
-    if (doneBtn) doneBtn.onclick = ()=>{ txEditing.delete(t.id); renderTx(acct); };
-    // handlers d'édition (seulement en mode édition)
-    const osel = tr.querySelector('.tx-owner');
-    if (osel) osel.onchange = ()=>{
-      if(!canWrite()) return;
-      t.owner = osel.value; saveState();
-      dbWrite(db=>db.updateTransaction(t.id, {owner: osel.value}));
-      learnOwner(t.tiers, osel.value);
-      renderDashboard(); renderProvisions();
-    };
+    const who = t.amount>0 ? `Versé par <b>${escH(ownerDisp(ownerOfTx(t))||'—')}</b>` : '';
+    const line2 = [who, hasC ? `<span class="cmt-mark" title="${esc(t.comment)}">${escH(short(t.comment,48))}</span>` : ''].filter(Boolean).join(' · ');
+    const st = reqMiss ? ['danger','Commentaire obligatoire'] : (!t.high||t.high==='?') ? ['warning','À catégoriser'] : t.flag ? ['warning','À revoir'] : ['success','Classé'];
+    const first = txSelectMode && canWrite() && !locked
+      ? `<input type="checkbox" class="tx-sel" data-id="${t.id}" aria-label="Sélectionner ${esc(t.tiers)}">`
+      : locked ? `<span class="tx-lock" title="Exercice ${closedYearOf((parseDate(t.date)||{}).iso)} clôturé">${lockSvg}</span>`
+      : `<button class="icon-btn flagbtn${t.flag?' on':''}" type="button" aria-pressed="${t.flag?'true':'false'}" aria-label="À revoir" title="${t.flag?'Ne plus marquer « à revoir »':'Marquer « à revoir »'}">${flagSvg}</button>`;
+    tr.innerHTML = `<td class="tx-selcell">${first}</td>
+      <td><div class="tx-cell"><div style="min-width:0"><b title="${esc(t.tiers)}">${escH(t.tiers)}</b>
+        <small class="tx-line">${catCell}${t.note?` <span class="tx-note" title="${esc(t.note)}">${escH(short(t.note,70))}</span>`:''}</small>
+        ${line2?`<small class="tx-line">${line2}</small>`:''}</div></div></td>
+      <td class="tx-date">${t.date}</td>
+      <td class="num ${t.amount>=0?'pos':'neg'}">${signed(t.amount)}</td>
+      <td><span class="status ${st[0]}">${st[1]}</span></td>
+      <td><button class="icon-btn tx-more" type="button" aria-label="Détail du mouvement" title="Détail : commentaire, attribution, scission">${moreSvg}</button></td>`;
+    const fb = tr.querySelector('.flagbtn');
+    if (fb) fb.onclick=()=>{ if(!canWrite()) return; t.flag=!t.flag; saveState(); renderTx(acct); dbWrite(db=>db.updateTransaction(t.id, {flag:t.flag})); };
     // changer la catégorie : clic sur le badge → sélecteur sur place
     const pickBtn = tr.querySelector('.cat-pick');
     if (pickBtn) pickBtn.onclick = ()=>{
@@ -791,49 +767,43 @@ function renderTx(acct){
     };
     const psel = tr.querySelector('.tx-catpick');
     if (psel){
-      psel.onchange = ()=>{
-        if (picking) catPicking = null;   // avant un éventuel prompt : le blur qui suit ne doit rien refaire
-        if (!setTxCategory(t, psel.value)) renderTx(acct);   // annulé : remet la ligne d'aplomb (la ligne en édition le reste)
-      };
-      if (picking){
-        // différé : un clic sur un autre badge passe avant et prend la main
-        psel.onblur = ()=>setTimeout(()=>{ if(catPicking!==t) return; catPicking=null; renderTx(acct); }, 150);
-        psel.onkeydown = e=>{ if(e.key==='Escape'){ catPicking=null; renderTx(acct); } };
-      }
+      psel.onchange = ()=>{ catPicking = null; if (!setTxCategory(t, psel.value)) renderTx(acct); };   // annulé : remet la ligne d'aplomb
+      // différé : un clic sur un autre badge passe avant et prend la main
+      psel.onblur = ()=>setTimeout(()=>{ if(catPicking!==t) return; catPicking=null; renderTx(acct); }, 150);
+      psel.onkeydown = e=>{ if(e.key==='Escape'){ catPicking=null; renderTx(acct); } };
     }
-    const cin = tr.querySelector('.tx-comment');
-    if (cin) cin.onchange = ()=>{
-      if(!canWrite()) return;
-      t.comment = cin.value; saveState();
-      dbWrite(db=>db.updateTransaction(t.id, {comment: cin.value}));
-      renderTx(acct);   // met à jour l'état « obligatoire » (rouge) une fois justifié
-    };
+    tr.querySelector('.tx-more').onclick=()=>showTxDetail(t);
     tr.style.cursor='pointer';
-    tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.tx-edit,.flagbtn,.cmt-mark')) return; showTxDetail(t); });
+    tr.addEventListener('click', e=>{ if(e.target.closest('input,select,button,a,.cmt-mark')) return; showTxDetail(t); });
     tb.appendChild(tr);
   });
   if (!tb.children.length){
     const filtered = flagOnly||catFilter||dirFilter||ownerFilter;
-    tb.innerHTML = `<tr><td colspan="7" class="sub" style="padding:16px">Aucune transaction ${filtered?'ne correspond aux filtres':'sur ce compte'}.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="6" class="sub" style="padding:16px">Aucune transaction ${filtered?'ne correspond aux filtres':'sur ce compte'}.</td></tr>`;
   }
   renderFdrWarn(acct);
   renderTxTools(acct);
 }
-
-// Barre d'outils de suppression (admin) : sélection + tout supprimer.
+// Barre d'outils : « Sélectionner » révèle les cases à cocher ; la corbeille n'est qu'à ce prix.
 function renderTxTools(acct){
   const head=document.getElementById('txSelHead'), tools=document.getElementById('txTools');
   if(!tools) return;
-  if(!canWrite()){ tools.style.display='none'; if(head) head.innerHTML=''; return; }
   const all=txOf(acct);
-  if(head) head.innerHTML = all.length?'<input type="checkbox" id="txSelAll" title="Tout sélectionner">':'';
+  if(!canWrite() || !all.length){ tools.style.display='none'; if(head) head.innerHTML=''; txSelectMode=false; return; }
+  tools.style.display='flex';
+  if(head) head.innerHTML = txSelectMode ? '<input type="checkbox" id="txSelAll" title="Tout sélectionner" aria-label="Tout sélectionner">' : '';
   const selAll=document.getElementById('txSelAll');
   if(selAll) selAll.onchange=()=>{ document.querySelectorAll('#txbody .tx-sel').forEach(c=>{ if(!c.closest('tr').style.display) c.checked=selAll.checked; }); updateTxToolsCount(); };
-  tools.style.display=all.length?'flex':'none';
-  tools.innerHTML = `<button class="btn btn-ghost" id="txDelSel" disabled style="opacity:.5">🗑 Supprimer la sélection (<span id="txSelN">0</span>)</button>
-    <button class="btn btn-ghost" id="txDelAll" style="color:var(--coral)">🗑 Tout supprimer ce compte (${all.length})</button>`;
-  document.getElementById('txDelSel').onclick=()=>deleteSelectedTx(acct);
-  document.getElementById('txDelAll').onclick=()=>deleteAllTx(acct);
+  tools.innerHTML = txSelectMode
+    ? `<button class="btn btn-ghost" id="txDelSel" disabled style="opacity:.5">Mettre à la corbeille (<span id="txSelN">0</span>)</button>
+       <button class="btn btn-ghost" id="txSelOff">Terminer</button>
+       <span class="sub">Cochez les mouvements à retirer · récupérables 7 jours · un exercice clôturé ne se coche pas</span>`
+    : `<button class="btn btn-ghost" id="txSelOn">Sélectionner</button>
+       <button class="btn btn-ghost" id="txDelAll" style="color:var(--danger);margin-left:auto">Tout supprimer ce compte (${all.length})</button>`;
+  document.getElementById('txDelSel')?.addEventListener('click', ()=>deleteSelectedTx(acct));
+  document.getElementById('txSelOn')?.addEventListener('click', ()=>{ txSelectMode=true; renderTx(acct); });
+  document.getElementById('txSelOff')?.addEventListener('click', ()=>{ txSelectMode=false; renderTx(acct); });
+  document.getElementById('txDelAll')?.addEventListener('click', ()=>deleteAllTx(acct));
   document.querySelectorAll('#txbody .tx-sel').forEach(c=>c.onchange=updateTxToolsCount);
   updateTxToolsCount();
 }
@@ -4871,37 +4841,49 @@ document.getElementById('pasteImport')?.addEventListener('click', ()=>{
 /* ============================================================
    DÉTAIL D'UNE TRANSACTION (clic) — communication complète
    ============================================================ */
+// La fiche d'un mouvement : tout ce qui s'édite y vit (catégorie, attribution, drapeau,
+// commentaire, scission, corbeille). Un exercice clôturé n'y laisse que le drapeau et le commentaire.
 function showTxDetail(t){
   let m=document.getElementById('txDetailModal');
   if(!m){
-    m=document.createElement('div'); m.id='txDetailModal';
-    m.style.cssText='position:fixed;inset:0;background:rgba(33,40,30,.45);z-index:120;display:none;align-items:center;justify-content:center;padding:20px';
-    m.innerHTML='<div class="card" id="txDetailCard" style="width:460px;max-width:94vw"></div>';
+    m=document.createElement('div'); m.id='txDetailModal'; m.setAttribute('role','dialog'); m.setAttribute('aria-modal','true'); m.setAttribute('aria-labelledby','txDetailTitle');
+    m.style.cssText='position:fixed;inset:0;background:var(--shade,rgba(33,40,30,.45));z-index:120;display:none;align-items:center;justify-content:center;padding:20px';
+    m.innerHTML='<div class="card" id="txDetailCard" style="width:480px;max-width:94vw;max-height:92vh;overflow:auto"></div>';
     m.addEventListener('click',e=>{ if(e.target===m) m.style.display='none'; });
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape' && m.style.display==='flex') m.style.display='none'; });
     document.body.appendChild(m);
   }
-  const owner=ownerOfTx(t);
-  const ow=ownersOf().find(o=>(o.short||o.n)===owner);
-  const line=(l,v)=>v?`<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--line-2)"><span class="sub" style="flex:0 0 auto">${l}</span><span style="font-weight:600;text-align:right">${v}</span></div>`:'';
+  const ed=canWrite(), locked=txLocked(t), free=ed && !locked, reqMiss=commentMissing(t);
+  const owner=ownerOfTx(t), ow=ownersOf().find(o=>(o.short||o.n)===owner);
+  const line=(l,v)=>v?`<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--line-2)"><span class="sub" style="flex:0 0 auto">${l}</span><span style="font-weight:600;text-align:right;min-width:0">${v}</span></div>`:'';
   const card=m.querySelector('#txDetailCard');
   card.innerHTML=`
-    <div class="h-row"><h2>Détail de la transaction</h2><button class="lk" id="txDetailClose" style="font-size:16px">✕</button></div>
-    ${line('Date', t.date)}
+    <div class="h-row"><h2 id="txDetailTitle" style="margin:0">Mouvement du ${t.date}</h2><button class="icon-btn" id="txDetailClose" type="button" aria-label="Fermer">✕</button></div>
+    ${locked?`<div class="sub" style="margin:-4px 0 6px">Exercice ${closedYearOf((parseDate(t.date)||{}).iso)} clôturé : seuls le drapeau et le commentaire restent modifiables.</div>`:''}
     ${line('Compte', t.account==='res'?'Compte de réserve':'Compte de paiement')}
-    ${line('Tiers', t.tiers)}
+    ${line('Tiers', escH(t.tiers))}
     ${line('Montant', `<span class="${t.amount<0?'neg':'pos'}">${signed(t.amount)}</span>`)}
-    ${txLocked(t) ? line('Exercice', `${closedYearOf((parseDate(t.date)||{}).iso)} · clôturé`) : ''}
-    ${line('Catégorie', canWrite() && !txLocked(t)
-      ? `<select class="fld txd-cat" style="font-size:12.5px;padding:5px 8px;max-width:250px">${catPickOptions(t.high, t.sub)}</select>`
+    ${line('Catégorie', free
+      ? `<select class="fld txd-cat" aria-label="Catégorie" style="font-size:12.5px;padding:5px 8px;max-width:250px">${catPickOptions(t.high, t.sub)}</select>`
       : `<span class="cat ${catClass(t.high)}">${t.high==='?'?'À catégoriser':t.high}${t.sub?(' · '+t.sub):''}</span>`)}
-    ${t.amount>0 ? line('Versé par', ow?ow.n:(owner||'—')) : ''}
+    ${t.amount>0 ? line('Versé par', free ? `<select class="fld txd-owner" aria-label="Versé par" style="font-size:12.5px;padding:5px 8px">${ownerOptions(owner)}</select>` : escH(ow?ow.n:(owner||'—'))) : ''}
+    ${line('À revoir', ed ? `<button class="btn btn-ghost txd-flag" type="button" aria-pressed="${t.flag?'true':'false'}" style="padding:4px 10px;font-size:12.5px">${t.flag?'Marqué · retirer la marque':'Marquer'}</button>` : (t.flag?'Oui':'Non'))}
     <div style="padding:10px 0 4px"><div class="sub" style="margin-bottom:4px">Communication</div>
-      <div style="font-family:monospace;font-size:12.5px;background:var(--card-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;word-break:break-word">${t.note||'—'}</div></div>
-    ${t.comment ? `<div style="padding:6px 0"><div class="sub" style="margin-bottom:4px">Commentaire (revue AG)</div><div class="cmt" style="font-style:normal">✎ ${t.comment}</div></div>` : ''}`;
+      <div style="font-family:monospace;font-size:12.5px;background:var(--card-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;word-break:break-word">${escH(t.note||'—')}</div></div>
+    <div style="padding:6px 0"><label class="sub" for="txdComment" style="display:block;margin-bottom:4px">Commentaire (revue AG)${reqMiss?` · <span style="color:var(--danger);font-weight:600">obligatoire : sortie de plus de ${FDR_RULE.minOut} € sur le compte de réserve</span>`:''}</label>
+      ${ed ? `<textarea class="fld" id="txdComment" rows="2" style="width:100%;resize:vertical" placeholder="${reqMiss?'Justification obligatoire…':'Pourquoi cette ligne mérite un mot en AG'}">${escH(t.comment||'')}</textarea>` : `<div>${escH(t.comment||'—')}</div>`}</div>
+    ${free ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost txd-split" type="button">Scinder en plusieurs lignes</button><button class="btn btn-ghost txd-trash" type="button" style="color:var(--danger)">Mettre à la corbeille</button></div>` : ''}`;
   card.querySelector('#txDetailClose').onclick=()=>m.style.display='none';
-  const dsel=card.querySelector('.txd-cat');
-  if(dsel) dsel.onchange=()=>{ setTxCategory(t, dsel.value); showTxDetail(t); };
+  const dsel=card.querySelector('.txd-cat'); if(dsel) dsel.onchange=()=>{ setTxCategory(t, dsel.value); showTxDetail(t); };
+  const osel=card.querySelector('.txd-owner'); if(osel) osel.onchange=()=>{
+    t.owner=osel.value; saveState(); dbWrite(db=>db.updateTransaction(t.id, {owner:osel.value})); learnOwner(t.tiers, osel.value);
+    renderTx(curAcct); renderDashboard(); renderProvisions(); showTxDetail(t); };
+  const fbtn=card.querySelector('.txd-flag'); if(fbtn) fbtn.onclick=()=>{ t.flag=!t.flag; saveState(); dbWrite(db=>db.updateTransaction(t.id, {flag:t.flag})); renderTx(curAcct); showTxDetail(t); };
+  const cin=card.querySelector('#txdComment'); if(cin) cin.onchange=()=>{ t.comment=cin.value; saveState(); dbWrite(db=>db.updateTransaction(t.id, {comment:cin.value})); renderTx(curAcct); };
+  const sp=card.querySelector('.txd-split'); if(sp) sp.onclick=()=>{ m.style.display='none'; openSplitModal(t); };
+  const tb=card.querySelector('.txd-trash'); if(tb) tb.onclick=()=>{ if(!confirm('Mettre ce mouvement à la corbeille ? Récupérable pendant 7 jours.')) return; m.style.display='none'; trashTx([t.id]); renderAll(); };
   m.style.display='flex';
+  (card.querySelector('.txd-cat')||card.querySelector('#txDetailClose')).focus();
 }
 
 /* ============================================================

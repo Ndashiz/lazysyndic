@@ -129,6 +129,7 @@
   .search label:focus-within{border-color:var(--ring)}
   .search input{all:unset;width:155px;font-size:12px;color:var(--foreground)}
   .search input::placeholder{color:var(--muted-foreground)}
+  .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
   .icon-btn{all:unset;box-sizing:border-box;position:relative;width:36px;height:36px;display:grid;place-items:center;border-radius:6px;cursor:pointer;color:var(--foreground);transition:background .15s}
   .icon-btn:hover,.icon-btn[aria-expanded="true"]{background:var(--accent)}
   .icon-btn:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
@@ -353,9 +354,8 @@
   .tx-row td{transition:background .2s}
   .tx-row.flag td{background:var(--warning-soft)}
   .tx-row.flag td:first-child{box-shadow:inset 3px 0 0 var(--warning)}
-  .flagbtn{all:unset;cursor:pointer;font-size:14px;opacity:.3;transition:.15s}
-  .flagbtn:hover{opacity:.7}
-  .tx-row.flag .flagbtn{opacity:1}
+  .flagbtn{opacity:.45;transition:opacity .15s}
+  .flagbtn:hover,.flagbtn.on,.tx-row.flag .flagbtn{opacity:1}
   .neg{color:var(--foreground);font-weight:600}
   .pos{color:var(--success);font-weight:600}
   .cmt{font-size:12px;color:var(--warning-ink);margin-top:3px;display:flex;align-items:center;gap:5px}
@@ -680,11 +680,11 @@
       <div id="txTools" style="display:none;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"></div>
       <div class="card data-panel table-wrap">
         <table id="txtable">
-          <tr><th id="txSelHead" style="width:30px"></th><th style="width:30px"></th><th>Date</th><th>Tiers</th><th>Catégorie</th><th class="num">Montant</th><th>Notes (banque)</th></tr>
+          <tr><th id="txSelHead" style="width:36px" scope="col"><span class="sr-only">État</span></th><th scope="col">Mouvement</th><th scope="col">Date</th><th class="num" scope="col">Montant</th><th scope="col">Statut</th><th style="width:40px" scope="col"><span class="sr-only">Détail</span></th></tr>
           <tbody id="txbody"></tbody>
         </table>
       </div>
-      <div class="note">Cliquez sur la catégorie pour la changer · sur le ⚑ pour flagger une ligne · « ✎ modifier » pour annoter une transaction à revoir en AG.</div>
+      <div class="note">Cliquez sur la catégorie pour la changer sur place, sur le drapeau pour marquer une ligne à revoir, sur « ⋯ » (ou la ligne) pour la fiche : commentaire, attribution, scission, corbeille.</div>
       <div id="trashBox"></div>
 
       <!-- annual note -->
