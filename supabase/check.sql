@@ -29,7 +29,7 @@ attendu_colonnes(t, c) as (values
   ('ls_members','role'), ('ls_members','created_at'),
   ('ls_owners','id'), ('ls_owners','short'), ('ls_owners','name'), ('ls_owners','quotite'), ('ls_owners','color'),
   ('ls_owners','due'), ('ls_owners','verse'), ('ls_owners','sort'), ('ls_owners','email'),
-  ('ls_owners','due_pay'), ('ls_owners','due_res'),
+  ('ls_owners','due_pay'), ('ls_owners','due_res'), ('ls_owners','ogm'), ('ls_owners','periodicity'),
   ('ls_lots','id'), ('ls_lots','label'), ('ls_lots','designation'), ('ls_lots','quotite'), ('ls_lots','parcelle'),
   ('ls_lots','owner_id'),
   ('ls_transactions','id'), ('ls_transactions','tx_date'), ('ls_transactions','tiers'), ('ls_transactions','high'),

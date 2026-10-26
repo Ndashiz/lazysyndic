@@ -35,6 +35,15 @@ test('sans règle apprise : le nom du copro, sinon rien (aucun libellé intégr�
   assert.deepEqual(/const BUILTIN_OWNERS = \[\];/.test(block[1]), true, 'BUILTIN_OWNERS doit rester vide : rien de nominatif dans un dépôt public');
 });
 
+test('la communication structurée du copro l’emporte sur tout, si son contrôle est juste', () => {
+  const d = detector([{ short:'Alex', n:'Alex Martin', ogm:'123456789002' }, { short:'Lou', n:'Lou Petit', ogm:'000000009797' }], { 'virement': 'Lou' });
+  assert.equal(d(tx('Virement', '+++123/4567/89002+++')), 'Alex');      // avant la règle apprise
+  assert.equal(d(tx('VIREMENT LOU PETIT +++123/4567/89002+++')), 'Alex'); // avant le nom
+  assert.equal(d(tx('Virement', '***000/0000/09797***')), 'Lou');       // reste 0 → 97, étoiles
+  assert.equal(d(tx('Virement', '+++123/4567/89003+++')), 'Lou');       // contrôle faux : on retombe sur la règle
+  assert.equal(d(tx('Virement', '+++999/9999/99997+++')), 'Lou');       // inconnue : idem
+});
+
 test('le nom du copro l’emporte sur une règle apprise plus courte que le libellé', () => {
   const d = detector(COPRO, { 'fond de reserve': 'Alex' });     // apprise sur une ligne de Alex
   assert.equal(d(tx('Fond de reserve')), 'Alex');               // libellé exact → la règle

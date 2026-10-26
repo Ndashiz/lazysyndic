@@ -329,7 +329,8 @@ const BUILTIN_RULES = [
 const BUILTIN_OWNERS = [];
 
 // Détection auto du copropriétaire d'après le libellé (fallback si non attribué).
-// Dans l'ordre : 1. la règle apprise sur ce libellé exact (une attribution faite à la
+// Dans l'ordre : 0. la communication structurée du copropriétaire, si le libellé en porte une
+// valide ; 1. la règle apprise sur ce libellé exact (une attribution faite à la
 // main, dans la liste ou l'aperçu d'import) ; 2. le nom d'un copropriétaire, court ou
 // complet, en mot entier dans le libellé ou la note ; 3. les règles apprises par
 // sous-chaîne ; 4. les libellés intégrés. Une règle vers un copropriétaire qui n'existe
@@ -342,6 +343,11 @@ function detectOwner(t){
   const tiers = norm(t.tiers), hay = norm(t.tiers + ' ' + (t.note||''));
   const om = (typeof state!=='undefined'&&state&&state.ownerRules)||{};
   const owners = ownersOf(), exists = short => owners.some(o=>o.short===short);
+  // 0. la communication structurée du copropriétaire (+++123/4567/89012+++, posée par LazySyndic sur
+  //    chaque appel de fonds) : déterministe, elle passe avant tout. Contrôle : reste mod 97 (0 → 97).
+  const og = /(?:\+{3}|\*{3})?\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*(?:\+{3}|\*{3})?/.exec(t.tiers + ' ' + (t.note||''));
+  if (og){ const d = og[1]+og[2]+og[3], r = Number(d.slice(0,10)) % 97;
+    if (d.slice(10) === String(r === 0 ? 97 : r).padStart(2,'0')){ const byOgm = owners.find(o => String(o.ogm||'').replace(/\D/g,'') === d); if (byOgm) return byOgm.short; } }
   if (om[tiers] && exists(om[tiers])) return om[tiers];
   const word = s => !!s && new RegExp('(^|[^\\p{L}\\p{N}])' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'u').test(hay);
   const named = owners.find(o => word(norm(o.short)) || word(norm(o.n)));
@@ -3343,15 +3349,77 @@ function renderBudgetOwn(){
     const ow=ownersOf();
     if (!ow.length){ ot.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
     const ed=canWrite();
-    ot.innerHTML='<tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th><th>E-mail (convocations, signatures)</th></tr>'
+    const hasCalls = typeof LSCalls !== 'undefined';
+    const missing = hasCalls ? ow.filter(o=>!LSCalls.ogmValid(o.ogm)).length : 0;
+    const perSel = o => `<select class="fld own-per" data-key="${escH(o.id||o.short||o.n)}" aria-label="Périodicité des appels de ${escH(o.n)}" style="font-size:12.5px;padding:5px 8px">${['month','quarter','year'].map(k=>`<option value="${k}" ${LSCalls.cleanPeriodicity(o.periodicity)===k?'selected':''}>${({month:'Mensuelle',quarter:'Trimestrielle',year:'Annuelle'})[k]}</option>`).join('')}</select>`;
+    ot.innerHTML=`<tr><th>Propriétaire</th><th>Lots détenus</th><th class="num">Quotité cumulée</th><th>E-mail (convocations, signatures)</th>${hasCalls?'<th>Communication structurée</th><th>Appels de fonds</th>':''}</tr>`
       + ow.map(o=>{
           const mine=lotsOf().filter(l=>l.owner_id===o.id).map(l=>l.designation||l.label).join(', ')||'—';
           const mail=ed ? `<input class="fld own-mail" type="email" data-key="${escH(o.id||o.short||o.n)}" value="${escH(o.email||'')}" placeholder="nom@exemple.be" style="width:100%;min-width:180px;font-size:12.5px;padding:5px 8px">`
                               : escH(o.email||'—');
-          return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td><td>${mine}</td><td class="num">${o.q}</td><td>${mail}</td></tr>`;
-        }).join('');
+          const ogm = !hasCalls ? '' : LSCalls.ogmValid(o.ogm) ? `<code style="font-size:12.5px;white-space:nowrap">${LSCalls.ogmFormat(o.ogm)}</code>` : `<span class="sub">à attribuer</span>`;
+          const per = !hasCalls ? '' : ed ? perSel(o) : ({month:'Mensuels',quarter:'Trimestriels',year:'Annuels'})[LSCalls.cleanPeriodicity(o.periodicity)];
+          return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td><td>${mine}</td><td class="num">${o.q}</td><td>${mail}</td>${hasCalls?`<td>${ogm}</td><td>${per}</td>`:''}</tr>`;
+        }).join('')
+      + (hasCalls && ed && missing ? `<tr><td colspan="6" class="sub" style="padding:10px 12px">${missing} copropriétaire${missing>1?'s':''} sans communication structurée : elle figure sur chaque appel de fonds et rend l'attribution des virements certaine. <button class="btn btn-ghost" id="ownAssignOgm" style="padding:4px 10px;font-size:12.5px;margin-left:6px">Attribuer les communications structurées</button></td></tr>` : '');
     ot.querySelectorAll('.own-mail').forEach(inp=>inp.onchange=()=>saveOwnerEmail(inp));
+    ot.querySelectorAll('.own-per').forEach(sel=>sel.onchange=()=>saveOwnerField(sel.dataset.key, 'periodicity', LSCalls.cleanPeriodicity(sel.value)));
+    ot.querySelector('#ownAssignOgm')?.addEventListener('click', assignOgms);
   }
+}
+// Une colonne de ls_owners (périodicité, communication) : état local, puis Supabase si on y est.
+async function saveOwnerField(key, field, value){
+  const o=ownersOf().find(x=>String(x.id||x.short||x.n)===String(key)); if(!o) return;
+  o[field]=value;
+  if(!writeToDb() || !o.id){ saveState(); toastSaved(); renderAll(); return; }
+  try{ await window.LS.db.updateOwner(o.id,{[field]:value}); toastSaved(); renderAll(); }
+  catch(e){ console.error(e); showToast(callsHint('Échec de l’enregistrement : '+(e.message||e)),'err'); }
+}
+const callsHint = m => /ogm|periodicity|schema cache|column/i.test(m) ? m+' — lancez supabase/calls.sql dans Supabase (SQL Editor).' : m;
+// Une communication structurée par copropriétaire qui n'en a pas : rang dans la liste + graine
+// (son identifiant), unique, posée une fois pour toutes.
+async function assignOgms(){
+  if(!canWrite() || typeof LSCalls==='undefined') return;
+  const ow=ownersOf(), taken=new Set(ow.map(o=>String(o.ogm||'').replace(/\D/g,'')).filter(d=>LSCalls.ogmValid(d)));
+  let n=0;
+  for (const [i,o] of ow.entries()){
+    if (LSCalls.ogmValid(o.ogm)) continue;
+    let k=i+1, ogm=LSCalls.ogmFromSeed(o.id||o.short||o.n, k);
+    while (taken.has(ogm)) ogm=LSCalls.ogmFromSeed(o.id||o.short||o.n, k+=100);
+    taken.add(ogm); o.ogm=ogm; n++;
+    if (writeToDb() && o.id){ try { await window.LS.db.updateOwner(o.id,{ogm}); } catch(e){ console.error(e); showToast(callsHint('Échec de l’enregistrement : '+(e.message||e)),'err'); return; } }
+  }
+  saveState();
+  if (n){ logTimeline({title:`Communications structurées attribuées`, kind:'manual', description:`${n} copropriétaire${n>1?'s':''} : la communication figure sur les appels de fonds et attribue les virements.`}); showToast(`${n} communication${n>1?'s':''} structurée${n>1?'s':''} attribuée${n>1?'s':''}.`); }
+  renderAll();
+}
+/* ---------- Appels de fonds (calls.js) ---------- */
+// Le modèle de l'appel d'un copropriétaire pour l'exercice du dû : son dû (charges, réserve), sa
+// périodicité, sa communication, l'IBAN du compte de paiement, la copropriété, le syndic.
+function fundCallModel(o, y){
+  const m=(window.LS&&window.LS.member)||{}, b=(state.charges||{})[y]||{};
+  const pubAt = b.publishedAt ? new Date(b.publishedAt) : null;
+  return LSCalls.callModel({name:o.n, short:o.short, q:o.q, email:o.email, ogm:o.ogm, periodicity:o.periodicity},
+    {pay:+o.due_pay||0, res:+o.due_res||0},
+    {year:y, qTot:sum(ownersOf().map(x=>+x.q||0))||1000, copro:{name:state.coproName||'', addr:state.coproAddr||'', kbo:state.coproKbo||''},
+     iban:(state.ibans||{}).pay||'', syndic:{name:(m.full_name||'').trim()||'Le syndic', email:String(m.userEmail||m.email||'').trim()},
+     issuedAt:todayISO(), approved: pubAt && !isNaN(pubAt) ? `budget ${y} publié le ${fmtDateLong(pubAt.toISOString().slice(0,10))}` : ''});
+}
+async function fundCallPdf(owners, y){
+  const models=owners.map(o=>fundCallModel(o, y));
+  const bytes=await LSCalls.buildPdf(await loadPdfLib(), models, {logo: await brandLogoPng()});
+  saveBytes(bytes, owners.length===1 ? LSCalls.fileName(models[0], 'pdf') : `appels-de-fonds-${y}.pdf`);
+  logTimeline({title:`Appel${owners.length>1?'s':''} de fonds ${y} généré${owners.length>1?'s':''}`, kind:'manual', description:owners.map(o=>o.n).join(', ')+'.'});
+}
+async function fundCallEml(o, y){
+  const m=fundCallModel(o, y); const logo=await brandMarkPng(); if(logo) m.logoCid='logo@lazysyndic';
+  const pdf=await LSCalls.buildPdf(await loadPdfLib(), [m], {logo: await brandLogoPng()});
+  const eml=LSConvocation.eml({from:m.syndic.email||undefined, fromName:m.syndic.name, to:o.email?[o.email]:[], subject:LSCalls.subject(m), text:LSCalls.text(m), html:LSCalls.html(m),
+    logo: logo?{bytes:logo, cid:'logo@lazysyndic'}:null, pdf:{name:LSCalls.fileName(m,'pdf'), bytes:pdf}});
+  const blob=new Blob([eml],{type:'message/rfc822'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=LSCalls.fileName(m,'eml'); document.body.appendChild(a); a.click(); a.remove();
+  logTimeline({title:`Appel de fonds ${y} préparé pour ${o.n}`, kind:'manual', description:`${eur(m.total)} pour l'année, ${eur(m.perPeriod)} ${m.every}. Brouillon .eml ${o.email?`adressé à ${o.email}`:'sans destinataire : e-mail à renseigner dans Copropriétaires & lots'}${m.ogm?'':' · sans communication structurée : à attribuer dans Copropriétaires & lots'}.`});
+  showToast(o.email ? `Appel de fonds prêt pour ${o.n} (${o.email}) : il s'ouvre dans votre messagerie.` : `Appel prêt, sans destinataire : ${o.n} n'a pas d'e-mail dans Copropriétaires & lots.`, o.email?'':'err');
 }
 
 async function saveOwnerEmail(inp){
@@ -3904,22 +3972,32 @@ function renderProvisions(){
   if(!led.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
   const num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});   // 952,63 comme partout, relu par parseAmount
   const ly=led[0].year;
-  t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Versé ${ly}</th><th class="num">Solde</th></tr>`
+  const calls = ed && typeof LSCalls!=='undefined';
+  t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Versé ${ly}</th><th class="num">Solde</th>${calls?`<th>Appel de fonds ${ly}</th>`:''}</tr>`
     + led.map(o=>{
       const late=o.solde<-0.005;
       const cell=(cls, v, lbl)=> ed
         ? `<input class="fld ${cls}" data-id="${o.id||''}" value="${num(v)}" inputmode="decimal" aria-label="${escH(lbl)} de ${escH(o.n)}" style="width:92px;text-align:right">`
         : eur(v);
+      const key=escH(o.id||o.short||o.n);
+      const call = !calls ? '' : o.due>0.005
+        ? `<td style="white-space:nowrap"><button class="btn btn-ghost prov-pdf" data-key="${key}" style="padding:4px 10px;font-size:12.5px" title="Document à imprimer ou à joindre">PDF</button> <button class="btn btn-ghost prov-eml" data-key="${key}" style="padding:4px 10px;font-size:12.5px" title="Brouillon d'e-mail avec le PDF joint">E-mail</button><div class="chg-sub">${({month:'mensuel',quarter:'trimestriel',year:'annuel'})[LSCalls.cleanPeriodicity(o.periodicity)]}${LSCalls.ogmValid(o.ogm)?'':' · sans communication structurée'}</div></td>`
+        : '<td class="sub">aucun dû</td>';
       return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${(o.short||o.n||'?')[0]}</span> ${o.n}</div></td>
         <td class="num">${cell('prov-pay', o.due_pay, 'Dû paiement')}</td>
         <td class="num">${cell('prov-res', o.due_res, 'Dû réserve')}</td>
         <td class="num">${eur(o.due)}</td>
         <td class="num">${eur(o.verse)}</td>
-        <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td></tr>`;
-    }).join('');
+        <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td>${call}</tr>`;
+    }).join('')
+    + (calls && led.some(o=>o.due>0.005) ? `<tr><td colspan="7" style="padding:10px 12px"><button class="btn btn-ghost" id="provAllPdf" style="padding:5px 12px;font-size:12.5px">Tous les appels de fonds ${ly} en un PDF</button> <span class="sub">une page par copropriétaire : échéancier, IBAN du compte de paiement, communication structurée.</span></td></tr>` : '');
   if(ed){
     t.querySelectorAll('.prov-pay').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_pay'));
     t.querySelectorAll('.prov-res').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_res'));
+    const byKey=k=>ownersOf().find(o=>String(o.id||o.short||o.n)===String(k));
+    t.querySelectorAll('.prov-pdf').forEach(b=>b.onclick=()=>{ const o=byKey(b.dataset.key); if(o) fundCallPdf([o], ly).catch(e=>showToast(e.message||String(e),'err')); });
+    t.querySelectorAll('.prov-eml').forEach(b=>b.onclick=()=>{ const o=byKey(b.dataset.key); if(o) fundCallEml(o, ly).catch(e=>showToast(e.message||String(e),'err')); });
+    t.querySelector('#provAllPdf')?.addEventListener('click', ()=>fundCallPdf(ownersOf().filter(o=>(+o.due_pay||0)+(+o.due_res||0)>0.005), ly).catch(e=>showToast(e.message||String(e),'err')));
   }
 }
 function saveProvision(inp, field){
@@ -5124,7 +5202,16 @@ function renderMySituation(){
       <div class="kpi"><div class="l">Solde</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${led.solde<0?'−':''}${eur(Math.abs(led.solde))}</div></div>
     </div>
     ${Math.abs(led.report)>=0.005 ? `<div class="sub" style="margin-top:8px">Report des exercices précédents : ${led.report<0?'−':'+'}${eur(Math.abs(led.report))}</div>` : ''}
+    ${typeof LSCalls!=='undefined' && led.due>0.005 ? (()=>{ const cm=fundCallModel(led, led.year); return `<div class="card" style="margin-top:14px;padding:12px 16px;background:var(--secondary);border-left:3px solid var(--clay)">
+      <div class="mini-h" style="margin:0 0 6px">Pour vos virements</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 24px;font-size:13.5px">
+        <span>${eur(cm.perPeriod)} <span class="sub">${cm.every}</span></span>
+        ${cm.iban?`<span>IBAN <b style="font-variant-numeric:tabular-nums">${escH(LSCalls.fmtIban(cm.iban))}</b></span>`:''}
+        ${cm.ogm?`<span>Communication <b style="font-variant-numeric:tabular-nums">${escH(cm.ogm)}</b></span>`:'<span class="sub">communication structurée à venir</span>'}
+      </div>
+      <div style="margin-top:8px"><button class="btn btn-ghost" id="myCallPdf" style="padding:4px 10px;font-size:12.5px">Mon appel de fonds ${led.year} (PDF)</button></div></div>`; })() : ''}
     ${histo}</div>`;
+  box.querySelector('#myCallPdf')?.addEventListener('click', ()=>fundCallPdf([led], led.year).catch(e=>showToast(e.message||String(e),'err')));
 }
 
 /* ============================================================
@@ -5151,22 +5238,26 @@ function renderPaymentTracking(){
   if(!ow.length || !months.length){ box.style.display='none'; box.innerHTML=''; return; }
   box.style.display='block';
   const MON=['Jan','Fév','Mar','Avr','Mai','Jun','Jui','Aoû','Sep','Oct','Nov','Déc'];
-  const header='<tr><th>Copropriétaire</th><th class="num">Charge/mois</th>'
+  const header='<tr><th>Copropriétaire</th><th class="num">Attendu</th>'
     + months.map(m=>`<th class="num">${MON[m.m-1]} ${String(m.y).slice(2)}</th>`).join('')+'</tr>';
+  const per = o => typeof LSCalls!=='undefined' ? LSCalls.cleanPeriodicity(o.periodicity) : 'month';
+  const expIn = (o, m) => typeof LSCalls!=='undefined' ? LSCalls.expectedInMonth(o.due_pay||0, per(o), m.y, m.m) : (o.due_pay||0)/12;
   const rows=ow.map(o=>{
-    const short=o.short||o.n, exp=(o.due_pay||0)/12;
+    const short=o.short||o.n;
+    const first = typeof LSCalls!=='undefined' ? (LSCalls.schedule(o.due_pay||0, per(o), new Date().getFullYear())[0]||{}).amount||0 : (o.due_pay||0)/12;
+    const everyLbl = ({month:'/ mois', quarter:'/ trimestre', year:'/ an'})[per(o)];
     const cells=months.map(m=>{
-      const paid=paidInMonth(short,m); let inner;
+      const paid=paidInMonth(short,m), exp=expIn(o, m); let inner;
       if(exp>0){ inner = paid>=exp*0.95 ? '<span class="badge b-ok">✓</span>'
         : paid>0 ? '<span class="badge" style="background:var(--clay-soft);color:var(--warning-ink)">partiel</span>'
         : '<span class="badge b-late">✗</span>'; }
       else inner = paid>0 ? eur(paid) : '—';
       return `<td class="num" title="${eur(paid)} versé en ${MON[m.m-1]}">${inner}</td>`;
     }).join('');
-    return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${short[0]}</span> ${o.n}</div></td><td class="num">${exp>0?eur(exp):'—'}</td>${cells}</tr>`;
+    return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${short[0]}</span> ${o.n}</div></td><td class="num">${first>0?`${eur(first)}<div class="chg-sub">${everyLbl}</div>`:'—'}</td>${cells}</tr>`;
   }).join('');
   const last=months[months.length-1];
-  const late=ow.filter(o=>{ const exp=(o.due_pay||0)/12; return exp>0 && paidInMonth(o.short||o.n,last) < exp*0.95; });
+  const late=ow.filter(o=>{ const exp=expIn(o, last); return exp>0 && paidInMonth(o.short||o.n,last) < exp*0.95; });
   const relance = late.length
     ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <span class="sub">⚠ En retard sur ${MON[last.m-1]} ${String(last.y).slice(2)} :</span>`

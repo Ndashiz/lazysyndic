@@ -116,7 +116,8 @@
       subcats: settings.subcats || {},
       ownerRules: settings.owner_rules || {},
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
-        due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||''})),
+        due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||'',
+        ogm:r.ogm||'', periodicity:r.periodicity||'month'})),   // appels de fonds (supabase/calls.sql)
       lots: res.ls_lots.map(r=>({id:r.id, label:r.label, designation:r.designation, quotite:r.quotite, parcelle:r.parcelle, owner_id:r.owner_id})),
       // Exercices comptables (supabase/periods.sql) : clôturé = closed_at posé, lignes verrouillées par la base.
       periods: (res.ls_periods||[]).sort((a,b)=>(a.year||0)-(b.year||0)).map(r=>({

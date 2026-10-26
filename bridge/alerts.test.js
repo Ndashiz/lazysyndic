@@ -23,6 +23,14 @@ test('detectOwner: an owner name in the label beats a shorter learned rule (app.
   assert.equal(detectOwner({ tiers: 'Fond de reserve' }, copro, { 'fond de reserve': 'Zoé' }), ''); // rule to a vanished owner
 });
 
+test('detectOwner: a valid structured communication beats rules and names (app.js step 0)', () => {
+  const copro = [{ short: 'Alex', name: 'Alex Martin', ogm: '123456789002' }, { short: 'Lou', name: 'Lou Petit', ogm: '000000009797' }];
+  assert.equal(detectOwner({ tiers: 'Virement', note: '+++123/4567/89002+++' }, copro, { virement: 'Lou' }), 'Alex');
+  assert.equal(detectOwner({ tiers: 'VIREMENT LOU PETIT +++123/4567/89002+++' }, copro), 'Alex');
+  assert.equal(detectOwner({ tiers: 'Virement ***000/0000/09797***' }, copro), 'Lou');
+  assert.equal(detectOwner({ tiers: 'Virement', note: '+++123/4567/89003+++' }, copro, { virement: 'Lou' }), 'Lou'); // bad check digits
+});
+
 test('detectOwner: explicit rule > name match > none', () => {
   assert.equal(detectOwner({ tiers: 'Versement Alex Martin' }, owners), 'Alex');
   assert.equal(detectOwner({ tiers: 'SAM' }, owners), 'Sam');

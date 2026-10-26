@@ -148,6 +148,27 @@ Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (c
 `ls_settings.charges`). Code : `charges.js` (calcul pur) ; tests :
 `node --test tests/charges.test.mjs` (aucune dépendance).
 
+## Appels de fonds
+
+Écran **Budget & copropriétaires** › Calcul des charges › « Provisions attendues par copropriétaire »,
+une fois le budget appliqué : un bouton **PDF** et un bouton **E-mail** par copropriétaire, et « Tous les
+appels de fonds en un PDF » (une page par copropriétaire). L'appel reprend le dû de l'exercice
+(charges courantes et fonds de réserve), l'**échéancier** au centime selon la périodicité du
+copropriétaire (mensuelle par défaut, trimestrielle ou annuelle, réglée dans Copropriétaires & lots),
+l'IBAN du compte de paiement et la **communication structurée** du copropriétaire. L'e-mail est un
+brouillon `.eml` aux couleurs du design, PDF joint, prêt à partir depuis la messagerie du syndic.
+
+La communication structurée belge (`+++123/4567/89012+++`, contrôle mod 97) est attribuée une fois
+pour toutes par « Attribuer les communications structurées » (Copropriétaires & lots) et ne change
+jamais : elle figure sur chaque appel, et un virement qui la porte est attribué à son copropriétaire
+avant toute autre règle (étape 0 de `detectOwner`, app et bridge). Le suivi des charges payées
+attend chaque copropriétaire à ses échéances, pas tous au mois. « Ma situation » montre à chacun
+son montant, l'IBAN et sa communication, et lui donne son appel en PDF.
+
+Prérequis : lancer [`supabase/calls.sql`](supabase/calls.sql) à la main (colonnes `ls_owners.ogm` et
+`periodicity`, reprises dans le baseline). Code : `calls.js` (pur : OGM, échéancier, modèle, PDF) ;
+tests : `node --test tests/calls.test.mjs` (aucune dépendance).
+
 ## Exercices comptables
 
 Écran **Comptabilité** › carte « Exercices » : une ligne par année civile, avec les soldes

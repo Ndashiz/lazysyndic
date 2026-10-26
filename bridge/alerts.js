@@ -16,7 +16,8 @@ const BUILTIN_OWNERS = [];
 
 /**
  * app.js detectOwner (bloc OWNER-DETECT) — heuristic owner attribution from a transaction's
- * tiers+note, used only when the tx has no explicit `owner`. Order: 1. learned rule on the
+ * tiers+note, used only when the tx has no explicit `owner`. Order: 0. the owner's structured
+ * communication, when the label carries a valid one; 1. learned rule on the
  * exact label (a manual attribution); 2. an owner's short or full name as a whole word in the
  * label or note; 3. learned rules by substring; 4. built-in labels. A rule pointing at an owner
  * that no longer exists is ignored. Learned rules used to come first: « fond de reserve » → Alex
@@ -28,6 +29,15 @@ const BUILTIN_OWNERS = [];
 export function detectOwner(t, owners, ownerRules = {}) {
   const tiers = norm(t.tiers), hay = norm(`${t.tiers || ''} ${t.note || ''}`);
   const exists = (short) => owners.some((o) => o.short === short);
+  // 0. structured communication (+++123/4567/89012+++) set by LazySyndic on each fund call: deterministic, wins.
+  const og = /(?:\+{3}|\*{3})?\s*(\d{3})\s*\/\s*(\d{4})\s*\/\s*(\d{5})\s*(?:\+{3}|\*{3})?/.exec(`${t.tiers || ''} ${t.note || ''}`);
+  if (og) {
+    const d = og[1] + og[2] + og[3], r = Number(d.slice(0, 10)) % 97;
+    if (d.slice(10) === String(r === 0 ? 97 : r).padStart(2, '0')) {
+      const byOgm = owners.find((o) => String(o.ogm || '').replace(/\D/g, '') === d);
+      if (byOgm) return byOgm.short;
+    }
+  }
   if (ownerRules[tiers] && exists(ownerRules[tiers])) return ownerRules[tiers];
   const word = (s) => !!s && new RegExp('(^|[^\\p{L}\\p{N}])' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}])', 'u').test(hay);
   const named = owners.find((o) => word(norm(o.short)) || word(norm(o.name)));

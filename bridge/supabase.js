@@ -47,7 +47,9 @@ export function createRest(url, serviceRoleKey) {
   /** Fetch exactly the columns the alert builder needs, in parallel. */
   async function loadForAlerts() {
     const [owners, transactions, settingsRows, reminders, timeline, bankLinks] = await Promise.all([
-      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
+      // `ogm` (communication structurée, calls.sql) est arrivée après : sans la colonne, repli sur l'ancienne liste.
+      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort,ogm').catch(() =>
+        select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort')),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at,draft&deleted_at=is.null'),
       // `charges` (budgets appliqués) est arrivée après `owner_rules` : sans la colonne, PostgREST
       // répond 400 sur toute la requête, on retombe sur les règles seules.
@@ -87,7 +89,8 @@ export function createRest(url, serviceRoleKey) {
    */
   async function loadForDashboard() {
     const [owners, transactions, settingsRows, reminders] = await Promise.all([
-      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort'),
+      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort,ogm').catch(() =>
+        select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort')),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,high,owner,deleted_at,draft&deleted_at=is.null'),
       // `copro_name` a été ajoutée après coup : sur un déploiement qui n'a pas la colonne,
       // PostgREST répond 400 sur toute la requête. On retombe sur les colonnes du schéma

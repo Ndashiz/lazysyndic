@@ -102,6 +102,9 @@ create table if not exists public.ls_owners (
 alter table public.ls_owners add column if not exists email   text;
 alter table public.ls_owners add column if not exists due_pay numeric(12,2) default 0;
 alter table public.ls_owners add column if not exists due_res numeric(12,2) default 0;
+-- appels de fonds (calls.sql) : communication structurée fixe (12 chiffres) et rythme des appels
+alter table public.ls_owners add column if not exists ogm         text;
+alter table public.ls_owners add column if not exists periodicity text default 'month';   -- month | quarter | year
 
 create table if not exists public.ls_lots (
   id          uuid primary key default gen_random_uuid(),
