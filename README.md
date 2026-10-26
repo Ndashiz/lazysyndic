@@ -225,9 +225,11 @@ Le navigateur ne détient aucun secret : la clé privée Enable Banking vit sur 
 ([`bridge/README.md`](bridge/README.md#bank-sync-enable-banking) : mise en place, outil `eb.js`).
 Supabase sert de boîte aux lettres entre l'app et le pont (table `ls_bank_links`, baseline §12).
 
-> ⚠️ Au 26/10/2026, la liste publique d'Enable Banking ne contient **pas** Swan. Vérifier avec
-> `node bridge/eb.js banks FR swan` (ou dans le Control Panel) avant tout : sans Swan chez Enable
-> Banking, la synchro ne peut pas joindre les comptes Swan.
+**Swan** : proposée par Enable Banking sous le nom « Swan », en Belgique et en France, comptes
+professionnels seulement, accord de 180 jours, marquée « bêta » chez eux. La liste publique de leur
+site ne la montre pas : seule l'API (`node bridge/eb.js banks BE swan`, application active) fait
+foi. Les deux comptes de la copropriété ont été liés via « Swan (Belgium) » le 26/10/2026 : dans
+la carte, saisir Swan · Belgique · Professionnel.
 
 ## Mise en place du backend
 

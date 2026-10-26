@@ -2216,7 +2216,8 @@ function renderBankCard(){
   }
   const l = bankCurrent();
   const timeoutMsg = bank.timeout ? `<div class="alert"><span class="ic">⚠</span><div><b>Le pont de synchro ne répond pas.</b> Il tourne sur le VPS avec <code>EB_APP_ID</code> et <code>EB_KEY_PATH</code> dans <code>bridge/.env</code> (voir bridge/README.md) ; sans lui, rien n’avance.</div></div>` : '';
-  const prevName = (l && l.aspsp_name) || 'Swan', prevCountry = (l && l.aspsp_country) || 'FR', prevPsu = (l && l.psu_type) || 'business';
+  // Défauts = la copro : Swan, liée via « Swan (Belgium) » chez Enable Banking, comptes professionnels.
+  const prevName = (l && l.aspsp_name) || 'Swan', prevCountry = (l && l.aspsp_country) || 'BE', prevPsu = (l && l.psu_type) || 'business';
   const form = (label) => `
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:12px">
         <label style="flex:2 1 180px"><div class="l" style="font-size:12px;color:var(--ink-faint)">Banque (nom chez Enable Banking)</div>

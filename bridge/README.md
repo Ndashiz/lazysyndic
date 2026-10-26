@@ -145,18 +145,18 @@ leaves room for the button). Consent lasts at most 180 days (the bank's
 `maximum_consent_validity`); the Import card and a Jarvis notice (`bankAlerts`: renew < 14 days,
 failing > 36 h, expired) say when to reconnect.
 
-### Coverage: check before anything else
+### Coverage: ask the API, not the website
 
-On 2026-10-26, Enable Banking's public coverage list did **not** include Swan (France: 115
-institutions, Belgium: 40, Netherlands: 29, full list searched). The authoritative answer is the
-API, from the bridge:
+Enable Banking's public coverage page does not list Swan, yet the API does: on 2026-10-26
+`eb.js banks BE swan` and `eb.js banks FR swan` both returned « Swan », business accounts only,
+180-day consent, flagged beta. Only an **active** application may list institutions (an inactive
+one gets `403 Application is not active`), so before activation the Control Panel's « Activate by
+linking accounts » picker is the only check. The copro's two accounts were linked through
+« Swan (Belgium) » — use Swan · BE · business in the app.
 
 ```bash
-sudo -u jarvis node /opt/lazysyndic/bridge/eb.js banks FR swan     # exit 2 = not there
+sudo -u jarvis node /opt/lazysyndic/bridge/eb.js banks BE swan     # exit 2 = not there
 ```
-
-or the Control Panel's « Activate by linking accounts » bank picker. If Swan is missing, nothing
-below can work for Swan — ask Enable Banking (support.api@enablebanking.com) whether it is planned.
 
 ### Setup
 
