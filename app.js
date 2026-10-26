@@ -4024,7 +4024,13 @@ function renderProvisions(){
   const num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});   // 952,63 comme partout, relu par parseAmount
   const ly=led[0].year;
   const calls = ed && typeof LSCalls!=='undefined';
-  t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Versé ${ly}</th><th class="num">Solde</th>${calls?`<th>Appel de fonds ${ly}</th>`:''}</tr>`
+  // Par mois : le dû total réparti selon la périodicité du copropriétaire (mois par défaut) ; en
+  // trimestriel ou annuel, l'échéance est indiquée telle quelle, avec la mensualité équivalente dessous.
+  const PER_LBL={month:'/ mois', quarter:'/ trimestre', year:'/ an'};
+  const perCell=o=>{ const per=typeof LSCalls!=='undefined' ? LSCalls.cleanPeriodicity(o.periodicity) : 'month';
+    const first = typeof LSCalls!=='undefined' ? (LSCalls.schedule(o.due, per, ly)[0]||{}).amount||0 : o.due/12;
+    return `<b>${eur(first)}</b><div class="chg-sub">${PER_LBL[per]}${per!=='month'?` · ${eur(o.due/12)} / mois`:''}</div>`; };
+  t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Par mois</th><th class="num">Versé ${ly}</th><th class="num">Solde</th>${calls?`<th>Appel de fonds ${ly}</th>`:''}</tr>`
     + led.map(o=>{
       const late=o.solde<-0.005;
       const cell=(cls, v, lbl)=> ed
@@ -4038,10 +4044,11 @@ function renderProvisions(){
         <td class="num">${cell('prov-pay', o.due_pay, 'Dû paiement')}</td>
         <td class="num">${cell('prov-res', o.due_res, 'Dû réserve')}</td>
         <td class="num">${eur(o.due)}</td>
+        <td class="num">${perCell(o)}</td>
         <td class="num">${eur(o.verse)}</td>
         <td class="num"${late?' style="color:var(--coral)"':''}>${o.solde<0?'−':''}${eur(Math.abs(o.solde))}</td>${call}</tr>`;
     }).join('')
-    + (calls && led.some(o=>o.due>0.005) ? `<tr><td colspan="7" style="padding:10px 12px"><button class="btn btn-ghost" id="provAllPdf" style="padding:5px 12px;font-size:12.5px">Tous les appels de fonds ${ly} en un PDF</button> <span class="sub">une page par copropriétaire : échéancier, IBAN du compte de paiement, communication structurée.</span></td></tr>` : '');
+    + (calls && led.some(o=>o.due>0.005) ? `<tr><td colspan="8" style="padding:10px 12px"><button class="btn btn-ghost" id="provAllPdf" style="padding:5px 12px;font-size:12.5px">Tous les appels de fonds ${ly} en un PDF</button> <span class="sub">une page par copropriétaire : échéancier, IBAN du compte de paiement, communication structurée.</span></td></tr>` : '');
   if(ed){
     t.querySelectorAll('.prov-pay').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_pay'));
     t.querySelectorAll('.prov-res').forEach(inp=>inp.onchange=()=>saveProvision(inp,'due_res'));
