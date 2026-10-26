@@ -49,7 +49,15 @@ au lieu de devenir une recette de charges : un remboursement ou un versement d'u
 
 ## Assemblées générales et signature des PV
 
-1. **Ordre du jour** — points titrés et documentés, majorité requise par point.
+1. **Ordre du jour** — points titrés et documentés, majorité requise par point. « Proposer l'ordre
+   du jour standard » ajoute d'un coup ce qu'une AG ordinaire ramène chaque année, sans doubler
+   l'existant : approbation des comptes de l'exercice écoulé (soldes au 31/12 repris), décharge au
+   syndic, désignation du commissaire aux comptes (art. 3.91), approbation du budget prévisionnel
+   (montants du budget préparé et Annexe 4), mandat du syndic, divers. Chaque point reste modifiable.
+   À la finalisation de l'AG, la décision sur « Approbation du budget prévisionnel N » remonte dans le
+   budget N : adopté, il porte « Approuvé par l'AG du … » à l'écran, dans l'Annexe 4 et sur les appels
+   de fonds (et il est publié de fait) ; rejeté, il reste soumis à une prochaine assemblée. Une ligne
+   de chronologie garde la trace dans les deux cas.
 2. **Convocation** — un e-mail mis en page aux couleurs de LazySyndic (nom du
    copropriétaire, date, heure, lieu, ordre du jour, règles de la séance : délai, quorum,
    procurations, votes, documents, PV) et, en pièce jointe, la **convocation complète

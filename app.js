@@ -2558,6 +2558,81 @@ document.getElementById('addPoint')?.addEventListener('click',()=>{
   dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,kind:'decision',majorite:'simple',cle:'Acte de base'}); p.id=s.id; });
 });
 
+// --- Ordre du jour standard d'une AG ordinaire : les points que la loi et l'usage ramènent chaque
+//     année (comptes de l'exercice écoulé, décharge, commissaire aux comptes, budget prévisionnel
+//     avec son Annexe 4, mandat du syndic, divers). Proposés, pas imposés : ceux qui existent déjà
+//     ne sont pas doublés, et chacun reste modifiable comme n'importe quel point.
+const BUDGET_POINT_RE = /budget\s+pr[ée]visionnel\s+(\d{4})/i;
+const budgetPointYear = p => { const m = BUDGET_POINT_RE.exec(String((p&&p.title)||'')); return m ? +m[1] : null; };
+function agYearOf(ag){ const d=parseFrDate((ag||{}).ag_date); return d && !isNaN(d) ? d.getFullYear() : new Date().getFullYear(); }
+// L'exercice dont l'AG approuve le budget : celui de l'année de l'AG s'il est préparé, sinon le suivant.
+function agBudgetYear(ag){
+  const y=agYearOf(ag), has=k=>{ const b=(state.charges||{})[k]; return !!b && (((b.postes||[]).length) || ((b.reserve||[]).length)); };
+  return has(y) ? y : has(y+1) ? y+1 : y;
+}
+function standardAgenda(ag){
+  const y=agYearOf(ag), N=y-1, by=agBudgetYear(ag), cn=(state.coproName||'').trim()||'la copropriété';
+  const bal=a=>eur(balanceAt(a, `${N}-12-31`));
+  let budgetBody=`Budget ${by} à préparer dans Budget & copropriétaires › Calcul des charges ; l'Annexe 4 sera jointe à la convocation.`;
+  try {
+    const b=chargesBudget(by);
+    if (b.postes.length || b.reserve.length){
+      const s=budgetSplit(by), pay=sum(s.charges.map(c=>c.annual)), res=sum(s.res.map(r=>r.reserve));
+      budgetBody=`Fonds de roulement ${eur(pay)} (charges courantes du compte de paiement), fonds de réserve ${eur(res)}, soit ${eur(pay+res)} pour l'année et ${eur((pay+res)/12)} par mois toutes quotités (marge ${LSCharges.cleanMarge(b.marge)} %). Répartition par copropriétaire selon la clé de chaque poste ; contribution au fonds de réserve conforme à l'art. 3.86 § 3. Annexe 4 jointe.`;
+    }
+  } catch(e){ console.error(e); }
+  return [
+    { title:`Approbation des comptes ${N}`, kind:'decision', majorite:'simple',
+      body:`Comptes de l'exercice ${N} de ${cn} : recettes et dépenses, situation de trésorerie, créances et dettes, présentés dans le rapport financier ${N} joint. Soldes au 31/12/${N} : compte de paiement ${bal('pay')}, compte de réserve ${bal('res')}.` },
+    { title:`Décharge au syndic pour l'exercice ${N}`, kind:'decision', majorite:'simple',
+      body:`Quitus au syndic pour sa gestion de l'exercice ${N}.` },
+    { title:`Désignation du commissaire aux comptes`, kind:'decision', majorite:'simple',
+      body:`L'assemblée désigne chaque année un commissaire aux comptes, copropriétaire ou non, chargé de vérifier les comptes (art. 3.91 du Code civil).` },
+    { title:`Approbation du budget prévisionnel ${by}`, kind:'decision', majorite:'simple', body:budgetBody },
+    { title:`Mandat du syndic`, kind:'decision', majorite:'simple',
+      body:`Renouvellement du mandat du syndic ; sa durée ne peut excéder trois ans (art. 3.89 § 1er).` },
+    { title:`Divers`, kind:'info', majorite:'simple', body:`Questions des copropriétaires, sans vote.` },
+  ];
+}
+function proposeStandardAgenda(){
+  if(!currentAG){ alert('Créez d’abord une assemblée.'); return; }
+  if(!canWrite()){ alert('Lecture seule.'); return; }
+  const have=currentAG.points.map(p=>norm(p.title));
+  const key=t=>norm(t).replace(/\d{4}/g,'').trim();
+  const add=standardAgenda(currentAG).filter(sp=>!have.some(h=>h.replace(/\d{4}/g,'').trim()===key(sp.title)));
+  if(!add.length){ showToast('Tous les points de l’ordre du jour standard sont déjà là.'); return; }
+  add.forEach(sp=>{
+    const pos=currentAG.points.length;
+    const p={pos, title:sp.title, body:sp.body, kind:sp.kind, majorite:sp.majorite, cle:'Acte de base', votes:{}, seance_notes:'', decision:''};
+    currentAG.points.push(p);
+    dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,body:p.body,kind:p.kind,majorite:p.majorite,cle:'Acte de base'}); p.id=s.id; });
+  });
+  renderAgenda(); renderSeance();
+  showToast(`${add.length} point${add.length>1?'s':''} ajouté${add.length>1?'s':''} à l'ordre du jour.`);
+}
+document.getElementById('agStdAgenda')?.addEventListener('click', proposeStandardAgenda);
+// À la finalisation de l'AG, la décision sur « Approbation du budget prévisionnel N » remonte dans le
+// budget N : approuvé (badge, Annexe 4, appels de fonds) ou non, avec une ligne de chronologie.
+function syncBudgetApproval(ag){
+  if(!ag || !canWrite()) return;
+  (ag.points||[]).forEach((p,i)=>{
+    const y=budgetPointYear(p); if(!y || p.kind!=='decision') return;
+    const b=(state.charges||{})[y]; if(!b) return;
+    const adopted = p.decision ? p.decision==='Adopté' : agTally(ag,p).adopted;
+    const prev=b.approved||null;
+    if (adopted){
+      if (prev && prev.agId===ag.id) return;
+      const d=parseFrDate(ag.ag_date), iso=d&&!isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : todayISO();
+      // approuvé par l'AG = publié aux copropriétaires, de fait
+      saveCharges(y, b.postes||[], {approved:{agId:ag.id, agTitle:ag.title||'', date:iso, point:i+1}, status:'published', publishedAt:b.publishedAt||new Date().toISOString()});
+      logTimeline({title:`Budget ${y} approuvé par l'AG`, kind:'manual', description:`Point ${i+1} « ${p.title} » adopté le ${fmtDateLong(iso)}. L'Annexe 4 et les appels de fonds portent la mention.`});
+    } else if (prev && prev.agId===ag.id){
+      saveCharges(y, b.postes||[], {approved:null});
+      logTimeline({title:`Budget ${y} non approuvé par l'AG`, kind:'manual', description:`Point ${i+1} « ${p.title} » rejeté : le budget reste soumis à une prochaine assemblée.`});
+    }
+  });
+}
+
 // --- Convocation : un e-mail mis en page (modèle Outlook, aux couleurs de LazySyndic) et, en pièce
 //     jointe, la convocation complète + le formulaire de procuration (PDF). convocation.js
 //     (LSConvocation) construit le texte, le HTML, le .eml et le PDF ; ici : les données depuis
@@ -2944,6 +3019,7 @@ document.getElementById('completeAG')?.addEventListener('click',function(){
   }});
   currentAG.status='finalisee';
   dbWrite(db=>db.agUpdate(currentAG.id,{status:'finalisee'}));
+  syncBudgetApproval(currentAG);
   if((currentAG.signature||{}).status!=='signe') _sgOpen.add(String(currentAG.id));
   alert('✓ AG finalisée et archivée. La signature du PV se poursuit dans l’historique, en bas de page.');
   curStep=1; renderAG();
@@ -3454,7 +3530,7 @@ function fundCallModel(o, y){
     {pay:+o.due_pay||0, res:+o.due_res||0},
     {year:y, qTot:sum(ownersOf().map(x=>+x.q||0))||1000, copro:{name:state.coproName||'', addr:state.coproAddr||'', kbo:state.coproKbo||''},
      iban:(state.ibans||{}).pay||'', syndic:{name:(m.full_name||'').trim()||'Le syndic', email:String(m.userEmail||m.email||'').trim()},
-     issuedAt:todayISO(), approved: pubAt && !isNaN(pubAt) ? `budget ${y} publié le ${fmtDateLong(pubAt.toISOString().slice(0,10))}` : ''});
+     issuedAt:todayISO(), approved: b.approved && b.approved.date ? `budget ${y} approuvé par l'assemblée générale du ${fmtDateLong(b.approved.date)}` : pubAt && !isNaN(pubAt) ? `budget ${y} publié le ${fmtDateLong(pubAt.toISOString().slice(0,10))}` : ''});
 }
 async function fundCallPdf(owners, y){
   const models=owners.map(o=>fundCallModel(o, y));
@@ -3544,7 +3620,7 @@ function chargesBudget(y){ const b=(state.charges||{})[y]||{};
   const frozen=LSCharges.isPublished({status, applied});
   const tx=chargesTx(), ref=y-1, cov=LSCharges.coverage(tx, ref), prev=LSCharges.clean(((state.charges||{})[ref]||{}).postes);
   const postes=LSCharges.clean(b.postes).map(p=>LSCharges.resolve(p, {tx, year:ref, cov, prev, marge, frozen}));
-  return {postes, reserve:LSCharges.cleanReserve(b.reserve, y), applied, status, publishedAt:b.publishedAt||null, marge, cov, prev, frozen}; }
+  return {postes, reserve:LSCharges.cleanReserve(b.reserve, y), applied, status, publishedAt:b.publishedAt||null, approved:b.approved||null, marge, cov, prev, frozen}; }
 // Un brouillon ne montre rien d'autre au copropriétaire : ni réserve, ni répartition.
 function hideChargesExtras(){
   const res=document.getElementById('resCard'); if(res){ res.innerHTML=''; res.style.display='none'; }
@@ -3811,7 +3887,7 @@ function renderCharges(){
   if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi. À la publication, les estimations calculées par formule sont figées.`);
   if (unc.count) notes.push(`Dépenses ${ref} reprises par aucun poste : ${eur(unc.total)} (${unc.count} mouvement${unc.count>1?'s':''})${unc.uncategorized.count?`, dont ${eur(unc.uncategorized.total)} encore à catégoriser`:''}.`);
   if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; lots).');
-  const badge = ed ? ` <span class="status ${pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${pub?'Publié':'Brouillon'}</span>` : '';
+  const badge = (ed || bud.approved) ? ` <span class="status ${bud.approved?'success':pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${bud.approved?`Approuvé par l'AG du ${fmtDateLong(bud.approved.date)}`:pub?'Publié':'Brouillon'}</span>` : '';
   const margeUi = ed ? `<label class="chg-marge">Marge <input class="fld" id="chgMarge" inputmode="decimal" value="${num(marge)}" aria-label="Marge appliquée aux estimations"> %</label>` : `<span class="sub">Marge ${num(marge)} %</span>`;
   card.innerHTML = `
     <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement${badge}</h2><div class="sub">${covTxt}</div></div>
@@ -4846,7 +4922,7 @@ function fillReportPeriod(){
     const part3=LSPdf.section(`Total ${cy} par copropriétaire`, {n:3, sub:`Ce que chaque copropriétaire verse en ${cy}, fonds de roulement et fonds de réserve additionnés. La mensualité est le montant du virement permanent conseillé.`}) + tableC;
     const legal=LSPdf.legal([
       `Clés de répartition : « Millièmes » au prorata des quotités de l’acte de base (${F.int(m.qTot)} millièmes) ; « Individuelle » à parts égales entre les ${m.n} copropriétaires. Les parts sont calculées au centime, le dernier centime revenant au premier copropriétaire de la liste.`,
-      `Fonds de réserve : la contribution annuelle ne peut être inférieure à ${L.rate} % de la totalité des charges communes ordinaires de l’exercice précédent (art. 3.86, § 3, du Code civil), sauf décision contraire de l’assemblée générale à la majorité des quatre cinquièmes${L.basis==='real'?'':` ; en l’absence de réel ${m.ref}, la base retenue ici est la prévision ${cy}`}. Le budget est soumis à l’approbation de l’assemblée générale.`,
+      `Fonds de réserve : la contribution annuelle ne peut être inférieure à ${L.rate} % de la totalité des charges communes ordinaires de l’exercice précédent (art. 3.86, § 3, du Code civil), sauf décision contraire de l’assemblée générale à la majorité des quatre cinquièmes${L.basis==='real'?'':` ; en l’absence de réel ${m.ref}, la base retenue ici est la prévision ${cy}`}. ${bud.approved?`Budget approuvé par l’assemblée générale du ${F.dateLong(bud.approved.date)}.`:'Le budget est soumis à l’approbation de l’assemblée générale.'}`,
     ]);
     return `<h2 class="pdf-h2" style="margin-top:18px"><span class="pdf-h2-t">Annexe 4 — Budget prévisionnel ${cy}</span>${m.draft?LSPdf.badge('draft','Brouillon'):''}</h2>
       <p class="pdf-sub">${m.draft?'Brouillon non publié aux copropriétaires. ':''}Deux fonds, deux comptes : le <b>fonds de roulement</b> paie les charges courantes de l’année depuis le compte de paiement ; le <b>fonds de réserve</b> constitue les travaux et imprévus sur le compte de réserve. Chaque partie donne la part de chaque copropriétaire selon sa clé.</p>
@@ -4912,7 +4988,7 @@ function fillReportPeriod(){
     } else if (kind==='budget'){
       const cy=chargesYear(), bud=chargesBudget(cy), draft=!budgetPublished(bud), cov=bud.cov||{months:0};
       title = `Budget prévisionnel ${cy}`;
-      const status = draft ? {kind:'draft', label:'Brouillon'} : {kind:'ok', label:bud.publishedAt ? `Publié le ${LSPdf.fmt.date(bud.publishedAt)}` : 'Publié'};
+      const status = draft ? {kind:'draft', label:'Brouillon'} : bud.approved ? {kind:'ok', label:`Approuvé par l'AG du ${LSPdf.fmt.date(bud.approved.date)}`} : {kind:'ok', label:bud.publishedAt ? `Publié le ${LSPdf.fmt.date(bud.publishedAt)}` : 'Publié'};
       const meta = [{label:'Exercice budgétaire', value:String(cy)},
         cov.months ? {label:'Réel de référence', value:LSPdf.fmt.months(cov.from, cov.to, cy-1)} : {label:'Réel de référence', value:`aucun relevé en ${cy-1}`},
         {label:'Marge appliquée', value:LSPdf.fmt.pct(bud.marge)}];
