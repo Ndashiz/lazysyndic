@@ -67,13 +67,15 @@
 
   /* ---------- CHARGEMENT (read) ---------- */
   async function loadAll(){
-    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline','ls_periods'];
+    const tables = ['ls_owners','ls_lots','ls_settings','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_timeline','ls_periods','ls_budgets'];
     const res = {};
     await Promise.all(tables.map(async t=>{
       const {data, error} = await sb.from(t).select('*');
       if (error){
         // tables AG optionnelles : tolérer leur absence (schéma pas encore migré)
         if (t==='ls_ag' || t==='ls_ag_points' || t==='ls_timeline' || t==='ls_periods'){ res[t]=[]; return; }
+        // ls_budgets (supabase/budgets.sql) absente : null, pour retomber sur l'ancien jsonb ls_settings.charges
+        if (t==='ls_budgets'){ res[t]=null; return; }
         throw new Error(`${t}: ${error.message}`);
       }
       res[t] = data || [];
@@ -109,7 +111,15 @@
       budgetKeys: settings.budget_keys || {},
       ibans: { pay: settings.iban_pay||'', res: settings.iban_res||'' },
       holders: settings.holders || {},   // titulaire par compte (supabase/releve.sql) — relevé de compte PDF
-      charges: settings.charges || {},   // budget prévisionnel par poste et par exercice (supabase/charges.sql)
+      // Budgets prévisionnels (supabase/budgets.sql) : une ligne par exercice, un copropriétaire ne
+      // reçoit que les publiés (RLS). Même forme qu'avant pour l'app : { "2026": {postes, reserve, …} }.
+      // Sans la table (SQL pas encore passé), l'ancien jsonb ls_settings.charges (supabase/charges.sql).
+      charges: res.ls_budgets ? Object.fromEntries(res.ls_budgets.map(r=>[String(r.year), {
+        postes:Array.isArray(r.postes)?r.postes:[], reserve:Array.isArray(r.reserve)?r.reserve:[],
+        marge:r.marge==null?3:Number(r.marge), status:r.status||'draft', applied:r.applied||null,
+        approved:r.approved||null, snapshot:r.snapshot||null, publishedAt:r.published_at||null, updatedAt:r.updated_at||null
+      }])) : (settings.charges || {}),
+      budgetsStore: res.ls_budgets ? 'table' : 'settings',
       recon: settings.recon || {},   // {pay:{closing,asOf}, res:{...}}
       annualNote: settings.annual_note || '',
       categories: settings.categories || [],
@@ -254,16 +264,17 @@
 
     // Sauvegarde : dump brut de toutes les tables (forme DB, round-trip fidèle).
     async dumpAll(){
-      const tables=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_settings','ls_imports','ls_ag','ls_ag_points','ls_periods'];
+      const tables=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_settings','ls_imports','ls_ag','ls_ag_points','ls_periods','ls_budgets'];
       const out={};
       for(const t of tables){ const {data,error}=await sb.from(t).select('*'); if(error) throw new Error(t+': '+error.message); out[t]=data||[]; }
       return out;
     },
     // Restauration : remplace TOUTES les données par celles de la sauvegarde.
     async restore(backup){
-      const delOrder=['ls_periods','ls_ag_points','ls_ag','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_owners'];
-      for(const t of delOrder){ const {error}=await sb.from(t).delete().not('id','is',null); if(error) throw new Error('delete '+t+': '+error.message); }
-      const insOrder=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_periods'];
+      const delOrder=['ls_budgets','ls_periods','ls_ag_points','ls_ag','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_owners'];
+      // ls_periods et ls_budgets ont l'exercice pour clé, pas un id
+      for(const t of delOrder){ const pk=(t==='ls_periods'||t==='ls_budgets')?'year':'id'; const {error}=await sb.from(t).delete().not(pk,'is',null); if(error) throw new Error('delete '+t+': '+error.message); }
+      const insOrder=['ls_owners','ls_lots','ls_transactions','ls_rules','ls_aliases','ls_contracts','ls_reminders','ls_imports','ls_ag','ls_ag_points','ls_periods','ls_budgets'];
       for(const t of insOrder){ const rows=(backup[t]||[]); if(rows.length){ const {error}=await sb.from(t).insert(rows); if(error) throw new Error('insert '+t+': '+error.message); } }
       if(backup.ls_settings && backup.ls_settings[0]){ const {id, ...rest}=backup.ls_settings[0]; const {error}=await sb.from('ls_settings').update(rest).eq('id',1); if(error) throw new Error('settings: '+error.message); }
     },
@@ -279,6 +290,10 @@
     // --- Exercices comptables (supabase/periods.sql) ---
     async periodUpsert(row){ const {data,error}=await T('ls_periods').upsert(row).select().single(); if(error)throw error; return data; },
     async periodUpdate(year, patch){ const {error}=await T('ls_periods').update(patch).eq('year',year); if(error)throw error; },
+
+    // --- Budgets prévisionnels (supabase/budgets.sql) : une ligne par exercice. Un budget publié
+    //     est figé par la base (trigger ls_budgets_guard) : l'app n'envoie que ce qui peut changer.
+    async budgetUpsert(row){ const {data,error}=await T('ls_budgets').upsert(row).select().single(); if(error)throw error; return data; },
 
     // --- PV d'AG : bucket privé ls-docs (supabase/ag.sql) ---
     async docUpload(path, bytes){

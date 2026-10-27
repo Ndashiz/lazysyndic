@@ -324,3 +324,27 @@ test('modèle de l\'Annexe 4 : rien d\'autre que les sommes de resolve et de spl
   assert.equal(vide.draft, false);
   assert.deepEqual([vide.roulement.totals.est, vide.roulement.totals.real, vide.roulement.totals.delta], [null, null, null]);
 });
+
+test('instantané des copropriétaires : clé, nom, quotité ; différences depuis la publication', () => {
+  const snap = C.ownersSnapshot([{id:'u1', n:'Alex Martin', short:'Alex', q:500}, {n:'Sam Bernard', short:'Sam', q:251}, {short:'Lou', q:'249'}]);
+  assert.deepEqual(snap, [{key:'u1', n:'Alex Martin', short:'Alex', q:500}, {key:'Sam', n:'Sam Bernard', short:'Sam', q:251}, {key:'Lou', n:'Lou', short:'Lou', q:249}]);
+  assert.equal(C.ownersDiff(snap, snap).same, true);
+  // Alex perd 20 millièmes, Sam est parti, Max est arrivé
+  const d = C.ownersDiff(snap, [{id:'u1', n:'Alex Martin', short:'Alex', q:480}, {short:'Lou', q:249}, {id:'u4', n:'Max Durand', short:'Max', q:271}]);
+  assert.equal(d.same, false);
+  assert.deepEqual(d.added.map(o => o.short), ['Max']);
+  assert.deepEqual(d.removed.map(o => o.short), ['Sam']);
+  assert.deepEqual(d.changed, [{key:'u1', short:'Alex', from:500, to:480}]);
+  // la répartition d'un budget publié se calcule sur l'instantané, pas sur les copropriétaires du jour
+  const postes = [{id:'a', label:'Eau', cat:null, key:'quote', forecast:1000}];
+  assert.deepEqual(C.split(postes, snap).map(r => r.annual), [500, 251, 249]);
+  assert.deepEqual(C.split(postes, C.ownersSnapshot([{id:'u1', short:'Alex', q:480}, {short:'Lou', q:249}, {id:'u4', short:'Max', q:271}])).map(r => r.annual), [480, 249, 271]);
+  // instantané relu : rien d'inattendu ne passe
+  assert.equal(C.cleanSnapshot(null), null);
+  assert.equal(C.cleanSnapshot({owners:[]}), null);
+  const s = C.cleanSnapshot({at:'2026-10-27T10:00:00Z', owners:snap, legalBasis:'real', legalBase:['12.5', 6, null]});
+  assert.deepEqual(s.legalBase, [12.5, 6, 0]);
+  assert.equal(s.legalBasis, 'real');
+  assert.equal(C.cleanSnapshot({at:1, owners:snap, legalBasis:'x', legalBase:[]}).legalBasis, 'forecast');
+  assert.equal(C.cleanSnapshot({at:1, owners:snap}).at, '');
+});

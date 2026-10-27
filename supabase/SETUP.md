@@ -21,7 +21,7 @@ magique, app sur `https://ndashiz.be/lazysyndic/`.
    `db.js` / `app.js` existe dans le baseline — à relancer dès qu'une colonne apparaît dans le code.
 
 Les scripts par fonctionnalité (`schema.sql`, `ag.sql`, `auto-provision.sql`, `budget.sql`,
-`charges.sql`, `releve.sql`) restent comme **historique** : tout leur contenu est repris dans le
+`charges.sql`, `releve.sql`, `calls.sql`, `periods.sql`, `budgets.sql`) restent comme **historique** : tout leur contenu est repris dans le
 baseline, il n'y a plus à les lancer un par un. Les étapes ci-dessous datent de la mise en place
 initiale ; l'étape 1 est remplacée par le baseline, les étapes 2 à 4 restent valables.
 

@@ -6,23 +6,25 @@
 --  Sur une base complète, le résultat doit contenir :
 --    • AUCUNE ligne « TABLE MANQUANTE », « COLONNE MANQUANTE », « BUCKET MANQUANT »,
 --      « FONCTION MANQUANTE », « TRIGGER MANQUANT » ni « RLS DÉSACTIVÉE » ;
---    • section « colonne » : les 17 tables ls_* et leurs colonnes (la liste attendue
+--    • section « colonne » : les 18 tables ls_* et leurs colonnes (la liste attendue
 --      ci-dessous = la définition de 000_baseline.sql, vérifiée par tests/schema.test.mjs) ;
 --    • section « policy » : ls_<table>_read + ls_<table>_write pour les 13 tables de données
 --      (ls_owners, ls_lots, ls_transactions, ls_rules, ls_aliases, ls_contracts, ls_reminders,
---      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points, ls_periods), ls_members_read seule
---      (jamais d'écriture côté client), ls_invites_admin, ls_bank_links_admin (syndic seul,
+--      ls_settings, ls_imports, ls_timeline, ls_ag, ls_ag_points, ls_periods), ls_budgets_read +
+--      ls_budgets_write (lecture = publié ou syndic : un brouillon ne sort que pour le syndic),
+--      ls_members_read seule (jamais d'écriture côté client), ls_invites_admin, ls_bank_links_admin (syndic seul,
 --      lecture comprise), ls_bank_syncs_read (syndic, lecture seule : seul le pont écrit), et sur storage.objects :
 --      ls_docs_read / ls_docs_insert / ls_docs_update / ls_docs_delete ;
 --    • section « bucket » : ls-docs, privé, 20971520 o, application/pdf ;
---    • section « fonction » : ls_is_admin, ls_is_member (boolean), ls_provision_member (trigger) ;
---    • section « trigger » : ls_on_auth_user_created et ls_transactions_closed_period, actifs.
+--    • section « fonction » : ls_is_admin, ls_is_member, ls_period_closed (boolean), ls_provision_member,
+--      ls_guard_closed_period, ls_guard_budget (trigger) ;
+--    • section « trigger » : ls_on_auth_user_created, ls_transactions_closed_period et ls_budgets_guard, actifs.
 --  Rien d'autre n'est listé : le projet est partagé, seul le préfixe ls_ nous regarde.
 -- ============================================================
 with attendu_tables(t) as (values
   ('ls_members'), ('ls_owners'), ('ls_lots'), ('ls_transactions'), ('ls_rules'), ('ls_aliases'),
   ('ls_contracts'), ('ls_reminders'), ('ls_settings'), ('ls_imports'), ('ls_timeline'),
-  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_invites'), ('ls_bank_links'), ('ls_bank_syncs')
+  ('ls_ag'), ('ls_ag_points'), ('ls_periods'), ('ls_budgets'), ('ls_invites'), ('ls_bank_links'), ('ls_bank_syncs')
 ),
 attendu_colonnes(t, c) as (values
   ('ls_members','id'), ('ls_members','email'), ('ls_members','full_name'), ('ls_members','owner_short'),
@@ -61,6 +63,9 @@ attendu_colonnes(t, c) as (values
   ('ls_periods','year'), ('ls_periods','starts'), ('ls_periods','ends'), ('ls_periods','closed_at'), ('ls_periods','closed_by'),
   ('ls_periods','opening_pay'), ('ls_periods','opening_res'), ('ls_periods','closing_pay'), ('ls_periods','closing_res'),
   ('ls_periods','approved_ag_id'), ('ls_periods','report_html'), ('ls_periods','note'), ('ls_periods','created_at'),
+  ('ls_budgets','year'), ('ls_budgets','status'), ('ls_budgets','postes'), ('ls_budgets','reserve'), ('ls_budgets','marge'),
+  ('ls_budgets','applied'), ('ls_budgets','approved'), ('ls_budgets','snapshot'), ('ls_budgets','published_at'),
+  ('ls_budgets','published_by'), ('ls_budgets','updated_at'), ('ls_budgets','updated_by'), ('ls_budgets','created_at'),
   ('ls_invites','email'), ('ls_invites','role'), ('ls_invites','owner_short'), ('ls_invites','full_name'),
   ('ls_bank_links','id'), ('ls_bank_links','status'), ('ls_bank_links','aspsp_name'), ('ls_bank_links','aspsp_country'),
   ('ls_bank_links','psu_type'), ('ls_bank_links','redirect_url'), ('ls_bank_links','state'), ('ls_bank_links','auth_url'),
@@ -94,13 +99,14 @@ lignes as (
   select -7, 'BUCKET MANQUANT', 'storage.buckets', 'ls-docs', 'baseline §11'
   where not exists (select 1 from storage.buckets where id = 'ls-docs')
   union all
-  select -6, 'FONCTION MANQUANTE', 'public', v.f, 'baseline §1 / §9'
-  from (values ('ls_is_admin'), ('ls_is_member'), ('ls_provision_member')) as v(f)
+  select -6, 'FONCTION MANQUANTE', 'public', v.f, 'baseline §1 / §8 bis / §8 ter / §9'
+  from (values ('ls_is_admin'), ('ls_is_member'), ('ls_provision_member'), ('ls_period_closed'), ('ls_guard_closed_period'), ('ls_guard_budget')) as v(f)
   where not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                     where n.nspname = 'public' and p.proname = v.f)
   union all
-  select -5, 'TRIGGER MANQUANT', 'auth.users', 'ls_on_auth_user_created', 'baseline §9'
-  where not exists (select 1 from pg_trigger where tgname = 'ls_on_auth_user_created')
+  select -5, 'TRIGGER MANQUANT', v.tbl, v.tg, 'baseline §9 / §8 bis / §8 ter'
+  from (values ('auth.users','ls_on_auth_user_created'), ('ls_transactions','ls_transactions_closed_period'), ('ls_budgets','ls_budgets_guard')) as v(tbl, tg)
+  where not exists (select 1 from pg_trigger where tgname = v.tg)
   union all
   select -4, 'RLS DÉSACTIVÉE', c.relname::text, null, 'enable row level security manquant'
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -127,11 +133,11 @@ lignes as (
   union all
   select 4, 'fonction', 'public', p.proname::text, pg_get_function_result(p.oid)
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' and p.proname in ('ls_is_admin', 'ls_is_member', 'ls_provision_member')
+  where n.nspname = 'public' and p.proname in ('ls_is_admin', 'ls_is_member', 'ls_provision_member', 'ls_period_closed', 'ls_guard_closed_period', 'ls_guard_budget')
   union all
-  select 5, 'trigger', 'auth.users', tgname::text,
+  select 5, 'trigger', tgrelid::regclass::text, tgname::text,
          case when tgenabled = 'D' then 'DÉSACTIVÉ ⚠️' else 'actif' end
-  from pg_trigger where tgname = 'ls_on_auth_user_created' and not tgisinternal
+  from pg_trigger where tgname in ('ls_on_auth_user_created', 'ls_transactions_closed_period', 'ls_budgets_guard') and not tgisinternal
 )
 select section, objet, nom, detail
 from lignes

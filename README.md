@@ -111,9 +111,21 @@ se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait d
   à lancer à la main).
 - **Brouillon / publié** : un budget reste un brouillon, visible du seul syndic (charges, réserve
   et répartition), jusqu'à « Publier le budget » ; les copropriétaires voient alors « le syndic
-  prépare le budget » et arrivent sur le dernier budget publié. L'appliquer aux provisions le
-  publie aussi ; « Repasser en brouillon » reste possible tant qu'il n'est pas appliqué. L'Annexe 4
-  d'un brouillon est marquée comme telle et ne sort que pour le syndic.
+  prépare le budget » et arrivent sur le dernier budget publié. Ce n'est pas l'écran qui cache le
+  brouillon : la table `ls_budgets` (une ligne par exercice) ne livre à un copropriétaire que les
+  budgets publiés (RLS). L'appliquer aux provisions le publie aussi. L'Annexe 4 d'un brouillon est
+  marquée comme telle et ne sort que pour le syndic.
+- **Publié = figé** : postes, fonds de réserve et marge passent en lecture seule, et la base refuse
+  toute modification (trigger `ls_budgets_guard`). Le seul chemin pour corriger est « Repasser en
+  brouillon » (journalisé) ; si le budget est appliqué aux provisions, le geste annule l'application
+  dans le même temps — le dû de chacun reste tel quel jusqu'à une nouvelle application — et une
+  approbation d'AG tombe.
+- **Répartition figée à la publication** : le budget publié emporte un instantané des
+  copropriétaires (clé, nom court, quotité) et de la base du minimum légal du moment. L'Annexe 4,
+  la répartition et « Appliquer aux provisions » s'y tiennent, quoi qu'il arrive ensuite aux
+  quotités ; l'écran dit ce qui a changé depuis (arrivé, parti, quotité modifiée), et un
+  copropriétaire arrivé depuis reste hors répartition (dû à saisir dans Provisions) tant que le
+  budget n'est pas republié.
 - **Postes groupés par catégorie** de la comptabilité (Énergie, Assurance, Frais ACP…), les
   postes sans catégorie en dernier.
 - **Estimé pour N-1** : ce qui avait été budgété l'an dernier pour la même catégorie, sinon le
@@ -152,9 +164,10 @@ sert de base tant qu'il n'y a pas de réel, et l'Annexe 4 le dit), et baisse qua
 postes appellent déjà plus. « Appliquer aux provisions » remplit alors le dû du compte de
 paiement et celui du compte de réserve.
 
-Prérequis : lancer [`supabase/charges.sql`](supabase/charges.sql) à la main (colonne
-`ls_settings.charges`). Code : `charges.js` (calcul pur) ; tests :
-`node --test tests/charges.test.mjs` (aucune dépendance).
+Prérequis : lancer [`supabase/budgets.sql`](supabase/budgets.sql) à la main (table `ls_budgets`,
+RLS, trigger ; reprend les budgets de l'ancienne colonne `ls_settings.charges` puis la vide). Sans
+la table, l'app retombe sur l'ancienne colonne. Code : `charges.js` (calcul pur, instantané des
+copropriétaires compris) ; tests : `node --test tests/charges.test.mjs` (aucune dépendance).
 
 ## Rapprochement bancaire
 

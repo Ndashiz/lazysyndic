@@ -358,9 +358,49 @@ function cleanReserve(list, year){
   }));
 }
 
+/* ------------------------------------------------------------
+   Instantané des copropriétaires à la publication
+   Un budget publié est un document : sa répartition est celle des copropriétaires du jour de la
+   publication (clé, nom, quotité) et de la base du minimum légal d'alors. Corriger une quotité ou
+   ajouter un copropriétaire ensuite ne change ni l'Annexe 4 publiée ni le dû à appliquer : l'écran
+   le signale (ownersDiff), et le syndic repasse le budget en brouillon pour le republier.
+   ------------------------------------------------------------ */
+// owners de l'app = [{id?, n, short, q}] → [{key, n, short, q}] ; la clé est celle de split
+// (id du copropriétaire, sinon son nom court) : c'est elle qui relie l'instantané au dû de chacun.
+function ownersSnapshot(owners){
+  return (Array.isArray(owners) ? owners : []).filter(o => o && typeof o === 'object').map(o => ({
+    key: String(o.key || o.id || o.short || o.n || o.name || ''),
+    n: String(o.n || o.name || o.short || ''),
+    short: String(o.short || o.n || o.name || ''),
+    q: Math.max(0, Number(o.q) || 0),
+  }));
+}
+// Ce qui a changé depuis l'instantané : arrivés, partis, quotités modifiées. La clé fait l'identité.
+function ownersDiff(snapshot, current){
+  const snap = ownersSnapshot(snapshot), cur = ownersSnapshot(current);
+  const s = new Map(snap.map(o => [o.key, o])), c = new Map(cur.map(o => [o.key, o]));
+  const added = cur.filter(o => !s.has(o.key));
+  const removed = snap.filter(o => !c.has(o.key));
+  const changed = cur.filter(o => s.has(o.key) && s.get(o.key).q !== o.q).map(o => ({ key:o.key, short:o.short, from:s.get(o.key).q, to:o.q }));
+  return { same: !added.length && !removed.length && !changed.length, added, removed, changed };
+}
+// Instantané relu (Supabase, sauvegarde) : {at, owners, legalBasis, legalBase} ou null.
+function cleanSnapshot(s){
+  if (!s || typeof s !== 'object') return null;
+  const owners = ownersSnapshot(s.owners);
+  if (!owners.length) return null;
+  return {
+    at: typeof s.at === 'string' ? s.at : '',
+    owners,
+    legalBasis: s.legalBasis === 'real' ? 'real' : 'forecast',
+    legalBase: owners.map((_, i) => { const v = +(Array.isArray(s.legalBase) ? s.legalBase[i] : 0); return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0; }),
+  };
+}
+
 const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
               cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, annexModel, REAL_FORMULA, FC_FORMULA,
-              reserveSpan, reserveCall, legalBase, reserveSplit, cleanReserve, LEGAL_RATE };
+              reserveSpan, reserveCall, legalBase, reserveSplit, cleanReserve, LEGAL_RATE,
+              ownersSnapshot, ownersDiff, cleanSnapshot };
 root.LSCharges = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

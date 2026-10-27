@@ -450,18 +450,23 @@ function appliedDue(o, y){
   const b=(state.charges||{})[y]; if(!b||!b.applied) return 0;
   const key=o.id||o.short||o.n, bo=b.applied.byOwner||{};
   if (bo[key]) return (+bo[key].pay||0)+(+bo[key].res||0);
-  try { const s=budgetSplit(y), i=chargesOwners().findIndex(x=>x.key===key); return i>=0 ? s.total[i] : 0; } catch(e){ return 0; }
+  try { const s=budgetSplit(y), i=s.owners.findIndex(x=>x.key===key); return i>=0 ? s.total[i] : 0; } catch(e){ return 0; }
 }
 // Les budgets appliqués avant que l'application ne fige la part de chacun (applied.byOwner) la
-// reçoivent une fois, pour que le bridge Jarvis, qui n'a pas charges.js, lise le même dû.
+// reçoivent une fois, pour que le bridge Jarvis, qui n'a pas charges.js, lise le même dû ; et les
+// budgets publiés avant l'instantané des copropriétaires (budgets.sql) le reçoivent, une fois aussi.
 function backfillAppliedByOwner(){
   if (!canWrite()) return;
-  let changed=false;
+  const changed=new Set();
   appliedYears().forEach(y=>{
     const b=state.charges[y]; if (b.applied.byOwner) return;
-    try { const s=budgetSplit(y); b.applied.byOwner=Object.fromEntries(chargesOwners().map((o,i)=>[o.key, {pay:s.charges[i].annual, res:s.res[i].reserve}])); changed=true; } catch(e){}
+    try { const s=budgetSplit(y); b.applied.byOwner=Object.fromEntries(s.owners.map((o,i)=>[o.key, {pay:s.charges[i].annual, res:s.res[i].reserve}])); changed.add(y); } catch(e){}
   });
-  if (changed) dbWrite(db=>db.updateSettings({charges: state.charges}));
+  Object.keys(state.charges||{}).filter(y=>/^\d{4}$/.test(y)).forEach(y=>{
+    const b=state.charges[y]; if (!budgetPublished(b) || b.snapshot) return;
+    try { b.snapshot=budgetSnapshot(+y); changed.add(+y); } catch(e){}
+  });
+  changed.forEach(y=>budgetWrite(y, {...state.charges[y], snapshot:null, applied:state.charges[y].applied}));
 }
 // Le grand livre par copropriétaire, borné à l'exercice du dû. Avant, le versé cumulait toutes les
 // entrées depuis le premier relevé contre un dû annuel : dès le deuxième budget appliqué, chacun
@@ -2624,10 +2629,10 @@ function syncBudgetApproval(ag){
       if (prev && prev.agId===ag.id) return;
       const d=parseFrDate(ag.ag_date), iso=d&&!isNaN(d) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : todayISO();
       // approuvé par l'AG = publié aux copropriétaires, de fait
-      saveCharges(y, b.postes||[], {approved:{agId:ag.id, agTitle:ag.title||'', date:iso, point:i+1}, status:'published', publishedAt:b.publishedAt||new Date().toISOString()});
+      saveCharges(y, chargesBudget(y).postes, {approved:{agId:ag.id, agTitle:ag.title||'', date:iso, point:i+1}, status:'published', publishedAt:b.publishedAt||new Date().toISOString()});
       logTimeline({title:`Budget ${y} approuvé par l'AG`, kind:'manual', description:`Point ${i+1} « ${p.title} » adopté le ${fmtDateLong(iso)}. L'Annexe 4 et les appels de fonds portent la mention.`});
     } else if (prev && prev.agId===ag.id){
-      saveCharges(y, b.postes||[], {approved:null});
+      saveCharges(y, chargesBudget(y).postes, {approved:null});
       logTimeline({title:`Budget ${y} non approuvé par l'AG`, kind:'manual', description:`Point ${i+1} « ${p.title} » rejeté : le budget reste soumis à une prochaine assemblée.`});
     }
   });
@@ -3594,12 +3599,15 @@ function budgetDefaultKey(high, sub){
    sans historique), une clé (millièmes ou individuelle) et une prévision annuelle.
    À côté : le réel de l'année précédente sur le compte de paiement et sa moyenne
    mensuelle. La prévision est répartie par copropriétaire ; le syndic peut en faire le
-   « dû — paiement » de chacun. Stocké dans ls_settings.charges (supabase/charges.sql) :
-   { "2026": { postes:[…], applied:{at, total} } }.
+   « dû — paiement » de chacun. Stocké dans ls_budgets, une ligne par exercice
+   (supabase/budgets.sql) ; en mémoire, même forme qu'avant : state.charges = { "2026": {postes,
+   reserve, marge, status, applied, approved, snapshot, publishedAt} }. Un copropriétaire ne reçoit
+   que les budgets publiés (RLS) ; un budget publié est figé par la base (trigger) : l'écran le
+   montre en lecture seule et n'offre que « Repasser en brouillon ».
    ------------------------------------------------------------------------------ */
 const CHG_MON = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 let chgYear = null;
-const chargesHint = m => /charges|schema cache|column/i.test(m) ? m+' — lancez supabase/charges.sql dans Supabase (SQL Editor).' : m;
+const chargesHint = m => /schema cache|could not find|column|relation/i.test(m) ? m+' — lancez supabase/budgets.sql dans Supabase (SQL Editor).' : m;
 // Exercice affiché : la prévision se prépare pour l'année qui suit celle en cours, sur le réel
 // de l'année en cours à ce jour ; un budget déjà préparé plus loin l'emporte. Un copropriétaire
 // ne voit que les budgets publiés : il arrive sur le plus récent d'entre eux.
@@ -3620,7 +3628,8 @@ function chargesBudget(y){ const b=(state.charges||{})[y]||{};
   const frozen=LSCharges.isPublished({status, applied});
   const tx=chargesTx(), ref=y-1, cov=LSCharges.coverage(tx, ref), prev=LSCharges.clean(((state.charges||{})[ref]||{}).postes);
   const postes=LSCharges.clean(b.postes).map(p=>LSCharges.resolve(p, {tx, year:ref, cov, prev, marge, frozen}));
-  return {postes, reserve:LSCharges.cleanReserve(b.reserve, y), applied, status, publishedAt:b.publishedAt||null, approved:b.approved||null, marge, cov, prev, frozen}; }
+  return {postes, reserve:LSCharges.cleanReserve(b.reserve, y), applied, status, publishedAt:b.publishedAt||null, approved:b.approved||null,
+    snapshot:LSCharges.cleanSnapshot(b.snapshot), marge, cov, prev, frozen}; }
 // Un brouillon ne montre rien d'autre au copropriétaire : ni réserve, ni répartition.
 function hideChargesExtras(){
   const res=document.getElementById('resCard'); if(res){ res.innerHTML=''; res.style.display='none'; }
@@ -3636,26 +3645,69 @@ function reservePeriod(p, y){
   return a.y===b.y ? `${a.m} → ${b.m} ${b.y}` : `${a.m} ${a.y} → ${b.m} ${b.y}`;
 }
 // Charges courantes et réserve de chacun pour l'exercice, ligne du minimum légal comprise.
+// Budget publié : la répartition est celle de l'instantané pris à la publication (copropriétaires,
+// quotités et base du minimum légal d'alors) ; en brouillon, celle des copropriétaires du jour.
+// `owners` = [{key, n, short, q}] dans l'ordre des parts : c'est par la clé, jamais par l'index
+// dans ownersOf(), qu'un montant rejoint un copropriétaire d'aujourd'hui.
 function budgetSplit(y){
-  const {postes, reserve}=chargesBudget(y), owners=chargesOwners();
+  const bud=chargesBudget(y), {postes, reserve}=bud, snap=bud.frozen ? bud.snapshot : null;
+  const owners=snap ? snap.owners : chargesOwners();
   const charges=LSCharges.split(postes, owners);
   // Minimum légal de réserve : 5 % des charges communes ordinaires de l'exercice précédent
   // (art. 3.86 §3), soit le réel N-1 de chaque poste réparti selon sa clé ; sans réel, la prévision N.
-  const lb=LSCharges.legalBase(postes, owners, charges.map(c=>c.annual));
+  const lb=snap ? {basis:snap.legalBasis, base:snap.legalBase} : LSCharges.legalBase(postes, owners, charges.map(c=>c.annual));
   const res=LSCharges.reserveSplit(reserve, y, owners, lb.base);
-  return {postes, reserve, charges, res, legalBasis:lb.basis, legalBase:lb.base,
+  return {postes, reserve, owners, snapshot:!!snap, charges, res, legalBasis:lb.basis, legalBase:lb.base,
     total: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100)/100),
     monthly: charges.map((c,i)=>Math.round((c.annual+res[i].reserve)*100/12)/100)};
 }
 function chargesTx(){ return (state.tx||[]).map(t=>({iso:(parseDate(t.date)||{}).iso||'', account:t.account, high:t.high, sub:t.sub||'', amount:+t.amount||0, tiers:t.tiers||''})); }
-function chargesOwners(){ return ownersOf().map(o=>({key:o.id||o.short||o.n, q:+o.q||0})); }
+const ownerKey = o => String(o.key||o.id||o.short||o.n||'');
+function chargesOwners(){ return LSCharges.ownersSnapshot(ownersOf()); }
+// L'instantané pris à la publication : copropriétaires du jour et base du minimum légal du moment.
+function budgetSnapshot(y){
+  const s=budgetSplit(y);
+  return {at:new Date().toISOString(), owners:s.owners, legalBasis:s.legalBasis, legalBase:s.legalBase};
+}
 function saveCharges(y, postes, extra){
   if(!canWrite()) return;
   const plain=(postes||[]).map(p=>{ const {calc, ...q}=p; return q; });   // la prévision résolue est enregistrée, pas le détail du calcul
-  state.charges = {...(state.charges||{}), [y]: {...((state.charges||{})[y]||{}), postes:plain, ...(extra||{})}};
+  const was=(state.charges||{})[y]||null;
+  const next={...(was||{}), postes:plain, ...(extra||{})};
+  // À la publication, l'instantané se prend ici, une fois pour toutes (la base refuse qu'il change
+  // ensuite) ; il tombe quand le budget repasse en brouillon.
+  if (budgetPublished(next)){ if (!next.snapshot) next.snapshot=budgetSnapshot(y); }
+  else next.snapshot=null;
+  state.charges = {...(state.charges||{}), [y]: next};
   saveState();
-  dbWrite(async db=>{ try { await db.updateSettings({charges: state.charges}); } catch(e){ throw new Error(chargesHint(e.message||String(e))); } });
+  budgetWrite(y, was);
   renderCharges();
+}
+// Écriture d'un exercice : sa seule ligne ls_budgets (supabase/budgets.sql), ou l'ancien jsonb
+// ls_settings.charges tant que la table n'existe pas. Un budget publié est figé par la base : on
+// n'envoie que ce qui peut encore changer (application, approbation, instantané posé une fois).
+function budgetWrite(y, was){
+  const b=(state.charges||{})[y]||{}, wasPub=budgetPublished(was||{}), isPub=budgetPublished(b);
+  const row={year:+y, status:isPub?'published':'draft', applied:b.applied||null, approved:b.approved||null};
+  if (!wasPub || !isPub){ row.postes=b.postes||[]; row.reserve=b.reserve||[]; row.marge=LSCharges.cleanMarge(b.marge); }
+  if (isPub && b.snapshot && !(was&&was.snapshot)) row.snapshot=b.snapshot;
+  if (isPub && !wasPub) row.published_at=b.publishedAt||new Date().toISOString();
+  return dbWrite(async db=>{ try { if (state.budgetsStore==='table') await db.budgetUpsert(row); else await db.updateSettings({charges: state.charges}); } catch(e){ throw new Error(chargesHint(e.message||String(e))); } });
+}
+// Repasser en brouillon : le seul chemin pour modifier un budget publié. S'il est appliqué aux
+// provisions, l'application est annulée dans le même geste (la base le refuse autrement) ; le dû
+// de chacun reste tel quel jusqu'à une nouvelle application. L'approbation de l'AG tombe aussi.
+function unpublishBudget(y){
+  if(!canWrite()) return;
+  const b=chargesBudget(y);
+  const why=[];
+  if (b.applied) why.push(`appliqué aux provisions${b.applied.at?` le ${fmtDateLong(String(b.applied.at).slice(0,10))}`:''} : l'application est annulée, le dû de chacun reste tel quel jusqu'à une nouvelle application`);
+  if (b.approved) why.push(`approuvé par l'AG du ${fmtDateLong(b.approved.date)} : la mention tombe, une modification demande une nouvelle décision de l'assemblée`);
+  if (why.length && !confirm(`Repasser le budget ${y} en brouillon ?\n\n• ${why.join('\n• ')}`)) return;
+  saveCharges(y, b.postes, {status:'draft', applied:null, approved:null, snapshot:null, publishedAt:null});
+  logTimeline({title:`Budget ${y} repassé en brouillon`, kind:'manual', description: why.length ? why.map(t=>t[0].toUpperCase()+t.slice(1)).join('. ')+'.' : 'Visible du syndic seulement jusqu\'à sa republication.'});
+  showToast(`Budget ${y} repassé en brouillon : visible du syndic seulement.`);
+  renderProvisions(); renderDashboard();
 }
 // Catégories proposées : celles de la comptabilité, plus celles déjà vues dans les mouvements.
 function chargeCats(){
@@ -3798,6 +3850,7 @@ function renderCharges(){
   ensureChargesCss();
   const y=chargesYear(), ref=y-1, ed=canWrite();
   const bud=chargesBudget(y), {postes, reserve, cov, prev, marge}=bud, pub=budgetPublished(bud);
+  const edit = ed && !pub;   // publié : figé, en lecture seule (la base refuse toute modification)
   const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
   const yearNav = `<div class="chg-year"><button class="lk" id="chgPrev" aria-label="Exercice ${y-1}">‹</button><b>${y}</b><button class="lk" id="chgNext" aria-label="Exercice ${y+1}">›</button></div>`;
   if (!ed && !pub){   // copropriétaire : un brouillon reste invisible jusqu'à sa publication
@@ -3823,11 +3876,12 @@ function renderCharges(){
   const totDelta = hasEst && hasReal ? Math.round((totEst-totReal)*100)/100 : null;
   const deltaTxt = d => d==null ? '' : d<-0.005 ? 'dépassement' : d>0.005 ? 'sous le budget' : 'conforme';
   const deltaCell = d => d==null ? '<span class="sub">—</span>' : `<span class="chg-delta ${d<-0.005?'neg':d>0.005?'pos':''}">${d<0?'−':''}${eur(Math.abs(d))}</span>`;
-  const chip = (p, which, label) => ed ? `<button class="lk chg-formula" data-id="${escH(p.id)}" data-which="${which}" title="Modifier la formule"><i>ƒ</i>${escH(label)}</button>` : `<span class="chg-chip"><i>ƒ</i>${escH(label)}</span>`;
+  const chip = (p, which, label) => edit ? `<button class="lk chg-formula" data-id="${escH(p.id)}" data-which="${which}" title="Modifier la formule"><i>ƒ</i>${escH(label)}</button>` : `<span class="chg-chip"><i>ƒ</i>${escH(label)}</span>`;
   // Vue copropriétaire : Poste · Budget N · Ma part ; le syndic garde les colonnes d'analyse.
   const me=(window.LS&&window.LS.member)||{};
-  const myIdx = !ed && me.owner_short ? ownersOf().findIndex(o=>(o.short||o.n)===me.owner_short) : -1;
-  const mySplit = myIdx>=0 ? budgetSplit(y).charges[myIdx] : null;
+  const split=budgetSplit(y);
+  const myIdx = !ed && me.owner_short ? split.owners.findIndex(o=>o.short===me.owner_short) : -1;
+  const mySplit = myIdx>=0 ? split.charges[myIdx] : null;
   const cols = ed ? 6 : (myIdx>=0 ? 3 : 2);
   const keyLabel = k => k==='indiv' ? 'Individuelle' : 'Millièmes';
   const row = (p,i) => { const c=p.calc, bad=clash.has(p.id);
@@ -3837,32 +3891,32 @@ function renderCharges(){
       : `${eur(c.real)}<div class="chg-sub">${eur(c.toDate)} sur ${c.months} mois</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`;
     const fcLabel = p.fcFormula ? LSCharges.shortFormula(p.fcFormula) : 'saisie';
     // Le poste porte tout ce qui le définit : nom, catégorie de la comptabilité, bénéficiaire, clé.
-    const meta = ed
+    const meta = edit
       ? `<div class="chg-meta">
           <select class="fld chg-cat" data-i="${i}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, postes)}</select>
           <span class="chg-meta-v"><input class="fld chg-vendor" data-i="${i}" value="${escH(p.vendor||'')}" placeholder="Bénéficiaire" aria-label="Bénéficiaire">${!p.vendor && vendors[i] ? `<button class="lk chg-vfill" data-i="${i}" title="Tiers le plus fréquent de la catégorie en ${ref}">= ${escH(vendors[i])}</button>` : ''}</span>
           <select class="fld chg-key" data-i="${i}" aria-label="Clé de répartition"><option value="quote" ${p.key==='quote'?'selected':''}>Millièmes</option><option value="indiv" ${p.key==='indiv'?'selected':''}>Individuelle</option></select>
         </div>`
       : `<div class="chg-sub" style="white-space:normal">${[LSCharges.catLabel(p.cat), p.vendor, keyLabel(p.key)].filter(Boolean).map(escH).join(' · ')}</div>`;
-    const budgetCell = `${ed?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Budget ${y} du poste">`:`<b>${eur(p.forecast)}</b>`}
+    const budgetCell = `${edit?`<input class="fld chg-fc" data-i="${i}" inputmode="decimal" value="${p.forecast?num(p.forecast):''}" placeholder="0,00" aria-label="Budget ${y} du poste">`:`<b>${eur(p.forecast)}</b>`}
         ${c.fcError?`<div class="chg-warn">${escH(c.fcError)}</div>`:''}
         <div>${chip(p,'fc', fcLabel)}</div>
         ${p.fcNote?`<div class="chg-sub chg-fcnote">${escH(p.fcNote)}</div>`:''}`;
     const share = mySplit ? (mySplit.byPoste||{})[p.id]||0 : 0;
     return `<tr class="${bad?'chg-clash':''}">
-      <td class="chg-poste">${ed?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}${meta}
+      <td class="chg-poste">${edit?`<input class="fld chg-label" data-i="${i}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste">`:`<b>${escH(p.label||'—')}</b>`}${meta}
         ${bad?'<div class="chg-warn">Catégorie déjà reprise par un autre poste : la dépense serait comptée deux fois.</div>':''}</td>
       ${ed?`<td class="num">${estCell}</td>
       <td class="num">${realCell}</td>
       <td class="num">${deltaCell(c.delta)}${c.delta!=null?`<div class="chg-sub">${deltaTxt(c.delta)}</div>`:''}</td>`:''}
       <td class="num emph">${budgetCell}</td>
-      ${ed?`<td><button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button></td>`
+      ${ed?`<td>${edit?`<button class="lk chg-del" data-i="${i}" aria-label="Supprimer le poste" title="Supprimer le poste">✕</button>`:''}</td>`
           : myIdx>=0 ? `<td class="num">${eur(share)}<div class="chg-sub">${eur(share/12)} / mois</div></td>` : ''}
     </tr>`;
   };
   // L'éditeur de formule vit sous le tableau, pas dans une ligne : dans le tableau défilant, à
   // 390 px, ses boutons partaient hors champ à droite.
-  const edited = ed && chgEdit ? postes.find(p=>p.id===chgEdit.id) : null;
+  const edited = edit && chgEdit ? postes.find(p=>p.id===chgEdit.id) : null;
   const editor = edited ? formulaEditorRow(edited, chgEdit.which, y, ref, cols) : '';
   const rows = LSCharges.groupPostes(postes).map(g=>`<tr class="chg-group"><td colspan="${cols}">${escH(g.label||'Sans catégorie')}</td></tr>` + g.items.map(({p,i})=>row(p,i)).join('')).join('');
   const myTot = mySplit ? mySplit.annual : 0;
@@ -3878,17 +3932,18 @@ function renderCharges(){
     : `<div class="chg-empty">Aucun poste de dépense pour ${y}.${ed?'':' Le syndic n’a pas encore préparé ce budget.'}</div>`;
   const seedable = cov.months>0 && LSCharges.seed(tx, ref, cov).some(n=>!postes.some(p=>LSCharges.overlaps(p.cat, n.cat)));
   const actions = !ed ? '' : `<div class="chg-actions">
-      <button class="btn btn-ghost" id="chgAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste</button>
-      ${seedable?`<button class="btn btn-ghost" id="chgSeed">${postes.length?`Ajouter les catégories de ${ref} sans poste`:`Proposer les postes depuis le réel ${ref}`}</button>`:''}
-      ${!postes.length && !reserve.length && (prevB.postes.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prevB.postes.length?`${prevB.postes.length} poste${prevB.postes.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
-      ${pub ? (bud.applied ? '' : `<button class="btn btn-ghost" id="chgUnpub">Repasser en brouillon</button>`) : (postes.length||reserve.length ? `<button class="btn btn-primary" id="chgPub">Publier le budget ${y}</button>` : '')}
+      ${edit?`<button class="btn btn-ghost" id="chgAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste</button>`:''}
+      ${edit&&seedable?`<button class="btn btn-ghost" id="chgSeed">${postes.length?`Ajouter les catégories de ${ref} sans poste`:`Proposer les postes depuis le réel ${ref}`}</button>`:''}
+      ${edit&&!postes.length && !reserve.length && (prevB.postes.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prevB.postes.length?`${prevB.postes.length} poste${prevB.postes.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
+      ${pub ? `<button class="btn btn-ghost" id="chgUnpub">${bud.applied?`Annuler l'application et repasser en brouillon`:'Repasser en brouillon'}</button>` : (postes.length||reserve.length ? `<button class="btn btn-primary" id="chgPub">Publier le budget ${y}</button>` : '')}
     </div>`;
   const notes = [];
+  if (ed && pub) notes.push(`Publié${bud.publishedAt?` le ${fmtDateLong(String(bud.publishedAt).slice(0,10))}`:''} : postes, fonds de réserve et marge sont figés, la base refuse toute modification, et la répartition est celle des copropriétaires du jour de la publication. Pour corriger : « Repasser en brouillon »${bud.applied?`, ce qui annule l'application aux provisions (le dû de chacun reste tel quel jusqu'à une nouvelle application)`:''}${bud.approved?` ; approuvé par l'AG du ${fmtDateLong(bud.approved.date)}, une modification demande une nouvelle décision de l'assemblée`:''}.`);
   if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi. À la publication, les estimations calculées par formule sont figées.`);
   if (unc.count) notes.push(`Dépenses ${ref} reprises par aucun poste : ${eur(unc.total)} (${unc.count} mouvement${unc.count>1?'s':''})${unc.uncategorized.count?`, dont ${eur(unc.uncategorized.total)} encore à catégoriser`:''}.`);
   if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; lots).');
   const badge = (ed || bud.approved) ? ` <span class="status ${bud.approved?'success':pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${bud.approved?`Approuvé par l'AG du ${fmtDateLong(bud.approved.date)}`:pub?'Publié':'Brouillon'}</span>` : '';
-  const margeUi = ed ? `<label class="chg-marge">Marge <input class="fld" id="chgMarge" inputmode="decimal" value="${num(marge)}" aria-label="Marge appliquée aux estimations"> %</label>` : `<span class="sub">Marge ${num(marge)} %</span>`;
+  const margeUi = edit ? `<label class="chg-marge">Marge <input class="fld" id="chgMarge" inputmode="decimal" value="${num(marge)}" aria-label="Marge appliquée aux estimations"> %</label>` : `<span class="sub">Marge ${num(marge)} %</span>`;
   card.innerHTML = `
     <div class="h-row"><div><h2>Charges courantes ${y} · compte de paiement${badge}</h2><div class="sub">${covTxt}</div></div>
       <div class="chg-head-right">${margeUi}${yearNav}</div></div>
@@ -3896,7 +3951,8 @@ function renderCharges(){
 
   card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; chgEdit=null; renderCharges(); };
   card.querySelector('#chgNext').onclick=()=>{ chgYear=y+1; chgEdit=null; renderCharges(); };
-  if (ed){
+  card.querySelector('#chgUnpub')?.addEventListener('click', ()=>unpublishBudget(y));
+  if (edit){
     const upd=(i, patch)=>saveCharges(y, postes.map((p,k)=>k===i ? {...p, ...patch} : p));
     const updId=(id, patch)=>saveCharges(y, postes.map(p=>p.id===id ? {...p, ...patch} : p));
     card.querySelector('#chgMarge').onchange=e=>{
@@ -3954,11 +4010,7 @@ function renderCharges(){
     card.querySelector('#chgPub')?.addEventListener('click', ()=>{
       saveCharges(y, postes, {status:'published', publishedAt:new Date().toISOString()});
       logTimeline({title:`Budget ${y} publié`, kind:'manual', description:`${postes.length} poste${postes.length>1?'s':''} de charges courantes et ${reserve.length} de réserve, consultables par les copropriétaires.`});
-      showToast(`Budget ${y} publié : les copropriétaires peuvent le consulter.`);
-    });
-    card.querySelector('#chgUnpub')?.addEventListener('click', ()=>{
-      saveCharges(y, postes, {status:'draft'});
-      showToast(`Budget ${y} repassé en brouillon : visible du syndic seulement.`);
+      showToast(`Budget ${y} publié : les copropriétaires peuvent le consulter. Postes, réserve et répartition sont figés.`);
     });
   }
   renderReserve(y, postes, reserve);
@@ -3968,7 +4020,8 @@ function renderCharges(){
 function renderReserve(y, postes, reserve){
   const card=document.getElementById('resCard'); if(!card) return;
   card.style.display='';   // peut avoir été masqué par hideChargesExtras (brouillon vu par un copropriétaire)
-  const ed=canWrite(), ow=ownersOf(), b=budgetSplit(y), rs=b.res;
+  // publié : lecture seule pour le syndic aussi ; les parts vont aux copropriétaires de l'instantané
+  const b=budgetSplit(y), ed=canWrite() && !budgetPublished(chargesBudget(y)), ow=b.owners, rs=b.res;
   const num = v => (+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});
   const short = o => escH(o.short||o.n);
   const baseTot=sum(b.legalBase||[]), baseLbl = b.legalBasis==='real' ? `réel ${y-1} ramené à 12 mois` : `prévision ${y}, faute de réel ${y-1}`;
@@ -4038,7 +4091,7 @@ function renderReserve(y, postes, reserve){
 function renderChargesSplit(y){
   const t=document.getElementById('chgSplit'), bar=document.getElementById('chgApply'), title=document.getElementById('chgSplitTitle');
   if (!t || !bar) return;
-  const ow=ownersOf(), n=ow.length, b=budgetSplit(y), {postes, reserve, charges, res}=b;
+  const b=budgetSplit(y), ow=b.owners, n=ow.length, {postes, reserve, charges, res}=b;
   const show = (postes.length>0 || reserve.length>0) && n>0;
   [t.closest('.card'), bar, title].forEach(el=>{ if(el) el.style.display = show ? '' : 'none'; });
   if (!show){ t.innerHTML=''; bar.innerHTML=''; return; }
@@ -4054,10 +4107,19 @@ function renderChargesSplit(y){
   const resRows = reserve.map(p=>`<tr><td>${escH(p.label||'—')}</td><td>${keyLabel(p.key)}</td>
       <td class="num">${eur(LSCharges.reserveCall(p, y))}</td>${cells(res.map(r=>eur(r.byPoste[p.id]||0)))}</tr>`).join('');
   const totPay=sum(postes.map(p=>p.forecast)), totRes=Math.round(sum(res.map(r=>r.reserve))*100)/100;
-  const duePay=ow.map(o=>+o.due_pay||0), dueRes=ow.map(o=>+o.due_res||0);
-  const diffPay=ow.map((o,i)=>Math.abs(duePay[i]-charges[i].annual)>=0.005), diffRes=ow.map((o,i)=>Math.abs(dueRes[i]-res[i].reserve)>=0.005);
-  const dueCells = (due, diff) => ow.map((o,i)=>`<td class="num"${diff[i]?' style="color:var(--warning-ink)"':''}>${eur(due[i])}</td>`).join('');
-  t.innerHTML = head
+  // Le dû d'aujourd'hui, retrouvé par la clé : un copropriétaire de l'instantané parti depuis n'en a plus.
+  const cur=new Map(ownersOf().map(o=>[ownerKey(o), o]));
+  const duePay=ow.map(o=>cur.has(o.key)?+cur.get(o.key).due_pay||0:null), dueRes=ow.map(o=>cur.has(o.key)?+cur.get(o.key).due_res||0:null);
+  const diffPay=ow.map((o,i)=>duePay[i]!=null && Math.abs(duePay[i]-charges[i].annual)>=0.005), diffRes=ow.map((o,i)=>dueRes[i]!=null && Math.abs(dueRes[i]-res[i].reserve)>=0.005);
+  const dueCells = (due, diff) => ow.map((o,i)=>`<td class="num"${diff[i]?' style="color:var(--warning-ink)"':''}>${due[i]==null?'<span class="sub">parti</span>':eur(due[i])}</td>`).join('');
+  // Budget publié : la répartition est figée ; ce qui a changé depuis chez les copropriétaires est dit.
+  const snap=b.snapshot ? chargesBudget(y).snapshot : null, dd=snap ? LSCharges.ownersDiff(ow, ownersOf()) : null;
+  let snapNote='';
+  if (snap){
+    const since=[...dd.added.map(o=>`${escH(o.short)} arrivé (${o.q} millièmes), hors répartition publiée`), ...dd.removed.map(o=>`${escH(o.short)} parti`), ...dd.changed.map(c=>`${escH(c.short)} ${c.from} → ${c.to} millièmes`)];
+    snapNote=`<tr class="res-note"><td colspan="${cols}">Répartition figée à la publication${snap.at?` (${fmtDateLong(snap.at.slice(0,10))})`:''} : copropriétaires, quotités et base du minimum légal d'alors.${since.length?` Depuis : ${since.join(' ; ')}. L'Annexe 4 et le dû appliqué s'en tiennent à la répartition publiée${canWrite()?` ; pour répartir sur les copropriétaires d'aujourd'hui, repassez le budget en brouillon et republiez-le`:''}.`:''}</td></tr>`;
+  }
+  t.innerHTML = head + snapNote
     + `<tr class="chg-group"><td colspan="${cols}">Compte de paiement</td></tr>` + payRows
     + `<tr class="chg-sum"><td colspan="2"><b>Charges courantes ${y}</b></td><td class="num"><b>${eur(totPay)}</b></td>${cells(charges.map(r=>`<b>${eur(r.annual)}</b>`))}</tr>`
     + `<tr class="chg-group"><td colspan="${cols}">Compte de réserve</td></tr>` + legalRow + resRows
@@ -4068,16 +4130,23 @@ function renderChargesSplit(y){
     + `<tr><td colspan="2" class="sub">Dû actuel, compte de réserve</td><td></td>${dueCells(dueRes, diffRes)}</tr>`;
   const applied=chargesBudget(y).applied;
   const when = applied && applied.at ? ` le ${new Date(applied.at).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}` : '';
-  if (!diffPay.some(Boolean) && !diffRes.some(Boolean)) bar.innerHTML = `<span class="ok">✓ Le dû de chaque copropriétaire correspond au budget ${y}, paiement et réserve${when?' (appliqué'+when+')':''}.</span>`;
+  const outside = dd && dd.added.length ? ` ${dd.added.map(o=>escH(o.short)).join(', ')} : hors répartition publiée, dû à saisir dans Provisions.` : '';
+  if (!diffPay.some(Boolean) && !diffRes.some(Boolean)) bar.innerHTML = `<span class="ok">✓ Le dû de chaque copropriétaire correspond au budget ${y}, paiement et réserve${when?' (appliqué'+when+')':''}.${outside}</span>`;
   else bar.innerHTML = canWrite()
-    ? `<button class="btn btn-primary" id="chgApplyBtn">Appliquer aux provisions</button><span class="sub">Le dû de chaque copropriétaire devient sa charge annuelle ${y} sur le compte de paiement et son appel ${y} sur le compte de réserve : le suivi des paiements et des retards s'y fie.</span>`
+    ? `<button class="btn btn-primary" id="chgApplyBtn">Appliquer aux provisions</button><span class="sub">Le dû de chaque copropriétaire devient sa charge annuelle ${y} sur le compte de paiement et son appel ${y} sur le compte de réserve : le suivi des paiements et des retards s'y fie.${outside}</span>`
     : `<span class="sub">Le dû actuel diffère encore du budget calculé pour ${y}.</span>`;
   bar.querySelector('#chgApplyBtn')?.addEventListener('click', ()=>applyCharges(y));
 }
 async function applyCharges(y){
   if (!canWrite()) return;
-  const ow=ownersOf(), b=budgetSplit(y), pay=b.charges.map(r=>r.annual), res=b.res.map(r=>r.reserve);
-  const lines=ow.map((o,i)=>`• ${o.n} : paiement ${eur(+o.due_pay||0)} → ${eur(pay[i])} · réserve ${eur(+o.due_res||0)} → ${eur(res[i])} (${eur(b.monthly[i])} / mois)`).join('\n');
+  // La part de chaque copropriétaire d'aujourd'hui, retrouvée par sa clé dans la répartition (celle
+  // de l'instantané si le budget est publié) ; arrivé depuis, il n'y figure pas : son dû ne bouge pas.
+  const b=budgetSplit(y), idx=new Map(b.owners.map((o,i)=>[o.key, i]));
+  const ow=ownersOf().filter(o=>idx.has(ownerKey(o))), out=ownersOf().filter(o=>!idx.has(ownerKey(o)));
+  if (!ow.length){ showToast(`Aucun copropriétaire d'aujourd'hui ne figure dans la répartition publiée du budget ${y} : repassez-le en brouillon et republiez-le.`, 'err'); return; }
+  const at=o=>idx.get(ownerKey(o)), pay=ow.map(o=>b.charges[at(o)].annual), res=ow.map(o=>b.res[at(o)].reserve), monthly=ow.map(o=>b.monthly[at(o)]);
+  const lines=ow.map((o,i)=>`• ${o.n} : paiement ${eur(+o.due_pay||0)} → ${eur(pay[i])} · réserve ${eur(+o.due_res||0)} → ${eur(res[i])} (${eur(monthly[i])} / mois)`).join('\n')
+    + (out.length?`\n\nHors répartition publiée, dû inchangé (à saisir dans Provisions) : ${out.map(o=>o.n).join(', ')}.`:'');
   if (!confirm(`Remplacer le dû des copropriétaires par le budget ${y} ?\n\n${lines}\n\nLe suivi des paiements (qui paie quoi, retards) se basera sur ces montants.`)) return;
   const before=ow.map(o=>({pay:+o.due_pay||0, res:+o.due_res||0}));
   ow.forEach((o,i)=>{ o.due_pay=pay[i]; o.due_res=res[i]; });
@@ -4085,11 +4154,11 @@ async function applyCharges(y){
     try { for (const [i,o] of ow.entries()) if (o.id) await window.LS.db.updateOwner(o.id, {due_pay:pay[i], due_res:res[i]}); }
     catch(e){ console.error(e); ow.forEach((o,i)=>{ o.due_pay=before[i].pay; o.due_res=before[i].res; }); toastError(e.message||e); renderProvisions(); renderCharges(); return; }
   }
-  const totPay=Math.round(sum(pay)*100)/100, totRes=Math.round(sum(res)*100)/100;
+  const totPay=Math.round(sum(b.charges.map(r=>r.annual))*100)/100, totRes=Math.round(sum(b.res.map(r=>r.reserve))*100)/100;
   saveCharges(y, b.postes, {applied:{at:new Date().toISOString(), total:totPay, reserve:totRes,
-    byOwner:Object.fromEntries(ow.map((o,i)=>[o.id||o.short||o.n, {pay:pay[i], res:res[i]}]))}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
+    byOwner:Object.fromEntries(b.owners.map((o,i)=>[o.key, {pay:b.charges[i].annual, res:b.res[i].reserve}]))}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
   logTimeline({title:`Budget ${y} appliqué aux provisions`, kind:'manual',
-    description:`Charges courantes ${eur(totPay)} et fonds de réserve ${eur(totRes)} répartis : `+ow.map((o,i)=>`${o.short||o.n} ${eur(b.total[i])}`).join(', ')});
+    description:`Charges courantes ${eur(totPay)} et fonds de réserve ${eur(totRes)} répartis : `+b.owners.map((o,i)=>`${o.short} ${eur(b.total[i])}`).join(', ')+(out.length?` ; hors répartition publiée : ${out.map(o=>o.short||o.n).join(', ')}`:'')});
   renderProvisions(); renderDashboard();
 }
 // Provisions attendues par copropriétaire (le « dû »), éditable par l'admin.
@@ -4870,8 +4939,8 @@ function fillReportPeriod(){
   // 2 · fonds de réserve, chacun avec la part de chaque copropriétaire, 3 · total par copropriétaire.
   // Aucun montant n'est calculé ici : tout vient du modèle.
   function chargesAnnex(cy, postes, ow){
-    const bud=chargesBudget(cy);
-    const m=LSCharges.annexModel(bud, budgetSplit(cy), ow.map(o=>({n:o.n, short:o.short, q:+o.q||0})), cy);
+    const bud=chargesBudget(cy), split=budgetSplit(cy);   // publié : les copropriétaires de l'instantané
+    const m=LSCharges.annexModel(bud, split, split.owners.map(o=>({n:o.n, short:o.short, q:o.q})), cy);
     const F=LSPdf.fmt, money=v=>v==null?'—':F.eur(v), ref=m.ref, cov=m.cov;
     const delta=d=>d==null?{text:'—'}:{text:F.signed(d), neg:d<-0.005};
     const keyLabel=k=>k==='indiv'?`Individuelle (÷ ${m.n})`:'Millièmes';

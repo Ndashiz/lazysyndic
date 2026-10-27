@@ -44,6 +44,18 @@ export function createRest(url, serviceRoleKey) {
     return write('PATCH', table, query, patch);
   };
 
+  /**
+   * Les budgets par exercice, dans la forme que ownerLedger attend ({ "2026": {status, applied} }) :
+   * la table ls_budgets (supabase/budgets.sql) ; tant qu'elle n'existe pas, l'ancien jsonb
+   * ls_settings.charges passé en `fallback`. Le pont lit en membre : seuls les budgets publiés lui
+   * parviennent, et un budget appliqué est toujours publié.
+   */
+  async function loadBudgets(fallback) {
+    const rows = await select('ls_budgets', 'select=year,status,applied').catch(() => null);
+    if (!rows) return fallback || {};
+    return Object.fromEntries(rows.map((r) => [String(r.year), { status: r.status, applied: r.applied || null }]));
+  }
+
   /** Fetch exactly the columns the alert builder needs, in parallel. */
   async function loadForAlerts() {
     const [owners, transactions, settingsRows, reminders, timeline, bankLinks] = await Promise.all([
@@ -63,6 +75,7 @@ export function createRest(url, serviceRoleKey) {
       select('ls_bank_links', 'select=id,status,aspsp_name,valid_until,error,last_sync_at,last_ok_at,created_at&order=created_at.desc&limit=10').catch(() => []),
     ]);
     const settings = settingsRows[0] || {};
+    const charges = await loadBudgets(settings.charges);
     return {
       bankLinks: bankLinks || [],
       owners: (owners || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
@@ -73,7 +86,7 @@ export function createRest(url, serviceRoleKey) {
       })),
       ownerRules: settings.owner_rules || {},
       // Les budgets appliqués : le versé se borne à l'exercice du dû (alerts.js ownerLedger).
-      charges: settings.charges || {},
+      charges,
     };
   }
 
@@ -101,6 +114,7 @@ export function createRest(url, serviceRoleKey) {
       select('ls_reminders', 'select=id,tx,due,done,sort'),
     ]);
     const settings = (settingsRows || [])[0] || {};
+    settings.charges = await loadBudgets(settings.charges);   // dashboard.js lit settings.charges
     return {
       owners: (owners || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
       transactions: transactions || [],
