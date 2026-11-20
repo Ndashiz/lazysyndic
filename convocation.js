@@ -18,7 +18,7 @@
      dateLabel ('22/06/2026 19h00' tel que saisi), dateLong ('lundi 22 juin 2026' ou ''),
      timeLabel ('19h00' ou ''), start (Date ou null, pour le .ics), lieu,
      points:[{n, title, kind:'decision'|'info', maj:'Majorité absolue', pct:51, body}],
-     syndic:{name, email}, sentLabel ('25/10/2026'), delayDays (entier ou null),
+     syndic:{name, email}, sentLabel ('25/10/2026'),
      recipient:{name, lots} ou null (message générique),
      logo (Uint8Array PNG, pour le PDF) ou null
    }
@@ -52,13 +52,11 @@ const greeting = d => (d.recipient && d.recipient.name) ? `${d.recipient.name},`
 const isDecision = p => p.kind === 'decision';
 
 /* ---- les règles de l'AG, écrites une fois : e-mail, texte brut et PDF ---- */
+// Pas de ligne « Délai » (retirée à la demande du syndic, 2026-11-20) : le message ne dit pas combien
+// de jours séparent l'envoi de la séance. La date d'envoi reste dans l'en-tête ; c'est l'étape 2 de
+// l'app qui signale au syndic un délai inférieur aux quinze jours légaux.
 function rules(d){
-  const n = d.delayDays;
-  const delay = (typeof n === 'number' && isFinite(n))
-    ? `Convocation adressée le ${d.sentLabel}, soit ${n} jour${Math.abs(n) > 1 ? 's' : ''} avant la séance (minimum légal : quinze jours, art. 3.87 §3 du Code civil).`
-    : `Convocation adressée le ${d.sentLabel}, au moins quinze jours avant la séance (art. 3.87 §3 du Code civil).`;
   return [
-    ['Délai', delay],
     ['Quorum', `L'assemblée délibère valablement si, en début de séance, plus de la moitié des copropriétaires sont présents ou représentés et détiennent au moins la moitié des quotes-parts, ou si les copropriétaires présents ou représentés détiennent plus de trois quarts des quotes-parts (art. 3.87 §5). À défaut, une seconde assemblée sera convoquée, quinze jours au moins après la première, et délibérera quel que soit le quorum.`],
     ['Procuration', `Si vous ne pouvez pas être présent(e), complétez le formulaire de procuration joint en nommant votre mandataire, puis renvoyez-le au syndic ou remettez-le à votre mandataire. Nul ne peut accepter plus de trois procurations, sauf si le total de ses voix et de celles de ses mandants n'excède pas 10 % des voix ; le syndic ne peut pas être mandataire (art. 3.87 §7).`],
     ['Votes', `Sauf majorité renforcée indiquée au point, les décisions se prennent à la majorité absolue des voix exprimées par les copropriétaires présents ou représentés ; abstentions, votes blancs et nuls ne sont pas comptés (art. 3.88).`],
@@ -189,7 +187,7 @@ ${td(`${top}padding:17px 0 15px`, `<div style="${base}font-size:15px;line-height
 
 // « En pratique » : les trois règles qui demandent un geste, dites comme on les dirait.
 const PRATIQUE = [['Procuration', 'Vous ne pouvez pas venir ?'], ['Documents', 'Consulter les documents'], ['Procès-verbal', 'Après la séance']];
-const LEGAL = ['Délai', 'Quorum', 'Votes'];
+const LEGAL = ['Quorum', 'Votes'];
 function pratiqueRows(d){
   const r = new Map(rules(d));
   return PRATIQUE.map(([k, title], i) => `<tr>${td(`${i ? `border-top:1px solid ${T.line};` : ''}padding:${i ? 14 : 0}px 0 ${i === PRATIQUE.length - 1 ? 0 : 14}px`,

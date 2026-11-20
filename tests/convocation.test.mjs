@@ -21,7 +21,7 @@ const base = () => ({
     { n:3, title:'Travaux de façade', kind:'decision', maj:'Double tiers', pct:67, body:'Deux devis en annexe.' },
   ],
   syndic: { name:'Alex Martin', email:'alex@exemple.be' },
-  sentLabel:'25/10/2026', delayDays:240, recipient:null,
+  sentLabel:'25/10/2026', recipient:null,
   logo:null,
 });
 const b64dec = s => Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8');
@@ -49,21 +49,21 @@ test('objet et texte brut : copropriété, type, date, lieu, points et règles d
   assert.match(t, /1\. Approbation des comptes <2025> · décision \(Majorité absolue\)\n   Comptes joints\.\n   Questions bienvenues\./);
   assert.match(t, /2\. Toiture : état des lieux · information/);
   assert.match(t, /Quorum : /); assert.match(t, /Procuration : /); assert.match(t, /art\. 3\.88/);
-  assert.match(t, /240 jours avant la séance/);
+  // le délai entre l'envoi et la séance n'est dit nulle part dans le message
+  assert.doesNotMatch(t + C.html(d), /jours? avant la séance|minimum légal|Délai/);
   assert.match(t, /Alex Martin\nSyndic de ACP Démo\nalex@exemple\.be/);
   // ce que lit le copropriétaire ne porte aucun tiret cadratin
   assert.doesNotMatch(C.subject(d) + t + C.html(d), /—/);
 });
 
-test('sans date lisible ni délai : la date telle que saisie, le rappel des quinze jours', () => {
-  const d = { ...base(), dateLong:'', timeLabel:'', start:null, delayDays:null, dateLabel:'fin juin, 19h' };
+test('sans date lisible : la date telle que saisie, pas de rendez-vous', () => {
+  const d = { ...base(), dateLong:'', timeLabel:'', start:null, dateLabel:'fin juin, 19h' };
   assert.equal(C.when(d), 'fin juin, 19h');
   assert.equal(C.subject(d), "Convocation à l'assemblée générale ordinaire du fin juin, 19h · ACP Démo");
   // sans date lisible : pas de page de calendrier, la date telle que saisie dans le billet
   assert.doesNotMatch(C.html(d), /width="78"/);
   assert.match(C.html(d), /data-when[^>]*>.*?fin juin, 19h/s);
   assert.match(C.text(d), /Date : fin juin, 19h/);
-  assert.match(C.text(d), /au moins quinze jours avant la séance/);
   assert.equal(C.ics(d), null);
 });
 
@@ -90,8 +90,8 @@ test('HTML : bandeau, billet, réponses, points échappés et typés, règles, p
   assert.match(h, /Majorité absolue · 51 %/); assert.match(h, /Double tiers · 67 %/);
   assert.match(h, /data-meta[^>]*>3 points · 2 décisions à prendre</);
   assert.match(h, /data-attachment>Convocation complète et formulaire de procuration</);
-  // les six règles : trois dites « en pratique », trois en cadre légal
-  for (const k of ['Délai', 'Quorum', 'Procuration', 'Votes', 'Documents', 'Procès-verbal']) assert.match(h, new RegExp('data-rule="' + k + '"'));
+  // les cinq règles : trois dites « en pratique », deux en cadre légal
+  for (const k of ['Quorum', 'Procuration', 'Votes', 'Documents', 'Procès-verbal']) assert.match(h, new RegExp('data-rule="' + k + '"'));
   assert.match(h, /Vous ne pouvez pas venir \?/); assert.match(h, /art\. 3\.87 §5/);
   // le symbole est dessiné en cellules de tableau : aucune image, ni jointe ni distante (Mail sort
   // les images jointes du tableau quand on répond ou qu'on transfère)

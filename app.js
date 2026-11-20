@@ -2751,7 +2751,7 @@ function convocationRecipients(){
 }
 // Les données du modèle (convocation.js). `owner` = un copropriétaire pour un message nominatif, sinon générique.
 function convocationData(ag, owner){
-  const r=convocationRecipients(), d=parseFrDate(ag.ag_date), dl=convocationDelay(ag);
+  const r=convocationRecipients(), d=parseFrDate(ag.ag_date);
   const lots=owner ? lotsOf().filter(l=>l.owner_id!=null && l.owner_id===owner.id).map(l=>l.designation||l.label).filter(Boolean).join(', ') : '';
   return {
     copro:{name:(state.coproName||'').trim()||'la copropriété', addr:state.coproAddr||'', kbo:state.coproKbo||''},
@@ -2761,7 +2761,6 @@ function convocationData(ag, owner){
     points:(ag.points||[]).map((p,i)=>({n:i+1, title:p.title||'', kind:p.kind, maj:MAJ[p.majorite]||'', pct:MAJPCT[p.majorite]||0, body:String(p.body||'').trim()})),
     syndic:{name:r.syndic, email:r.from},
     sentLabel:ag.convocation_date||new Date().toLocaleDateString('fr-BE'),
-    delayDays:dl?dl.days:null,
     recipient:owner?{name:owner.n, lots}:null,
   };
 }
