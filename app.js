@@ -2484,7 +2484,7 @@ function renderAG(){
     const l=document.getElementById('agLieu'); if(l) l.value=currentAG.lieu||'';
     const ty=document.getElementById('agType'); if(ty) ty.value=currentAG.type||'Ordinaire';
     setAgStatus(currentAG.status);
-    renderAgenda(); renderPresences(); renderSeance();
+    renderAgenda(); renderPresences(); renderSeance(); agDraftNote();
     goStep(curStep);
   }
   renderAGArchive();
@@ -2498,11 +2498,82 @@ function renderAG(){
     currentAG[field]=e.target.value;
     currentAG.title=(currentAG.type||'AG')+(currentAG.ag_date?(' — '+currentAG.ag_date):'');
     const tt=document.getElementById('agTitle'); if(tt) tt.textContent=currentAG.title;
-    dbWrite(db=>db.agUpdate(currentAG.id,{[field]:e.target.value, title:currentAG.title}));
+    const ag=currentAG;
+    agWrite(db=>db.agUpdate(ag.id,{[field]:ag[field], title:ag.title}));
   });
 });
 
-function persistPoint(p, patch){ Object.assign(p,patch); dbWrite(db=>db.agPointUpdate(p.id,patch)); }
+/* --- Brouillon de l'ordre du jour ---
+   Une assemblée « en préparation » est un brouillon : elle vit en base dès sa création et chaque
+   champ s'enregistre quand on le quitte. Ce qui manquait, c'est le geste et sa preuve : un bouton
+   qui relit tout l'écran (y compris le champ encore en cours de frappe), l'écrit d'un bloc, et une
+   ligne qui dit quand le brouillon a été enregistré pour la dernière fois. */
+let agDirty=false, agEdits=0, agSavedAt=null, agSaving=false;
+function agDraftNote(err){
+  const n=document.getElementById('agDraftNote'); if(!n) return;
+  const hm=d=>String(d.getHours()).padStart(2,'0')+' h '+String(d.getMinutes()).padStart(2,'0');
+  n.style.color = (err||agDirty) ? 'var(--warning-ink)' : '';
+  n.textContent = err ? 'enregistrement impossible, réessayez'
+    : agSaving ? 'enregistrement…'
+    : agDirty ? 'modifications non enregistrées'
+    : agSavedAt ? 'brouillon enregistré à '+hm(agSavedAt)
+    : 'brouillon, rien n\'est envoyé tant que l\'agenda n\'est pas validé';
+  const b=document.getElementById('agSaveDraft'); if(b){ b.style.display=canWrite()?'':'none'; b.disabled=agSaving; }
+}
+function agMarkDirty(){ agEdits++; if(!agDirty){ agDirty=true; agDraftNote(); } }
+/** Une écriture de l'étape 1 : comme dbWrite, mais elle tient la ligne « brouillon enregistré ». */
+async function agWrite(fn){
+  const n=agEdits;
+  if(writeToDb()){
+    try{ await fn(window.LS.db); }
+    catch(e){ console.error(e); toastError(e.message||e); agDirty=true; agDraftNote(true); return false; }
+  } else saveState();
+  toastSaved(); agSavedAt=new Date(); if(n===agEdits) agDirty=false; agDraftNote();
+  return true;
+}
+/** Un point ajouté n'a son id qu'au retour de l'insertion : `_ins` permet de l'attendre, pour qu'une
+ *  modification tapée entre-temps ne parte pas sans id (et que le brouillon ne l'insère pas deux fois). */
+function agInsertPoint(ag, p){
+  const done=()=>{ try{ delete p._ins; }catch(e){} };
+  Object.defineProperty(p,'_ins',{configurable:true, enumerable:false, writable:true,
+    value: agWrite(async db=>{ const s=await db.agPointAdd({ag_id:ag.id,pos:p.pos,title:p.title,body:p.body||'',kind:p.kind,majorite:p.majorite,cle:p.cle||'Acte de base'}); p.id=s.id; }).then(done,done)});
+}
+function persistPoint(p, patch){
+  Object.assign(p,patch);
+  agWrite(async db=>{ if(p._ins) await p._ins; if(p.id) await db.agPointUpdate(p.id,patch); });
+}
+/** Enregistrer le brouillon : l'écran fait foi. Relit l'en-tête et chaque point, puis écrit tout. */
+async function agSaveDraft(quiet){
+  const ag=currentAG; if(!ag||!canWrite()||agSaving) return false;
+  const val=id=>{ const e=document.getElementById(id); return e?e.value.trim():''; };
+  ag.ag_date=val('agDate'); ag.lieu=val('agLieu'); ag.type=val('agType')||'Ordinaire';
+  ag.title=(ag.type||'AG')+(ag.ag_date?(' — '+ag.ag_date):'');
+  const tt=document.getElementById('agTitle'); if(tt) tt.textContent=ag.title;
+  const cards=[...document.querySelectorAll('#agenda > .card')];
+  ag.points.forEach((p,i)=>{
+    const c=cards[i]; p.pos=i; if(!c) return;
+    Object.assign(p,{title:c.querySelector('.pt-title').value, body:c.querySelector('.pt-body').innerText,
+      kind:c.querySelector('.pt-kind').value, majorite:c.querySelector('.pt-maj').value, cle:c.querySelector('.pt-cle').value});
+  });
+  agSaving=true; agDraftNote();
+  const ok=await agWrite(async db=>{
+    await db.agUpdate(ag.id,{ag_date:ag.ag_date, lieu:ag.lieu, type:ag.type, title:ag.title});
+    for(const p of ag.points){
+      if(p._ins) await p._ins;
+      const row={pos:p.pos, title:p.title, body:p.body||'', kind:p.kind, majorite:p.majorite, cle:p.cle};
+      if(p.id) await db.agPointUpdate(p.id,row);
+      else { const s=await db.agPointAdd({ag_id:ag.id, ...row}); p.id=s.id; }
+    }
+  });
+  agSaving=false;
+  if(ok){ agDirty=false; agDraftNote(); renderSeance(); if(!quiet) showToast('Brouillon enregistré. Vous pouvez reprendre plus tard.'); }
+  else agDraftNote(true);
+  return ok;
+}
+document.getElementById('agSaveDraft')?.addEventListener('click',()=>agSaveDraft());
+// Toute frappe à l'étape 1 passe la ligne à « modifications non enregistrées ».
+document.querySelector('#ag .agpanel[data-panel="1"]')?.addEventListener('input',()=>{ if(currentAG&&canWrite()) agMarkDirty(); });
+window.addEventListener('beforeunload',e=>{ if(agDirty && currentAG && canWrite()){ e.preventDefault(); e.returnValue=''; } });
 
 function renderAgenda(){
   const wrap=document.getElementById('agenda'); if(!wrap||!currentAG) return; wrap.innerHTML='';
@@ -2544,13 +2615,14 @@ function renderAgenda(){
 function movePoint(i,dir){
   const pts=currentAG.points, j=i+dir; if(j<0||j>=pts.length) return;
   [pts[i],pts[j]]=[pts[j],pts[i]];
-  pts.forEach((p,k)=>{ if(p.pos!==k){ p.pos=k; dbWrite(db=>db.agPointUpdate(p.id,{pos:k})); }});
+  pts.forEach((p,k)=>{ if(p.pos!==k) persistPoint(p,{pos:k}); });
   renderAgenda(); renderSeance();
 }
 function delPoint(p,i){
   if(!canWrite()) return;
   currentAG.points.splice(i,1);
-  dbWrite(db=>db.agPointDelete(p.id));
+  agWrite(async db=>{ if(p._ins) await p._ins; if(p.id) await db.agPointDelete(p.id); });
+  currentAG.points.forEach((q,k)=>{ if(q.pos!==k) persistPoint(q,{pos:k}); });
   renderAgenda(); renderSeance();
 }
 document.getElementById('addPoint')?.addEventListener('click',()=>{
@@ -2560,7 +2632,7 @@ document.getElementById('addPoint')?.addEventListener('click',()=>{
   const p={pos, title:'Nouveau point', body:'', kind:'decision', majorite:'simple', cle:'Acte de base', votes:{}, seance_notes:'', decision:''};
   currentAG.points.push(p);
   renderAgenda(); renderSeance();
-  dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,kind:'decision',majorite:'simple',cle:'Acte de base'}); p.id=s.id; });
+  agInsertPoint(currentAG, p);
 });
 
 // --- Ordre du jour standard d'une AG ordinaire : les points que la loi et l'usage ramènent chaque
@@ -2610,7 +2682,7 @@ function proposeStandardAgenda(){
     const pos=currentAG.points.length;
     const p={pos, title:sp.title, body:sp.body, kind:sp.kind, majorite:sp.majorite, cle:'Acte de base', votes:{}, seance_notes:'', decision:''};
     currentAG.points.push(p);
-    dbWrite(async db=>{ const s=await db.agPointAdd({ag_id:currentAG.id,pos,title:p.title,body:p.body,kind:p.kind,majorite:p.majorite,cle:'Acte de base'}); p.id=s.id; });
+    agInsertPoint(currentAG, p);
   });
   renderAgenda(); renderSeance();
   showToast(`${add.length} point${add.length>1?'s':''} ajouté${add.length>1?'s':''} à l'ordre du jour.`);
@@ -2998,6 +3070,7 @@ document.getElementById('genPV')?.addEventListener('click',()=>{
 });
 
 function goStep(n){
+  if(curStep===1 && n!==1 && agDirty) agSaveDraft(true);   // on ne quitte pas l'agenda avec une frappe en l'air
   curStep=Math.max(1,Math.min(5,n));
   document.querySelectorAll('#stepper .step').forEach(s=>{
     const sn=+s.dataset.step;

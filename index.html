@@ -835,8 +835,8 @@
         <div id="agenda"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px"><button class="btn btn-ghost" id="addPoint">+ Ajouter un point</button><button class="btn btn-ghost" id="agStdAgenda" title="Comptes de l'exercice écoulé, décharge, commissaire aux comptes, budget prévisionnel (Annexe 4), mandat du syndic, divers">Proposer l'ordre du jour standard</button></div>
         <div class="save-bar" style="margin-top:18px">
-          <div class="n"><b id="ptCount">6 points</b> · une fois validé, on passe à l'envoi des convocations</div>
-          <button class="btn btn-primary nextStep">Valider l'agenda →</button>
+          <div class="n"><b id="ptCount">6 points</b> · <span id="agDraftNote">brouillon, rien n'est envoyé tant que l'agenda n'est pas validé</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end"><button class="btn btn-ghost" id="agSaveDraft" title="Enregistre la date, le lieu et tous les points tels qu'ils sont à l'écran. Vous pouvez fermer et reprendre plus tard.">Enregistrer le brouillon</button><button class="btn btn-primary nextStep">Valider l'agenda →</button></div>
         </div>
       </div>
 
