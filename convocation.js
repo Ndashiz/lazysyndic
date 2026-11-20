@@ -31,6 +31,8 @@ const T = {
   bg:'#F7F9F7', card:'#FFFFFF', ink:'#1D2A24', muted:'#6C746F', line:'#E0E5E2', soft:'#EEF1EF',
   primary:'#005F45', deep:'#21503D', secondary:'#E6F3EB', mint:'#BFE3CF',
   info:'#3C76A9', infoSoft:'#E2F1FD', warnSoft:'#FFF1D9', warnInk:'#915C08', clay:'#C9854A',
+  ink2:'#3A4741',        // texte courant, un cran sous l'encre des titres (9,6:1 sur blanc)
+  clayDeep:'#A5632C',    // l'argile du logo, assombrie pour porter du texte blanc (4,7:1)
 };
 const FONT = "'Hanken Grotesk','Segoe UI',Helvetica,Arial,sans-serif";
 
@@ -66,18 +68,20 @@ function rules(d){
 }
 
 /* ------------------------------------------------------------ objet ---- */
+// Pas de tiret cadratin dans ce que lit le copropriétaire : deux-points, virgules, points médians.
 function subject(d){
-  return `Convocation — Assemblée générale ${typeLabel(d)} — ${coproName(d)} — ${d.dateLabel || when(d)}`;
+  const day = d.dateLong || d.dateLabel;
+  return `Convocation à l'assemblée générale ${typeLabel(d)}${day ? ' du ' + day : ''} · ${coproName(d)}`;
 }
 
 /* ------------------------------------------------------- texte brut ---- */
 function text(d){
   const cn = coproName(d), ty = typeLabel(d);
   const points = (d.points||[]).map(p => {
-    const head = `${p.n}. ${p.title}${isDecision(p) ? ` — décision (${p.maj})` : ' — information'}`;
+    const head = `${p.n}. ${p.title} · ${isDecision(p) ? `décision (${p.maj})` : 'information'}`;
     return p.body ? head + '\n' + p.body.split('\n').map(l => '   ' + l).join('\n') : head;
   }).join('\n\n');
-  const extra = rules(d).map(([k, v]) => `${k} — ${v}`).join('\n\n');
+  const extra = rules(d).map(([k, v]) => `${k} : ${v}`).join('\n\n');
   return `${greeting(d)}
 
 En ma qualité de syndic de ${cn}, j'ai le plaisir de vous convoquer à l'assemblée générale ${ty} des copropriétaires, qui se tiendra :
@@ -96,38 +100,90 @@ ${points || '(aucun point)'}
 ${extra}
 
 Dans l'attente de votre présence,
-${d.syndic.name} — Syndic, ${cn}${d.syndic.email ? '\n' + d.syndic.email : ''}
+${d.syndic.name}
+Syndic de ${cn}${d.syndic.email ? '\n' + d.syndic.email : ''}
 
 --
 Convocation établie avec LazySyndic. Envoyée par e-mail aux copropriétaires ayant accepté ce mode de communication (art. 3.87 §3 du Code civil).
 `;
 }
 
-/* ------------------------------------------------------- HTML (mail) ---- */
+/* ------------------------------------------------------- HTML (mail) ----
+   Une invitation plutôt qu'un courrier : l'en-tête dit de quoi il s'agit, le « billet » blanc posé
+   sur le bandeau dit quand et où (une page de calendrier, lisible d'un coup d'œil), deux boutons
+   permettent de répondre au syndic, puis viennent l'ordre du jour et ce qu'il faut savoir. Le cadre
+   légal reste, en petit : le PDF joint le reprend en entier et fait foi.
+   Tout en tableaux, styles inline, couleurs en hexadécimal : c'est le moteur de Word qui rend le
+   message dans Outlook. Les coins arrondis y sont simplement carrés. ------------------------- */
 const td = (style, inner, attrs='') => `<td ${attrs} style="${style}">${inner}</td>`;
 const base = `font-family:${FONT};`;
+const TBL = 'role="presentation" cellpadding="0" cellspacing="0" border="0"';
+const PAD = 28;                                                   // marge intérieure de la carte
+const MOIS = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+const JOURS = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+const validDate = x => x instanceof Date && !isNaN(x);
+const eyebrow = (t, color) => `<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${color}">${t}</div>`;
+const h2 = t => `<div style="${base}font-size:18px;line-height:24px;font-weight:800;letter-spacing:-.2px;color:${T.ink}">${t}</div>`;
+// pastille en ligne, sous le titre du point : la ligne se replie d'elle-même sur un téléphone, sans
+// media query (un <style> ne survit pas au copier-coller dans un message). Word ignore le padding
+// d'un <span> : dans Outlook la pastille est un simple surlignage, lisible quand même.
+const chip = (label, bg, fg) => `<span style="display:inline-block;padding:2px 9px;border-radius:999px;background-color:${bg};color:${fg};${base}font-size:11px;line-height:16px;font-weight:700;white-space:nowrap">${label}</span>`;
+// bouton « à l'épreuve des balles » : la cellule porte le fond, le lien porte le texte
+const button = (href, label, solid) => `<table ${TBL} align="left"><tr><td style="padding:0 10px 8px 0"><table ${TBL}><tr><td align="center" bgcolor="${solid ? T.primary : T.card}" style="background-color:${solid ? T.primary : T.card};border:1px solid ${T.primary};border-radius:8px"><a href="${esc(href)}" style="display:inline-block;padding:11px 18px;${base}font-size:14px;line-height:20px;font-weight:700;color:${solid ? '#FFFFFF' : T.primary};text-decoration:none">${label}</a></td></tr></table></td></tr></table>`;
+
+// La page de calendrier du billet ; '' sans date lisible.
+function dateTile(d){
+  if (!validDate(d.start)) return '';
+  const s = d.start;
+  return `<table ${TBL} width="78" style="width:78px;border:1px solid ${T.line};border-radius:10px">
+<tr><td align="center" bgcolor="${T.clayDeep}" style="background-color:${T.clayDeep};border-radius:9px 9px 0 0;padding:5px 0;${base}font-size:11px;line-height:14px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#FFFFFF">${esc(MOIS[s.getMonth()])} ${s.getFullYear()}</td></tr>
+<tr><td align="center" style="padding:7px 0 0;${base}font-size:32px;line-height:34px;font-weight:800;letter-spacing:-.5px;color:${T.ink}">${s.getDate()}</td></tr>
+<tr><td align="center" style="padding:0 0 8px;${base}font-size:12px;line-height:16px;color:${T.muted}">${JOURS[s.getDay()]}</td></tr>
+</table>`;
+}
+
+// Deux réponses en un clic : un message déjà rédigé à l'attention du syndic. '' sans son e-mail.
+function replyLinks(d){
+  const to = String((d.syndic||{}).email||'').trim();
+  if (!to) return null;
+  const cn = coproName(d), day = d.dateLong || d.dateLabel || '', who = d.recipient && d.recipient.name ? d.recipient.name : '';
+  const ag = `l'assemblée générale ${typeLabel(d)}${day ? ' du ' + day : ''} (${cn})`;
+  const enc = t => encodeURIComponent(t).replace(/'/g, '%27');      // pas d'apostrophe nue : certains clients mail coupent le lien dessus
+  const href = (subj, body) => `mailto:${enc(to).replace(/%40/g,'@')}?subject=${enc(subj)}&body=${enc(body.replace(/\n/g,'\r\n'))}`;
+  return {
+    yes: href(`Présence à l'assemblée générale · ${cn}`, `Bonjour,\n\nJe serai présent(e) à ${ag}.\n\n${who}`),
+    proxy: href(`Procuration pour l'assemblée générale · ${cn}`, `Bonjour,\n\nJe ne pourrai pas assister à ${ag}.\nJe donne procuration à : \n\nJe joins le formulaire de procuration complété et signé.\n\n${who}`),
+  };
+}
 
 function pointRows(d){
   const pts = d.points || [];
-  if (!pts.length) return `<tr>${td(`${base}font-size:13px;line-height:19px;color:${T.muted};padding:12px 0`, 'Aucun point à l’ordre du jour pour le moment.')}</tr>`;
-  return pts.map((p, i) => {
-    const top = i ? `border-top:1px solid ${T.line};` : '';
-    const chip = isDecision(p)
-      ? `<span style="display:inline-block;padding:3px 9px;border-radius:999px;background:${T.infoSoft};color:${T.info};${base}font-size:11px;line-height:16px;font-weight:700;white-space:nowrap">Décision</span>`
-      : `<span style="display:inline-block;padding:3px 9px;border-radius:999px;background:${T.soft};color:${T.muted};${base}font-size:11px;line-height:16px;font-weight:700;white-space:nowrap">Information</span>`;
-    const maj = isDecision(p) ? `<div style="${base}font-size:11px;line-height:16px;color:${T.muted};margin-top:4px;white-space:nowrap">${esc(p.maj)}${p.pct ? ` · ${p.pct} %` : ''}</div>` : '';
+  if (!pts.length) return `<tr>${td(`${base}font-size:14px;line-height:20px;color:${T.muted};padding:14px 0`, 'Aucun point à l’ordre du jour pour le moment.')}</tr>`;
+  return pts.map(p => {
+    const top = `border-top:1px solid ${T.line};`;
+    const tag = isDecision(p)
+      ? `${chip('Décision', T.secondary, T.primary)} <span style="${base}font-size:12px;line-height:18px;color:${T.muted}">${esc(p.maj)}${p.pct ? ` · ${p.pct} %` : ''}</span>`
+      : chip('Information', T.soft, T.muted);
     return `<tr>
-${td(`${top}padding:12px 0;width:30px`, `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${T.secondary}" style="width:26px;height:26px;border-radius:13px;${base}font-size:12px;line-height:26px;font-weight:700;color:${T.primary}">${p.n}</td></tr></table>`, 'valign="top"')}
-${td(`${top}padding:12px 12px 12px 10px;${base}color:${T.ink}`, `<div style="${base}font-size:14px;line-height:20px;font-weight:700;color:${T.ink}">${esc(p.title)}</div>${p.body ? `<div style="${base}font-size:13px;line-height:19px;color:${T.muted};margin-top:3px">${nl2br(p.body)}</div>` : ''}`, 'valign="top"')}
-${td(`${top}padding:12px 0;width:120px`, chip + maj, 'valign="top" align="right"')}
+${td(`${top}padding:14px 0;width:40px`, `<table ${TBL}><tr><td align="center" bgcolor="${T.secondary}" style="background-color:${T.secondary};width:28px;height:28px;border-radius:8px;${base}font-size:13px;line-height:28px;font-weight:800;color:${T.primary}">${p.n}</td></tr></table>`, 'valign="top" width="40"')}
+${td(`${top}padding:17px 0 15px`, `<div style="${base}font-size:15px;line-height:21px;font-weight:700;color:${T.ink}">${esc(p.title)}</div><div style="margin-top:6px;line-height:20px">${tag}</div>${p.body ? `<div style="${base}font-size:13px;line-height:19px;color:${T.muted};margin-top:7px">${nl2br(p.body)}</div>` : ''}`, 'valign="top"')}
 </tr>`;
   }).join('\n');
 }
 
-function ruleRows(d){
-  return rules(d).map(([k, v], i) => `<tr>
-${td(`${i ? `border-top:1px solid ${T.line};` : ''}padding:9px 10px 9px 0;width:96px;${base}font-size:11px;line-height:17px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:${T.primary}`, esc(k), 'valign="top"')}
-${td(`${i ? `border-top:1px solid ${T.line};` : ''}padding:9px 0;${base}font-size:13px;line-height:19px;color:${T.ink}`, esc(v), 'valign="top"')}
+// « En pratique » : les trois règles qui demandent un geste, dites comme on les dirait.
+const PRATIQUE = [['Procuration', 'Vous ne pouvez pas venir ?'], ['Documents', 'Consulter les documents'], ['Procès-verbal', 'Après la séance']];
+const LEGAL = ['Délai', 'Quorum', 'Votes'];
+function pratiqueRows(d){
+  const r = new Map(rules(d));
+  return PRATIQUE.map(([k, title], i) => `<tr>${td(`${i ? `border-top:1px solid ${T.line};` : ''}padding:${i ? 14 : 0}px 0 ${i === PRATIQUE.length - 1 ? 0 : 14}px`,
+    `<div style="${base}font-size:14px;line-height:20px;font-weight:700;color:${T.ink}">${title}</div><div style="${base}font-size:13px;line-height:20px;color:${T.ink2};margin-top:2px">${esc(r.get(k) || '')}</div>`, `data-rule="${esc(k)}"`)}</tr>`).join('\n');
+}
+function legalRows(d){
+  const r = new Map(rules(d));
+  return LEGAL.map(k => `<tr>
+${td(`padding:0 12px 8px 0;width:64px;${base}font-size:12px;line-height:18px;font-weight:700;color:${T.ink}`, esc(k), `valign="top" width="64" data-rule="${esc(k)}"`)}
+${td(`padding:0 0 8px;${base}font-size:12px;line-height:18px;color:${T.muted}`, esc(r.get(k) || ''), 'valign="top"')}
 </tr>`).join('\n');
 }
 
@@ -135,85 +191,119 @@ ${td(`${i ? `border-top:1px solid ${T.line};` : ''}padding:9px 0;${base}font-siz
 function htmlBody(d){
   const cn = esc(coproName(d)), ty = typeLabel(d);
   const logo = d.logoSrc
-    ? `<img src="${esc(d.logoSrc)}" width="34" height="34" alt="" style="display:block;width:34px;height:34px;border:0;border-radius:8px">`
-    : `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${T.deep}" style="width:34px;height:34px;border-radius:8px"></td></tr></table>`;
-  const sent = `${esc(d.sentLabel)}`;
+    ? `<img src="${esc(d.logoSrc)}" width="32" height="32" alt="" style="display:block;width:32px;height:32px;border:0;border-radius:8px">`
+    : `<table ${TBL}><tr><td bgcolor="${T.deep}" style="width:32px;height:32px;border-radius:8px"></td></tr></table>`;
   const n = (d.points||[]).length, nDec = (d.points||[]).filter(isDecision).length;
-  const meta = [n ? `${n} point${n > 1 ? 's' : ''} à l’ordre du jour` : '', nDec ? `${nDec} décision${nDec > 1 ? 's' : ''} à prendre` : ''].filter(Boolean).join(' · ');
+  const meta = [n ? `${n} point${n > 1 ? 's' : ''}` : '', nDec ? `${nDec} décision${nDec > 1 ? 's' : ''} à prendre` : ''].filter(Boolean).join(' · ');
   const addr = [d.copro.addr, d.copro.kbo ? 'BCE ' + String(d.copro.kbo).replace(/^\s*BCE\s*/i,'') : ''].filter(Boolean).join(' · ');
-  return `<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${T.bg}">Assemblée générale ${ty} de ${cn} — ${esc(when(d))}. Ordre du jour, procuration et convocation complète en pièce jointe.</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.bg}" style="background-color:${T.bg};margin:0;padding:0">
-<tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.card}" style="width:600px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:10px">
+  const tile = dateTile(d), links = replyLinks(d);
+  const dayTxt = d.dateLong ? cap(d.dateLong) : (d.dateLabel || 'Date à préciser');
+  const hourTxt = d.dateLong ? (d.timeLabel ? `à ${esc(d.timeLabel)}` : '') : '';
+  const fact = (label, value, sub) => `${eyebrow(label, T.primary)}<div style="${base}font-size:16px;line-height:22px;font-weight:700;color:${T.ink};margin-top:2px">${value}${sub ? ` <span style="color:${T.primary};white-space:nowrap">${sub}</span>` : ''}</div>`;
+  const side = `padding-left:${PAD}px;padding-right:${PAD}px;`;
+  return `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${T.bg}">Assemblée générale ${ty} de ${cn}, ${esc(when(d))}. Ordre du jour ci-dessous, convocation complète et procuration en pièce jointe.</div>
+<table ${TBL} width="100%" bgcolor="${T.bg}" style="background-color:${T.bg};margin:0;padding:0;width:100%;table-layout:fixed">
+<tr><td align="center" style="padding:24px 8px 8px">
+<table ${TBL} width="600" bgcolor="${T.card}" style="width:600px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:14px">
 
 <!-- en-tête -->
-<tr><td style="padding:18px 28px;border-bottom:1px solid ${T.line}">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-${td('width:34px;padding-right:10px', logo, 'valign="middle"')}
+<tr><td style="padding:18px ${PAD}px">
+<table ${TBL} width="100%"><tr>
+${td('width:32px;padding-right:10px', logo, 'valign="middle" width="32"')}
 ${td(`${base}font-size:17px;line-height:22px;color:${T.deep};letter-spacing:-.2px`, `<span style="font-weight:800">Lazy</span><span style="font-weight:600">Syndic</span>`, 'valign="middle"')}
-${td(`${base}font-size:12px;line-height:18px;color:${T.muted};white-space:nowrap`, `Convocation · ${sent}`, 'valign="middle" align="right"')}
+${td(`${base}font-size:12px;line-height:18px;color:${T.muted}`, `Envoyée le ${esc(d.sentLabel)}`, 'valign="middle" align="right"')}
 </tr></table>
 </td></tr>
 
-<!-- bandeau -->
-<tr><td bgcolor="${T.primary}" style="background-color:${T.primary};padding:28px 28px 26px">
-<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${T.mint}">Assemblée générale ${ty}</div>
-<div style="${base}font-size:26px;line-height:32px;font-weight:800;color:#FFFFFF;margin-top:6px;letter-spacing:-.3px">${cn}</div>
-${addr ? `<div style="${base}font-size:12px;line-height:18px;color:${T.mint};margin-top:4px">${esc(addr)}</div>` : ''}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px"><tr>
-${td(`width:50%;padding:12px 14px;border-left:3px solid ${T.clay}`, `<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${T.mint}">Date et heure</div><div style="${base}font-size:16px;line-height:22px;font-weight:700;color:#FFFFFF;margin-top:3px">${esc(d.dateLong ? cap(d.dateLong) : (d.dateLabel || 'Date à préciser'))}${d.dateLong && d.timeLabel ? `<br>${esc(d.timeLabel)}` : ''}</div>`, 'valign="top"')}
-${td('width:12px', '')}
-${td(`width:50%;padding:12px 14px;border-left:3px solid ${T.clay}`, `<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${T.mint}">Lieu</div><div style="${base}font-size:16px;line-height:22px;font-weight:700;color:#FFFFFF;margin-top:3px">${esc(d.lieu || 'Lieu à préciser')}</div>`, 'valign="top"')}
+<!-- bandeau : de quoi il s'agit, puis le billet (quand, où) -->
+<tr><td bgcolor="${T.deep}" style="background-color:${T.deep};padding:30px ${PAD}px 32px">
+${eyebrow('Convocation', T.mint)}
+<div style="${base}font-size:28px;line-height:34px;font-weight:800;letter-spacing:-.4px;color:#FFFFFF;margin-top:6px">Assemblée générale ${ty}</div>
+<div style="${base}font-size:15px;line-height:22px;font-weight:700;color:#FFFFFF;margin-top:8px" data-copro>${cn}</div>
+${addr ? `<div style="${base}font-size:13px;line-height:19px;color:${T.mint}">${esc(addr)}</div>` : ''}
+<table ${TBL} width="100%" bgcolor="${T.card}" style="background-color:${T.card};border-radius:12px;margin-top:22px"><tr>
+${tile ? td('padding:18px 0 18px 18px;width:78px', tile, 'valign="top" width="96"') : ''}
+${td('padding:18px 20px', `<table ${TBL} width="100%">
+<tr>${td('padding:0 0 12px', fact('Quand', esc(dayTxt), hourTxt), 'data-when')}</tr>
+<tr>${td(`padding:12px 0 0;border-top:1px solid ${T.line}`, fact('Où', esc(d.lieu || 'Lieu à préciser')), 'data-where')}</tr>
+</table>`, 'valign="top"')}
 </tr></table>
 </td></tr>
 
 <!-- message -->
-<tr><td style="padding:28px 28px 8px;${base}color:${T.ink}">
-<p style="margin:0 0 14px;${base}font-size:15px;line-height:22px;font-weight:700;color:${T.ink}">${esc(greeting(d))}</p>
-<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">En ma qualité de syndic de <b>${cn}</b>, j’ai le plaisir de vous convoquer à l’assemblée générale ${ty} des copropriétaires, qui se tiendra le <b>${esc(when(d))}</b>${d.lieu ? `, ${esc(d.lieu)}` : ''}.</p>
-<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Vous trouverez ci-dessous l’ordre du jour${meta ? ` (${meta})` : ''} et les règles de la séance. La convocation complète et le formulaire de procuration sont joints à ce message.</p>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-${td(`padding:12px 14px;background-color:${T.warnSoft};border-radius:8px;${base}font-size:13px;line-height:19px;color:${T.warnInk}`, `<b>Pièce jointe</b> — convocation à l’assemblée générale et formulaire de procuration (PDF). Si vous ne pouvez pas être présent(e), renvoyez la procuration complétée au syndic.`, `bgcolor="${T.warnSoft}"`)}
+<tr><td style="padding:30px ${PAD}px 6px;${base}color:${T.ink}">
+<p style="margin:0 0 12px;${base}font-size:17px;line-height:24px;font-weight:700;color:${T.ink}">${esc(greeting(d))}</p>
+<p style="margin:0 0 12px;${base}font-size:15px;line-height:24px;color:${T.ink2}">En ma qualité de syndic de <b style="color:${T.ink}">${cn}</b>, j’ai le plaisir de vous convoquer à l’assemblée générale ${ty} des copropriétaires, qui se tiendra le <b style="color:${T.ink}">${esc(when(d))}</b>${d.lieu ? `, ${esc(d.lieu)}` : ''}.</p>
+<p style="margin:0;${base}font-size:15px;line-height:24px;color:${T.ink2}">Vous trouverez ci-dessous l’ordre du jour et ce qu’il faut savoir avant la séance.</p>
+</td></tr>
+${links ? `
+<!-- répondre -->
+<tr><td style="padding:16px ${PAD}px 4px">
+${button(links.yes, 'Je serai présent(e)', true)}
+${button(links.proxy, 'Je donne procuration', false)}
+</td></tr>
+<tr><td style="padding:0 ${PAD}px 4px;${base}font-size:12px;line-height:18px;color:${T.muted}">Un clic prépare votre réponse au syndic, il ne reste qu’à l’envoyer.</td></tr>` : ''}
+
+<!-- pièce jointe -->
+<tr><td style="padding:18px ${PAD}px 6px">
+<table ${TBL} width="100%" bgcolor="${T.bg}" style="background-color:${T.bg};border:1px solid ${T.line};border-radius:10px"><tr>
+${td('padding:14px 0 14px 14px;width:44px', `<table ${TBL}><tr><td align="center" bgcolor="${T.warnSoft}" style="background-color:${T.warnSoft};width:44px;height:44px;border-radius:8px;${base}font-size:11px;line-height:44px;font-weight:800;letter-spacing:.6px;color:${T.warnInk}">PDF</td></tr></table>`, 'valign="middle" width="58"')}
+${td(`padding:14px 16px 14px 14px;${base}`, `<div style="${base}font-size:14px;line-height:20px;font-weight:700;color:${T.ink}" data-attachment>Convocation complète et formulaire de procuration</div><div style="${base}font-size:13px;line-height:19px;color:${T.muted}">En pièce jointe de ce message. En cas de divergence, le PDF fait foi.</div>`, 'valign="middle"')}
 </tr></table>
 </td></tr>
 
 <!-- ordre du jour -->
-<tr><td style="padding:18px 28px 6px">
-<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${T.primary};padding-bottom:4px;border-bottom:2px solid ${T.primary}">Ordre du jour</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td style="padding:26px ${PAD}px 0">
+<table ${TBL} width="100%"><tr>
+${td('padding:0 0 10px', h2('Ordre du jour'), 'valign="bottom"')}
+${td(`padding:0 0 12px 12px;${base}font-size:12px;line-height:18px;color:${T.muted}`, esc(meta), 'valign="bottom" align="right" data-meta')}
+</tr></table>
+<table ${TBL} width="100%" style="border-bottom:1px solid ${T.line}">
 ${pointRows(d)}
 </table>
 </td></tr>
 
-<!-- à savoir -->
-<tr><td style="padding:18px 28px 6px">
-<div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${T.primary};padding-bottom:4px;border-bottom:2px solid ${T.primary}">À savoir</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-${ruleRows(d)}
+<!-- en pratique -->
+<tr><td style="padding:28px ${PAD}px 0">
+${h2('En pratique')}
+<table ${TBL} width="100%" bgcolor="${T.bg}" style="background-color:${T.bg};border-radius:10px;margin-top:10px"><tr><td style="padding:18px 20px">
+<table ${TBL} width="100%">
+${pratiqueRows(d)}
+</table>
+</td></tr></table>
+</td></tr>
+
+<!-- cadre légal -->
+<tr><td style="padding:22px ${PAD}px 0">
+${eyebrow('Cadre légal', T.muted)}
+<table ${TBL} width="100%" style="margin-top:8px">
+${legalRows(d)}
 </table>
 </td></tr>
 
 <!-- signature -->
-<tr><td style="padding:18px 28px 28px;${base}color:${T.ink}">
-<p style="margin:0 0 16px;${base}font-size:14px;line-height:22px;color:${T.ink}">Dans l’attente de votre présence,</p>
-<div style="${base}font-size:14px;line-height:20px;font-weight:700;color:${T.ink}">${esc(d.syndic.name)}</div>
-<div style="${base}font-size:13px;line-height:19px;color:${T.muted}">Syndic · ${cn}${d.syndic.email ? ` · <a href="mailto:${esc(d.syndic.email)}" style="color:${T.primary};text-decoration:underline">${esc(d.syndic.email)}</a>` : ''}</div>
-</td></tr>
-
-<!-- pied -->
-<tr><td bgcolor="${T.bg}" style="background-color:${T.bg};padding:16px 28px;border-top:1px solid ${T.line};border-radius:0 0 10px 10px">
-<div style="${base}font-size:12px;line-height:18px;font-weight:700;color:${T.deep}">Convocation établie avec LazySyndic</div>
-<div style="${base}font-size:11px;line-height:17px;color:${T.muted};margin-top:3px">Envoyée par e-mail aux copropriétaires ayant accepté ce mode de communication (art. 3.87 §3 du Code civil). En cas de divergence, la convocation jointe en PDF fait foi.</div>
+<tr><td style="${side}padding-top:14px;padding-bottom:30px">
+<table ${TBL} width="100%"><tr><td style="border-top:1px solid ${T.line};padding-top:22px;${base}color:${T.ink}">
+<div style="${base}font-size:15px;line-height:24px;color:${T.ink2}">Dans l’attente de votre présence,</div>
+<div style="${base}font-size:16px;line-height:22px;font-weight:800;color:${T.ink};margin-top:12px" data-syndic>${esc(d.syndic.name)}</div>
+<div style="${base}font-size:13px;line-height:19px;color:${T.muted}">Syndic de ${cn}${d.syndic.email ? ` · <a href="mailto:${esc(d.syndic.email)}" style="color:${T.primary};text-decoration:underline">${esc(d.syndic.email)}</a>` : ''}</div>
+</td></tr></table>
 </td></tr>
 
 </table>
+
+<!-- pied, hors de la carte -->
+<table ${TBL} width="600" style="width:600px;max-width:100%"><tr><td align="center" style="padding:16px ${PAD}px 28px">
+<div style="${base}font-size:12px;line-height:18px;font-weight:700;color:${T.deep}">Convocation établie avec LazySyndic</div>
+<div style="${base}font-size:11px;line-height:17px;color:${T.muted};margin-top:2px">Envoyée par e-mail aux copropriétaires ayant accepté ce mode de communication (art. 3.87 §3 du Code civil).</div>
+</td></tr></table>
 </td></tr>
 </table>`;
 }
 
 function html(d){
   return `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>${esc(subject(d))}</title></head>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${esc(subject(d))}</title></head>
 <body style="margin:0;padding:0;background-color:${T.bg};-webkit-text-size-adjust:100%">
 ${htmlBody(d)}
 </body></html>`;
@@ -232,7 +322,7 @@ function ics(d, {durationMin=120}={}){
     'BEGIN:VEVENT',
     `UID:ag-${stamp(s)}-${slug(coproName(d)).toLowerCase() || 'acp'}@lazysyndic`,
     `DTSTAMP:${stamp(new Date())}`, `DTSTART:${stamp(s)}`, `DTEND:${stamp(e)}`,
-    `SUMMARY:${escI(`Assemblée générale ${typeLabel(d)} — ${coproName(d)}`)}`,
+    `SUMMARY:${escI(`Assemblée générale ${typeLabel(d)} · ${coproName(d)}`)}`,
     d.lieu ? `LOCATION:${escI(d.lieu)}` : '',
     `DESCRIPTION:${escI((d.points||[]).map(p => `${p.n}. ${p.title}`).join('\n') || 'Ordre du jour : voir la convocation.')}`,
     'END:VEVENT','END:VCALENDAR'];
@@ -320,7 +410,7 @@ async function buildPdf(PDFLib, d){
   }).join('');
   const C = { ink:rgb(.114,.165,.141), soft:rgb(.42,.45,.43), faint:rgb(.56,.58,.55), line:rgb(.88,.9,.89),
               zebra:rgb(.967,.971,.965), green:rgb(0,.373,.271), greenSoft:rgb(.902,.953,.922), deep:rgb(.129,.314,.239),
-              clay:rgb(.788,.522,.29), warnSoft:rgb(1,.945,.85), warnInk:rgb(.569,.361,.031), white:rgb(1,1,1) };
+              clay:rgb(.788,.522,.29), clayDeep:rgb(.647,.388,.173), warnSoft:rgb(1,.945,.85), warnInk:rgb(.569,.361,.031), white:rgb(1,1,1) };
   const W = 595.28, H = 841.89, M = 48, CW = W - 2*M, BOTTOM = M + 28;
   const cn = coproName(d), ty = typeLabel(d), copro = d.copro || {};
   const logo = d.logo ? await doc.embedPng(d.logo).catch(() => null) : null;
@@ -400,19 +490,28 @@ async function buildPdf(PDFLib, d){
   para(greeting(d), {font:F.b, size:10.5, after:6});
   para(`En ma qualité de syndic de ${cn}, j'ai le plaisir de vous convoquer à l'assemblée générale ${ty} des copropriétaires, qui se tiendra :`, {after:10});
 
-  // encadré date / lieu
+  // le billet, comme dans l'e-mail : la page de calendrier, puis quand et où
   {
-    const BH = 52, half = (CW - 10)/2;
+    const hasDay = validDate(d.start), TILE = 54, TH = 62, PX = 14;
+    const tx = M + PX + (hasDay ? TILE + 16 : 0), wTxt = CW - (tx - M) - PX;
+    const dl = wrap(when(d), F.b, 12, wTxt).slice(0, 2), ll = wrap(d.lieu || 'Lieu à préciser', F.b, 12, wTxt).slice(0, 3);
+    const BH = Math.max(32 + 15*(dl.length + ll.length), hasDay ? TH : 0) + 2*PX;
     need(BH + 14);
-    page.drawRectangle({x:M, y:y-BH, width:half, height:BH, color:C.greenSoft});
-    page.drawRectangle({x:M, y:y-BH, width:3, height:BH, color:C.clay});
-    page.drawRectangle({x:M+half+10, y:y-BH, width:half, height:BH, color:C.greenSoft});
-    page.drawRectangle({x:M+half+10, y:y-BH, width:3, height:BH, color:C.clay});
-    text('DATE ET HEURE', M + 12, y - 15, {font:F.b, size:7, color:C.green});
-    text('LIEU', M + half + 22, y - 15, {font:F.b, size:7, color:C.green});
-    const dl = wrap(when(d), F.b, 11, half - 24), ll = wrap(d.lieu || 'Lieu à préciser', F.b, 11, half - 24);
-    dl.slice(0,2).forEach((l, i) => page.drawText(l, {x:M+12, y:y - 31 - i*13, size:11, font:F.b, color:C.ink}));
-    ll.slice(0,2).forEach((l, i) => page.drawText(l, {x:M+half+22, y:y - 31 - i*13, size:11, font:F.b, color:C.ink}));
+    page.drawRectangle({x:M, y:y-BH, width:CW, height:BH, color:C.greenSoft});
+    if (hasDay){
+      const x0 = M + PX, ty = y - PX, s = d.start;
+      page.drawRectangle({x:x0, y:ty-TH, width:TILE, height:TH, color:C.white, borderColor:C.line, borderWidth:.6});
+      page.drawRectangle({x:x0, y:ty-16, width:TILE, height:16, color:C.clayDeep});
+      text(`${MOIS[s.getMonth()]} ${s.getFullYear()}`.toUpperCase(), x0 + TILE/2, ty - 11.3, {font:F.b, size:6.6, color:C.white, center:true});
+      text(String(s.getDate()), x0 + TILE/2, ty - 41, {font:F.b, size:24, center:true});
+      text(JOURS[s.getDay()], x0 + TILE/2, ty - 54, {size:7.5, color:C.soft, center:true});
+    }
+    let cy = y - PX;
+    const block = (label, lines) => {
+      cy -= 7; text(label, tx, cy, {font:F.b, size:7, color:C.green}); cy -= 5;
+      lines.forEach(l => { cy -= 12; page.drawText(l, {x:tx, y:cy, size:12, font:F.b, color:C.ink}); cy -= 3; });
+    };
+    block('QUAND', dl); cy -= 8; block('OÙ', ll);
     y -= BH + 14;
   }
   para(`Le formulaire de procuration figure en dernière page ; les règles de la séance sont rappelées ci-dessous.`, {size:9, color:C.soft, after:8});

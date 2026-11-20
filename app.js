@@ -2781,7 +2781,10 @@ function brandLogoPng(){
     img.src='brand/logo.svg';
   });
 }
-const brandMarkPng=()=>fetch('brand/icon-180.png').then(x=>x.ok?x.arrayBuffer():null).then(b=>b?new Uint8Array(b):null).catch(()=>null);
+let _brandMarkP=null;
+const brandMarkPng=()=>_brandMarkP=_brandMarkP||fetch('brand/icon-180.png').then(x=>x.ok?x.arrayBuffer():null).then(b=>b?new Uint8Array(b):null).catch(()=>null);
+// Une promesse qui ne revient pas ne doit pas laisser un bouton muet : passé `ms`, elle échoue avec `what`.
+const within=(p,ms,what)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(what)),ms))]);
 // Copie le HTML (et sa version texte) dans le presse-papiers : collé dans Outlook, Mail ou Gmail,
 // le message garde sa mise en page. À appeler dans le geste, avant tout await (Safari refuse sinon).
 function copyRichText(html, text){
@@ -2801,58 +2804,112 @@ function copyRichText(html, text){
   }
   return Promise.resolve(fallback());
 }
-async function convocationPdf(d){ return LSConvocation.buildPdf(await loadPdfLib(), {...d, logo:await brandLogoPng()}); }
+// pdf-lib vient d'un CDN : s'il ne répond pas, on le dit (et le clic suivant retente) ; le logo,
+// lui, n'empêche jamais le PDF de sortir.
+async function convocationPdf(d){
+  const lib=await within(loadPdfLib(),20000,'la bibliothèque PDF (cdn.jsdelivr.net) ne répond pas : réseau coupé ou bloqueur de contenu ?')
+    .catch(e=>{ _pdfLibP=null; throw e; });
+  const logo=await within(brandLogoPng(),4000,'logo').catch(()=>null);
+  return within(LSConvocation.buildPdf(lib,{...d,logo}),20000,'la mise en page du PDF ne se termine pas');
+}
+// Le premier clic ne doit pas attendre le réseau : la bibliothèque et les logos se chargent dès
+// l'ouverture de l'étape 2, pour que le téléchargement parte dans la foulée du geste.
+function convWarm(){ loadPdfLib().catch(()=>{}); brandLogoPng(); brandMarkPng(); }
+// Pendant qu'un fichier se prépare : les boutons de l'étape 2 et de l'aperçu sont gelés, et on le dit.
+let _convBusy=false;
+function convBusy(on, msg){
+  _convBusy=on;
+  document.querySelectorAll('#mailConv,#copyConv,#genConv,#pdfConv,#agConvInfo [data-conv],#convModal .cv-bar [data-act]').forEach(b=>{
+    if(on){ if(!b.disabled){ b.disabled=true; b.dataset.cvBusy='1'; } }
+    else if(b.dataset.cvBusy){ b.disabled=false; delete b.dataset.cvBusy; }
+  });
+  if(on && msg) showToast(msg,'wait');
+}
+// Ce qui vient d'être préparé reste écrit sous les boutons (et dans l'aperçu s'il est ouvert), avec
+// un vrai lien : si le navigateur a retenu le téléchargement automatique, un clic le relance.
+let _convUrl=null;
+function convResult(html, kind){
+  const tone={ok:['var(--success-soft)','oklch(.88 .05 160)','var(--success)','✓'], err:['','','','!']}[kind||'ok'];
+  const box=`<div class="alert" style="margin:14px 0 0;${tone[0]?`background:${tone[0]};border-color:${tone[1]};color:${tone[2]}`:''}"><span class="ic">${tone[3]}</span><div>${html}</div></div>`;
+  const el=document.getElementById('agConvResult'); if(el) el.innerHTML=box;
+  const note=document.querySelector('#convModal.open .cv-note'); if(note) note.innerHTML=html;
+}
+function convDeliver(blob, name, msg, hint){
+  if(_convUrl) URL.revokeObjectURL(_convUrl);
+  const url=_convUrl=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=name; a.style.display='none';
+  document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),1000);
+  convResult(`<b>${escH(name)}</b> ${msg} <a href="${url}" download="${escH(name)}" style="color:inherit;font-weight:600;white-space:nowrap">Télécharger à nouveau</a>${hint?`<div style="margin-top:4px;font-weight:400">${hint}</div>`:''}`);
+  showToast(`Fichier ${msg.replace(/\.$/,'')} : il est dans vos téléchargements.`,'',5000);
+}
+const EML_HINT='Outlook l’ouvre comme un brouillon prêt à partir. Dans Mail sur Mac : ouvrez le fichier, puis <b>Message › Envoyer à nouveau</b> (⇧⌘D) pour en faire un message à envoyer.';
 // Les gestes de l'étape 2. `owner` = message nominatif pour ce copropriétaire ; null = tous.
 async function convocationAct(act, owner){
   if(!currentAG){ alert('Aucune assemblée.'); return; }
   if(act==='preview'){ openConvPreview(owner); return; }
-  const L=LSConvocation, r=convocationRecipients(), d=convocationData(currentAG, owner);
-  const to=owner ? (owner.email?[owner.email]:[]) : r.to;
-  const subj=L.subject(d), txt=L.text(d);
-  const fail=(what,e)=>{ console.error(e); showToast(`${what} impossible à générer : ${e&&e.message||e}`,'err'); };
+  if(_convBusy) return;
+  const fail=(what,e)=>{ console.error(e); const m=`${what} impossible à préparer : ${escH(e&&e.message||e)}`; convResult(m,'err'); showToast(m,'err'); };
+  let L, r, d, to, subj, txt;
+  try{
+    L=LSConvocation; r=convocationRecipients(); d=convocationData(currentAG, owner);
+    to=owner ? (owner.email?[owner.email]:[]) : r.to;
+    subj=L.subject(d); txt=L.text(d);
+  }catch(e){ fail('Convocation',e); return; }
   if(act==='copy'){
-    const ok=await copyRichText(L.htmlBody(d), txt);
-    showToast(ok?'Modèle copié : collez-le dans un nouveau message Outlook (⌘V), puis joignez le PDF.':'Copie impossible ici : passez par le fichier .eml.', ok?'':'err');
+    let ok=false; try{ ok=await copyRichText(L.htmlBody(d), txt); }catch(e){ console.error(e); }
+    showToast(ok?'Modèle copié : collez-le dans un nouveau message (⌘V), puis joignez le PDF.':'Copie impossible ici : passez par le fichier .eml.', ok?'':'err', 5000);
     return;
   }
   if(act==='compose'){
-    const copied=copyRichText(L.htmlBody(d), txt);                    // dans le geste, avant tout await
+    let copied=Promise.resolve(false);
+    try{ copied=copyRichText(L.htmlBody(d), txt); }catch(e){ console.error(e); }      // dans le geste, avant tout await
     const addr=to.map(e=>encodeURIComponent(e).replace(/%40/g,'@')).join(',');
     location.href=`mailto:${addr}?subject=${encodeURIComponent(subj)}`;
     markConvoked();
-    let ok=false; try{ ok=await copied; }catch(e){}
-    try{ saveBytes(await convocationPdf(d), L.fileName(d,'pdf'));
-         showToast(ok?'Message ouvert, modèle copié (⌘V pour le coller) et PDF téléchargé : joignez-le avant d’envoyer.'
-                     :'Message ouvert et PDF téléchargé : joignez-le avant d’envoyer.'); }
-    catch(e){ fail('PDF',e); }
+    convBusy(true,'Préparation du PDF à joindre…');
+    try{
+      let ok=false; try{ ok=await copied; }catch(e){}
+      const bytes=await convocationPdf(d);
+      convDeliver(new Blob([bytes],{type:'application/pdf'}), L.fileName(d,'pdf'),
+        ok?'téléchargé, modèle copié.':'téléchargé.',
+        ok?'Dans le message qui vient de s’ouvrir : collez le modèle (⌘V), puis joignez ce PDF avant d’envoyer.':'Joignez ce PDF au message qui vient de s’ouvrir avant d’envoyer.');
+    }catch(e){ fail('PDF',e); }
+    finally{ convBusy(false); }
     return;
   }
   if(act==='pdf'){
-    try{ saveBytes(await convocationPdf(d), L.fileName(d,'pdf')); showToast('Convocation et procuration téléchargées (PDF).'); }
+    convBusy(true,'Préparation du PDF…');
+    try{ convDeliver(new Blob([await convocationPdf(d)],{type:'application/pdf'}), L.fileName(d,'pdf'), 'téléchargé.', 'Convocation complète et formulaire de procuration.'); }
     catch(e){ fail('PDF',e); }
+    finally{ convBusy(false); }
     return;
   }
   if(act==='eml'){
+    convBusy(true,'Préparation du brouillon et de ses pièces jointes…');
     try{
-      const [bytes, mark]=await Promise.all([convocationPdf(d), brandMarkPng()]);
+      const [bytes, mark]=await Promise.all([convocationPdf(d), within(brandMarkPng(),4000,'logo').catch(()=>null)]);
       const cid='logo@lazysyndic', ics=L.ics(d);
       const eml=L.eml({from:r.from, fromName:r.syndic, to, subject:subj, text:txt,
         html:L.html({...d, logoSrc: mark ? 'cid:'+cid : d.logoSrc}),
         logo: mark ? {bytes:mark, cid} : null,
         pdf:{name:L.fileName(d,'pdf'), bytes},
         ics: ics ? {name:'assemblee-generale.ics', text:ics} : null});
-      downloadBlob(new Blob([eml],{type:'message/rfc822'}), L.fileName(d,'eml'));
+      convDeliver(new Blob([eml],{type:'message/rfc822'}), L.fileName(d,'eml'), `téléchargé, PDF${ics?' et rendez-vous':''} joints.`, EML_HINT);
       markConvoked();
-      showToast('Brouillon prêt, PDF et rendez-vous joints : ouvrez le fichier .eml dans Outlook pour l’envoyer.');
     }catch(e){ fail('Brouillon',e); }
+    finally{ convBusy(false); }
   }
 }
 function markConvoked(){
   if(!canWrite() || !currentAG || currentAG.status!=='prep') return;
   currentAG.status='convoquee'; currentAG.convocation_date=new Date().toLocaleDateString('fr-BE');
   setAgStatus('convoquee');
-  dbWrite(db=>db.agUpdate(currentAG.id,{status:'convoquee',convocation_date:currentAG.convocation_date}));
+  // écriture sans « Modifications enregistrées » : le message du fichier préparé doit rester lisible
+  const ag=currentAG;
+  if(writeToDb()) window.LS.db.agUpdate(ag.id,{status:'convoquee',convocation_date:ag.convocation_date}).catch(e=>{ console.error(e); toastError(e.message||e); });
+  else saveState();
   renderConvInfo();
+  if(_convBusy) convBusy(true);
 }
 let _convCss=false;
 function convCss(){
@@ -2910,24 +2967,31 @@ function openConvPreview(owner){
   sel.innerHTML=`<option value="">Tous les copropriétaires (message générique)</option>`
     +r.others.map((o,i)=>`<option value="${i}">${escH(o.n)}${o.email?'':' — sans e-mail'}</option>`).join('');
   const i=owner?r.others.indexOf(owner):-1; sel.value=i>=0?String(i):'';
+  m.querySelector('.cv-note').textContent='Ce que reçoit le copropriétaire. Le PDF joint reprend la convocation complète et le formulaire de procuration.';
   renderConvPreview(); m.classList.add('open');
 }
 function renderConvInfo(){
   const el=document.getElementById('agConvInfo'); if(!el||!currentAG) return;
   convCss();
+  convWarm();
   const r=convocationRecipients(), dl=convocationDelay(currentAG);
+  // La loi demande le lieu, le jour et l'heure (art. 3.87 §3) : ce qui manque se dit avant l'envoi.
+  const miss=[!parseFrDate(currentAG.ag_date)&&'la date', parseFrDate(currentAG.ag_date)&&!agTimeLabel(currentAG.ag_date||'')&&'l’heure', !String(currentAG.lieu||'').trim()&&'le lieu'].filter(Boolean);
+  const missing=miss.length?`<div class="alert" style="background:var(--warning-soft);border-color:oklch(.88 .07 80);color:var(--warning-ink)"><span class="ic">i</span><div>Il manque ${miss.join(' et ')} : la convocation doit indiquer le lieu, le jour et l’heure (art. 3.87 §3). <button class="lk" id="cvFix" style="color:inherit;font-weight:600">Compléter à l’étape 1</button></div></div>`:'';
   const who=r.others.map((o,i)=>`<div class="cv-row"><div class="cv-who"><b>${escH(o.n)}</b> ${o.email?`<span class="sub">${escH(o.email)}</span>`:'<span style="color:var(--danger)">— e-mail manquant</span>'}</div>
       <div class="cv-acts"><button class="rb" data-conv="preview" data-i="${i}" title="Aperçu du message nominatif">Aperçu</button><button class="rb" data-conv="compose" data-i="${i}" ${o.email?'':'disabled'} title="Message nominatif dans ma messagerie, PDF téléchargé">Composer</button><button class="rb" data-conv="eml" data-i="${i}" title="Brouillon .eml nominatif, PDF et rendez-vous joints">.eml</button></div></div>`).join('');
   let delay;
-  if(!dl) delay=`<div class="alert" style="background:var(--warning-soft);border-color:oklch(.88 .07 80);color:var(--warning-ink)"><span class="ic">i</span> Indiquez la date de l’AG à l’étape 1 (ex. 22/06/2026 19h00) pour vérifier le délai légal de 15 jours.</div>`;
+  if(!dl) delay='';   // sans date lisible, c'est `missing` qui le dit
   else if(dl.days>=15) delay=`<div class="alert" style="background:var(--success-soft);border-color:oklch(.88 .05 160);color:var(--success)"><span class="ic">✓</span> Délai légal respecté : ${dl.sent?'envoyée':'envoi'} ${dl.days} jours avant la séance (minimum 15).</div>`;
   else delay=`<div class="alert"><span class="ic">!</span> ${dl.days<0?'La date de l’AG est passée.':`Seulement ${dl.days} jour${dl.days>1?'s':''} avant la séance : le minimum légal est de 15 jours (art. 3.87 §3), sauf urgence.`}</div>`;
   el.innerHTML=`<div class="mini-h" style="margin-top:0">Destinataires — un message nominatif par copropriétaire, ou un envoi groupé</div>
     <div class="sg-signers cv-list">${who||'<div class="sub">Aucun autre copropriétaire.</div>'}</div>
     ${r.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Budget &amp; copro › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
+    ${missing}
     ${delay}
     ${currentAG.convocation_date?`<div class="sub" style="margin-bottom:10px">Convocation marquée envoyée le ${escH(currentAG.convocation_date)}.</div>`:''}`;
   el.querySelectorAll('[data-conv]').forEach(b=>b.onclick=()=>convocationAct(b.dataset.conv, r.others[+b.dataset.i]||null));
+  const fix=el.querySelector('#cvFix'); if(fix) fix.onclick=()=>goStep(1);
 }
 document.getElementById('mailConv')?.addEventListener('click',()=>convocationAct('compose',null));
 document.getElementById('prevConv')?.addEventListener('click',()=>convocationAct('preview',null));
@@ -6107,16 +6171,16 @@ function ensureToastCss(){
      background:rgba(255,255,255,.22);font-size:11px;flex:0 0 auto}`;
   document.head.appendChild(s);
 }
-function showToast(msg, kind){
+function showToast(msg, kind, ms){
   ensureToastCss();
   let el=document.getElementById('lsToast');
   if(!el){ el=document.createElement('div'); el.id='lsToast'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite'); document.body.appendChild(el); }
-  el.innerHTML=`<span class="ic">${kind==='err'?'!':'✓'}</span><span>${msg}</span>${kind==='err'?'<button class="x" type="button" aria-label="Fermer">✕</button>':''}`;
+  el.innerHTML=`<span class="ic">${kind==='err'?'!':kind==='wait'?'…':'✓'}</span><span>${msg}</span>${kind==='err'?'<button class="x" type="button" aria-label="Fermer">✕</button>':''}`;
   el.className='ls-toast'+(kind==='err'?' err':'')+' show';   // affichage synchrone (animation CSS pour l'entrée)
   clearTimeout(_toastHide);
   // Une erreur reste affichée jusqu'à sa fermeture : en 4,5 s on n'a pas le temps de la lire.
   if(kind==='err') el.querySelector('.x').onclick=()=>el.classList.remove('show');
-  else _toastHide=setTimeout(()=>el.classList.remove('show'), 2000);
+  else if(kind!=='wait') _toastHide=setTimeout(()=>el.classList.remove('show'), ms||2000);   // 'wait' reste jusqu'au toast suivant
 }
 // Sauvegardes groupées (ex. catégorie + apprentissage de la règle) → une seule bannière.
 function toastSaved(){

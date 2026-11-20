@@ -40,47 +40,61 @@ function parts(eml){
 
 test('objet et texte brut : copropriété, type, date, lieu, points et règles de la séance', () => {
   const d = base();
-  assert.equal(C.subject(d), 'Convocation — Assemblée générale ordinaire — ACP Démo — 22/06/2026 19h00');
+  assert.equal(C.subject(d), "Convocation à l'assemblée générale ordinaire du lundi 22 juin 2026 · ACP Démo");
   const t = C.text(d);
   assert.match(t, /^Madame, Monsieur, cher\(e\) copropriétaire,/);
   assert.match(t, /syndic de ACP Démo/);
   assert.match(t, /Date : Lundi 22 juin 2026 à 19h00/);
   assert.match(t, /Lieu : Appartement RDC/);
-  assert.match(t, /1\. Approbation des comptes <2025> — décision \(Majorité absolue\)\n   Comptes joints\.\n   Questions bienvenues\./);
-  assert.match(t, /2\. Toiture : état des lieux — information/);
-  assert.match(t, /Quorum — /); assert.match(t, /Procuration — /); assert.match(t, /art\. 3\.88/);
+  assert.match(t, /1\. Approbation des comptes <2025> · décision \(Majorité absolue\)\n   Comptes joints\.\n   Questions bienvenues\./);
+  assert.match(t, /2\. Toiture : état des lieux · information/);
+  assert.match(t, /Quorum : /); assert.match(t, /Procuration : /); assert.match(t, /art\. 3\.88/);
   assert.match(t, /240 jours avant la séance/);
-  assert.match(t, /Alex Martin — Syndic, ACP Démo\nalex@exemple\.be/);
+  assert.match(t, /Alex Martin\nSyndic de ACP Démo\nalex@exemple\.be/);
+  // ce que lit le copropriétaire ne porte aucun tiret cadratin
+  assert.doesNotMatch(C.subject(d) + t + C.html(d), /—/);
 });
 
 test('sans date lisible ni délai : la date telle que saisie, le rappel des quinze jours', () => {
   const d = { ...base(), dateLong:'', timeLabel:'', start:null, delayDays:null, dateLabel:'fin juin, 19h' };
   assert.equal(C.when(d), 'fin juin, 19h');
+  assert.equal(C.subject(d), "Convocation à l'assemblée générale ordinaire du fin juin, 19h · ACP Démo");
+  // sans date lisible : pas de page de calendrier, la date telle que saisie dans le billet
+  assert.doesNotMatch(C.html(d), /width="78"/);
+  assert.match(C.html(d), /data-when[^>]*>.*?fin juin, 19h/s);
   assert.match(C.text(d), /Date : fin juin, 19h/);
   assert.match(C.text(d), /au moins quinze jours avant la séance/);
   assert.equal(C.ics(d), null);
 });
 
-test('HTML : bandeau, points échappés et typés, règles, pièce jointe, signature, logo', () => {
+test('HTML : bandeau, billet, réponses, points échappés et typés, règles, pièce jointe, signature, logo', () => {
   const h = C.html(base());
   assert.match(h, /^<!DOCTYPE html>/);
-  assert.match(h, /<title>Convocation — Assemblée générale ordinaire — ACP Démo/);
-  assert.match(h, /Assemblée générale ordinaire<\/div>/);
-  assert.match(h, />ACP Démo<\/div>/);
+  assert.match(h, /<title>Convocation à l&#39;assemblée générale ordinaire du lundi 22 juin 2026 · ACP Démo/);
+  assert.match(h, />Assemblée générale ordinaire<\/div>/);
+  assert.match(h, /data-copro>ACP Démo<\/div>/);
   assert.match(h, /Rue Fictive 1, 1000 Bruxelles · BCE 0123\.456\.789/);
-  assert.match(h, /Lundi 22 juin 2026<br>19h00/);
-  assert.match(h, />Appartement RDC<\/div>/);
+  // le billet : la page de calendrier (mois, jour, jour de la semaine), puis quand et où
+  assert.match(h, />juin 2026<\/td>/); assert.match(h, />22<\/td>/); assert.match(h, />lundi<\/td>/);
+  assert.match(h, /data-when[^>]*>.*?Lundi 22 juin 2026 <span[^>]*>à 19h00<\/span>/s);
+  assert.match(h, /data-where[^>]*>.*?>Appartement RDC<\/div>/s);
+  // deux réponses au syndic, déjà rédigées
+  assert.match(h, /href="mailto:alex@exemple\.be\?subject=Pr%C3%A9sence[^"]*"[^>]*>Je serai présent\(e\)<\/a>/);
+  assert.match(h, /href="mailto:alex@exemple\.be\?subject=Procuration[^"]*"[^>]*>Je donne procuration<\/a>/);
+  assert.match(decodeURIComponent(/href="(mailto:[^"]*Procuration[^"]*)"/.exec(h)[1]), /Je donne procuration à : \r\n/);
   assert.match(h, /Approbation des comptes &lt;2025&gt;/);              // échappé
   assert.doesNotMatch(h, /<2025>/);
   assert.match(h, /Comptes joints\.<br>Questions bienvenues\./);
   assert.equal((h.match(/>Décision<\/span>/g) || []).length, 2);
   assert.equal((h.match(/>Information<\/span>/g) || []).length, 1);
   assert.match(h, /Majorité absolue · 51 %/); assert.match(h, /Double tiers · 67 %/);
-  assert.match(h, /3 points à l’ordre du jour · 2 décisions à prendre/);
-  assert.match(h, /<b>Pièce jointe<\/b>/);
-  for (const k of ['Délai', 'Quorum', 'Procuration', 'Votes', 'Documents', 'Procès-verbal']) assert.match(h, new RegExp('>' + k + '</td>'));
+  assert.match(h, /data-meta[^>]*>3 points · 2 décisions à prendre</);
+  assert.match(h, /data-attachment>Convocation complète et formulaire de procuration</);
+  // les six règles : trois dites « en pratique », trois en cadre légal
+  for (const k of ['Délai', 'Quorum', 'Procuration', 'Votes', 'Documents', 'Procès-verbal']) assert.match(h, new RegExp('data-rule="' + k + '"'));
+  assert.match(h, /Vous ne pouvez pas venir \?/); assert.match(h, /art\. 3\.87 §5/);
   assert.match(h, /src="https:\/\/exemple\.be\/brand\/icon-180\.png"/);
-  assert.match(h, /mailto:alex@exemple\.be/);
+  assert.match(h, /data-syndic>Alex Martin<\/div>/);
   // moteur Word d'Outlook : tableaux et styles inline, pas de variable CSS ni de SVG
   assert.doesNotMatch(h, /var\(--/); assert.doesNotMatch(h, /<svg/); assert.doesNotMatch(h, /<style/);
   assert.match(h, /#005F45/);
@@ -88,10 +102,17 @@ test('HTML : bandeau, points échappés et typés, règles, pièce jointe, signa
   assert.ok(h.includes(C.htmlBody(base())));
 });
 
+test('sans e-mail du syndic : pas de bouton de réponse, le reste tient', () => {
+  const h = C.html({ ...base(), syndic:{ name:'Alex Martin', email:'' } });
+  assert.doesNotMatch(h, /Je serai présent/); assert.doesNotMatch(h, /mailto:/);
+  assert.match(h, /data-syndic>Alex Martin<\/div>/);
+});
+
 test('nominatif : le copropriétaire est nommé, ses lots repris', () => {
   const d = { ...base(), recipient:{ name:'Sam Bernard', lots:'App. 2e étage' } };
   assert.match(C.text(d), /^Sam Bernard,\n/);
   assert.match(C.html(d), /font-weight:700;color:#1D2A24">Sam Bernard,<\/p>/);
+  assert.match(decodeURIComponent(/href="(mailto:[^"]*Pr%C3%A9sence[^"]*)"/.exec(C.html(d))[1].replace(/&amp;/g, '&')), /Je serai présent\(e\) à l'assemblée générale ordinaire du lundi 22 juin 2026 \(ACP Démo\)\.\r\n\r\nSam Bernard$/);
   assert.equal(C.fileName(d, 'eml'), 'Convocation_AG_ACP-Demo_2026-06-22_Sam-Bernard.eml');
   assert.equal(C.fileName(base(), 'pdf'), 'Convocation_AG_ACP-Demo_2026-06-22.pdf');
 });
@@ -104,7 +125,7 @@ test('.ics : un rendez-vous de deux heures, ordre du jour en description', () =>
   const toDate = x => new Date(x.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, '$1-$2-$3T$4:$5:$6Z'));
   assert.equal(toDate(e[1]) - toDate(s[1]), 2*3600*1000);
   assert.equal(toDate(s[1]).getTime(), new Date(2026, 5, 22, 19, 0).getTime());
-  assert.match(ics, /SUMMARY:Assemblée générale ordinaire — ACP Démo/);
+  assert.match(ics, /SUMMARY:Assemblée générale ordinaire · ACP Démo/);
   assert.match(ics, /LOCATION:Appartement RDC/);
   assert.match(ics.replace(/\r\n /g, ''), /DESCRIPTION:1\. Approbation des comptes <2025>\\n2\. Toiture : état des lieux\\n3\. Travaux de façade/);
   assert.ok(ics.split('\r\n').every(l => l.length <= 75), 'lignes de 75 caractères au plus');

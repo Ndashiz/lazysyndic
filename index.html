@@ -844,7 +844,7 @@
       <div class="agpanel" data-panel="2" style="display:none">
         <div class="card">
           <h2>Envoyer les convocations</h2>
-          <div class="sub" style="margin-bottom:16px">La convocation est un e-mail mis en page aux couleurs de LazySyndic — nom du copropriétaire, date, heure, lieu, ordre du jour de l'étape 1 et règles de la séance — avec, en pièce jointe, la convocation complète et le formulaire de procuration (PDF). <b>Composer</b> ouvre votre messagerie avec les destinataires, copie le modèle à coller dans le message (⌘V) et télécharge le PDF à joindre ; le <b>fichier .eml</b> est un brouillon Outlook prêt à partir, PDF et rendez-vous déjà joints.</div>
+          <div class="sub" style="margin-bottom:16px">Chaque copropriétaire reçoit une invitation mise en page : la date, l'heure et le lieu, l'ordre du jour de l'étape 1, deux boutons pour vous répondre (présence ou procuration) et, en pièce jointe, la convocation complète avec le formulaire de procuration (PDF). <b>Aperçu</b> montre ce qu'il verra. <b>Fichier .eml</b> télécharge un brouillon complet, PDF et rendez-vous déjà joints, à ouvrir dans votre messagerie. <b>Composer</b> ouvre un message vide avec les destinataires, copie le modèle à y coller (⌘V) et télécharge le PDF à joindre.</div>
           <div id="agConvInfo"></div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="btn btn-primary" id="mailConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg> Composer pour tous</button>
@@ -853,6 +853,7 @@
             <button class="btn btn-ghost" id="genConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Fichier .eml</button>
             <button class="btn btn-ghost" id="pdfConv"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg> PDF</button>
           </div>
+          <div id="agConvResult" aria-live="polite"></div>
         </div>
         <div class="save-bar" style="margin-top:18px">
           <div class="n">Convocations prêtes</div>
