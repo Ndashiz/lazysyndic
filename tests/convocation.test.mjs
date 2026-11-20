@@ -176,7 +176,7 @@ test('PDF : lettre + procuration, deux pages, métadonnées', { skip: !PDFLib &&
   assert.equal(doc.getTitle(), "Convocation à l'assemblée générale ordinaire · ACP Démo · Sam Bernard");
   assert.equal(doc.getAuthor(), 'ACP Démo');
   assert.equal(doc.getCreator(), 'LazySyndic');
-  // beaucoup de points : l'ordre du jour et les instructions de vote passent sur d'autres pages sans casser
+  // beaucoup de points : l'ordre du jour passe sur d'autres pages sans casser
   const many = { ...base(), points: Array.from({ length: 40 }, (_, i) => ({ n:i+1, title:`Point ${i+1} — un intitulé assez long pour replier la ligne du tableau`, kind:'decision', maj:'Majorité absolue', pct:51, body:'Texte du point, sur une ligne ou deux, pour remplir la page.' })) };
   const big = await PDFLib.PDFDocument.load(await C.buildPdf(PDFLib, many));
   assert.ok(big.getPageCount() >= 4);

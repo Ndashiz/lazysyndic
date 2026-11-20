@@ -514,7 +514,7 @@ async function buildPdf(PDFLib, d){
     block('QUAND', dl); cy -= 8; block('OÙ', ll);
     y -= BH + 14;
   }
-  para(`Le formulaire de procuration figure en dernière page ; les règles de la séance sont rappelées ci-dessous.`, {size:9, color:C.soft, after:8});
+  y -= 4;
 
   /* ordre du jour : n° | point (titre + texte) | majorité | nature */
   heading('Ordre du jour');
@@ -548,25 +548,17 @@ async function buildPdf(PDFLib, d){
   ], {zebra: i % 2 === 1}));
   y -= 14;
 
-  /* règles de la séance : encadré, qui ne se sépare pas de son titre */
-  {
-    const S = 8.4, LHR = 1.32, LBL = 68, PX = 12;
-    const items = rules(d).map(([k, v]) => ({k, lines: wrap(v, F.r, S, CW - 2*PX - LBL)}));
-    const h = items.reduce((s, it) => s + Math.max(it.lines.length, 1)*S*LHR + 4, 0) + 16;
-    if (y - 30 - h < BOTTOM) newPage();
-    heading('À savoir');
-    page.drawRectangle({x:M, y:y-h, width:CW, height:h, borderColor:C.green, borderWidth:.8});
-    let yy = y - 11;
-    items.forEach(it => {
-      text(it.k.toUpperCase(), M + PX, yy - 7, {font:F.b, size:6.8, color:C.green});
-      it.lines.forEach(l => { page.drawText(l, {x:M + PX + LBL, y:yy - S, size:S, font:F.r, color:C.ink}); yy -= S*LHR; });
-      yy -= 4;
-    });
-    y -= h + 14;
-  }
+  /* Pas d'encadré « À savoir » dans la lettre (retiré à la demande du syndic, 2026-11-20) : le rappel
+     des règles alourdissait la page. Deux phrases restent, parce qu'elles servent : où consulter les
+     documents (la convocation doit le dire, art. 3.87 §3) et où trouver la procuration. */
+  const docsTxt = new Map(rules(d)).get('Documents');
+  const proxyTxt = `Si vous ne pouvez pas être présent(e), vous pouvez vous faire représenter : le formulaire de procuration figure en dernière page.`;
+  // la fin de la lettre ne se sépare pas : jamais une signature seule en haut d'une page
+  need((wrap(docsTxt, F.r, 10, CW).length + wrap(proxyTxt, F.r, 10, CW).length) * 10*1.38 + 6 + 16 + 56);
+  para(docsTxt, {after:6});
+  para(proxyTxt, {after:16});
 
   /* signature */
-  need(70);
   para('Dans l\'attente de votre présence,', {after:12});
   text(d.syndic.name || 'Le syndic', M, y - 10, {font:F.b, size:10.5}); y -= 14;
   text(`Syndic de ${cn}${d.syndic.email ? ' · ' + d.syndic.email : ''}`, M, y - 10, {size:9.5, color:C.soft}); y -= 14;
@@ -574,7 +566,8 @@ async function buildPdf(PDFLib, d){
   /* ---- page 2 : la procuration ---- */
   newPage();
   text('Procuration', M, y - 16, {font:F.b, size:19, color:C.green}); y -= 24;
-  text(`Assemblée générale ${ty} de ${cn} · ${when(d)}${d.lieu ? ' · ' + d.lieu : ''}`, M, y - 10, {size:9.5, color:C.soft}); y -= 28;
+  // replié : un lieu un peu long sortait de la page
+  para(`Assemblée générale ${ty} de ${cn} · ${when(d)}${d.lieu ? ' · ' + d.lieu : ''}`, {size:9.5, color:C.soft, after:16});
   const blank = n => '_'.repeat(n);
   const who = d.recipient && d.recipient.name ? d.recipient.name : blank(38);
   const lots = d.recipient && d.recipient.lots ? d.recipient.lots : blank(26);
@@ -592,29 +585,9 @@ async function buildPdf(PDFLib, d){
   y -= 6;
   para(`Le mandataire est désigné nommément. Nul ne peut accepter plus de trois procurations, sauf si le total de ses voix et de celles de ses mandants n'excède pas 10 % des voix ; le syndic ne peut pas être mandataire (art. 3.87 §7 du Code civil).`, {size:8.6, color:C.soft, after:12});
 
-  const dec = pts.filter(isDecision);
-  if (dec.length){
-    need(40);
-    text('Instructions de vote (recommandées, pour éviter tout malentendu en séance)', M, y - 9, {font:F.b, size:9.5});
-    y -= 20;
-    const vc = [{w:22}, {w:CW - 22 - 3*58}, {w:58, l:'Pour'}, {w:58, l:'Contre'}, {w:58, l:'Abstention'}];
-    let x = M;
-    vc.forEach(c => { if (c.l) text(c.l.toUpperCase(), x + c.w/2, y - 7, {font:F.b, size:6.9, color:C.soft, center:true}); x += c.w; });
-    y -= 12; hline(y, {t:1, color:C.ink});
-    dec.forEach((p, i) => {
-      const lines = wrap(p.title, F.r, 9.5, vc[1].w - 2*PAD);
-      const h = Math.max(lines.length*9.5*LH, 16) + 2*PAD;
-      if (y - h < BOTTOM){ newPage(); text('Instructions de vote (suite)', M, y - 9, {font:F.b, size:9.5}); y -= 20; }
-      if (i % 2) page.drawRectangle({x:M, y:y-h, width:CW, height:h, color:C.zebra});
-      page.drawText(safe(String(p.n)), {x:M+PAD, y:y-PAD-9.5+1.5, size:9.5, font:F.b, color:C.green});
-      let yy = y - PAD;
-      lines.forEach(l => { yy -= 9.5; page.drawText(l, {x:M+vc[0].w+PAD, y:yy+1.5, size:9.5, font:F.r, color:C.ink}); yy -= 9.5*(LH-1); });
-      let bx = M + vc[0].w + vc[1].w;
-      for (let k = 0; k < 3; k++){ page.drawRectangle({x:bx + vc[2].w/2 - 5, y:y - h/2 - 5, width:10, height:10, borderColor:C.ink, borderWidth:.7}); bx += 58; }
-      y -= h; hline(y, {t:.35});
-    });
-    y -= 18;
-  }
+  // Pas de tableau « Instructions de vote » (retiré à la demande du syndic, 2026-11-20) : la procuration
+  // tient en une page, mandat et signature.
+  y -= 10;
   need(60);
   para(`Fait à ${blank(28)}, le ${blank(22)}`, {size:10, lh:1.6, after:10});
   para(`Signature (précédée de la mention « Bon pour pouvoir ») : ${blank(34)}`, {size:10, lh:1.6, after:0});
