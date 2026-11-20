@@ -22,7 +22,7 @@ const base = () => ({
   ],
   syndic: { name:'Alex Martin', email:'alex@exemple.be' },
   sentLabel:'25/10/2026', delayDays:240, recipient:null,
-  logoSrc:'https://exemple.be/brand/icon-180.png', logo:null,
+  logo:null,
 });
 const b64dec = s => Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8');
 // les parties d'un .eml : leur Content-Type et leur corps brut (base64), jusqu'à la frontière suivante
@@ -93,7 +93,11 @@ test('HTML : bandeau, billet, réponses, points échappés et typés, règles, p
   // les six règles : trois dites « en pratique », trois en cadre légal
   for (const k of ['Délai', 'Quorum', 'Procuration', 'Votes', 'Documents', 'Procès-verbal']) assert.match(h, new RegExp('data-rule="' + k + '"'));
   assert.match(h, /Vous ne pouvez pas venir \?/); assert.match(h, /art\. 3\.87 §5/);
-  assert.match(h, /src="https:\/\/exemple\.be\/brand\/icon-180\.png"/);
+  // le symbole est dessiné en cellules de tableau : aucune image, ni jointe ni distante (Mail sort
+  // les images jointes du tableau quand on répond ou qu'on transfère)
+  assert.doesNotMatch(h, /<img/); assert.doesNotMatch(h, /cid:/);
+  assert.match(h, /bgcolor="#F4F0E6"/); assert.match(h, /bgcolor="#C9854A"/);
+  assert.ok(h.includes(C.mark(32)));
   assert.match(h, /data-syndic>Alex Martin<\/div>/);
   // moteur Word d'Outlook : tableaux et styles inline, pas de variable CSS ni de SVG
   assert.doesNotMatch(h, /var\(--/); assert.doesNotMatch(h, /<svg/); assert.doesNotMatch(h, /<style/);
@@ -134,7 +138,7 @@ test('.ics : un rendez-vous de deux heures, ordre du jour en description', () =>
 test('.eml : brouillon Outlook (X-Unsent), texte + HTML avec logo inline, PDF et .ics joints', () => {
   const d = base();
   const eml = C.eml({ from:'alex@exemple.be', fromName:'Alex Martin', to:['sam@exemple.be', 'lou@exemple.be'],
-    subject:C.subject(d), text:C.text(d), html:C.html({ ...d, logoSrc:'cid:logo@lazysyndic' }),
+    subject:C.subject(d), text:C.text(d), html:'<p><img src="cid:logo@lazysyndic" alt=""></p>' + C.htmlBody(d),
     logo:{ bytes:new Uint8Array([137, 80, 78, 71]), cid:'logo@lazysyndic' },
     pdf:{ name:'Convocation AG.pdf', bytes:new Uint8Array([37, 80, 68, 70]) },
     ics:{ name:'assemblee-generale.ics', text:C.ics(d) } });

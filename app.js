@@ -2763,8 +2763,6 @@ function convocationData(ag, owner){
     sentLabel:ag.convocation_date||new Date().toLocaleDateString('fr-BE'),
     delayDays:dl?dl.days:null,
     recipient:owner?{name:owner.n, lots}:null,
-    // l'image d'en-tête du mail (le symbole, en PNG : Outlook ne lit pas le SVG) ; remplacée par un cid: dans le .eml
-    logoSrc:new URL('brand/icon-180.png',document.baseURI).href,
   };
 }
 // Le logo horizontal en PNG, pour les PDF (pdf-lib ne lit pas le SVG) ; null si le rendu échoue
@@ -2781,8 +2779,6 @@ function brandLogoPng(){
     img.src='brand/logo.svg';
   });
 }
-let _brandMarkP=null;
-const brandMarkPng=()=>_brandMarkP=_brandMarkP||fetch('brand/icon-180.png').then(x=>x.ok?x.arrayBuffer():null).then(b=>b?new Uint8Array(b):null).catch(()=>null);
 // Une promesse qui ne revient pas ne doit pas laisser un bouton muet : passé `ms`, elle échoue avec `what`.
 const within=(p,ms,what)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(what)),ms))]);
 // Copie le HTML (et sa version texte) dans le presse-papiers : collé dans Outlook, Mail ou Gmail,
@@ -2814,7 +2810,7 @@ async function convocationPdf(d){
 }
 // Le premier clic ne doit pas attendre le réseau : la bibliothèque et les logos se chargent dès
 // l'ouverture de l'étape 2, pour que le téléchargement parte dans la foulée du geste.
-function convWarm(){ loadPdfLib().catch(()=>{}); brandLogoPng(); brandMarkPng(); }
+function convWarm(){ loadPdfLib().catch(()=>{}); brandLogoPng(); }
 // Pendant qu'un fichier se prépare : les boutons de l'étape 2 et de l'aperçu sont gelés, et on le dit.
 let _convBusy=false;
 function convBusy(on, msg){
@@ -2887,11 +2883,9 @@ async function convocationAct(act, owner){
   if(act==='eml'){
     convBusy(true,'Préparation du brouillon et de ses pièces jointes…');
     try{
-      const [bytes, mark]=await Promise.all([convocationPdf(d), within(brandMarkPng(),4000,'logo').catch(()=>null)]);
-      const cid='logo@lazysyndic', ics=L.ics(d);
-      const eml=L.eml({from:r.from, fromName:r.syndic, to, subject:subj, text:txt,
-        html:L.html({...d, logoSrc: mark ? 'cid:'+cid : d.logoSrc}),
-        logo: mark ? {bytes:mark, cid} : null,
+      const bytes=await convocationPdf(d), ics=L.ics(d);
+      // pas d'image dans le message : le symbole est dessiné en HTML (LSConvocation.mark)
+      const eml=L.eml({from:r.from, fromName:r.syndic, to, subject:subj, text:txt, html:L.html(d),
         pdf:{name:L.fileName(d,'pdf'), bytes},
         ics: ics ? {name:'assemblee-generale.ics', text:ics} : null});
       convDeliver(new Blob([eml],{type:'message/rfc822'}), L.fileName(d,'eml'), `téléchargé, PDF${ics?' et rendez-vous':''} joints.`, EML_HINT);
@@ -3681,10 +3675,10 @@ async function fundCallPdf(owners, y){
   logTimeline({title:`Appel${owners.length>1?'s':''} de fonds ${y} généré${owners.length>1?'s':''}`, kind:'manual', description:owners.map(o=>o.n).join(', ')+'.'});
 }
 async function fundCallEml(o, y){
-  const m=fundCallModel(o, y); const logo=await brandMarkPng(); if(logo) m.logoCid='logo@lazysyndic';
+  const m=fundCallModel(o, y);
   const pdf=await LSCalls.buildPdf(await loadPdfLib(), [m], {logo: await brandLogoPng()});
   const eml=LSConvocation.eml({from:m.syndic.email||undefined, fromName:m.syndic.name, to:o.email?[o.email]:[], subject:LSCalls.subject(m), text:LSCalls.text(m), html:LSCalls.html(m),
-    logo: logo?{bytes:logo, cid:'logo@lazysyndic'}:null, pdf:{name:LSCalls.fileName(m,'pdf'), bytes:pdf}});
+    pdf:{name:LSCalls.fileName(m,'pdf'), bytes:pdf}});
   const blob=new Blob([eml],{type:'message/rfc822'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=LSCalls.fileName(m,'eml'); document.body.appendChild(a); a.click(); a.remove();
   logTimeline({title:`Appel de fonds ${y} préparé pour ${o.n}`, kind:'manual', description:`${eur(m.total)} pour l'année, ${eur(m.perPeriod)} ${m.every}. Brouillon .eml ${o.email?`adressé à ${o.email}`:'sans destinataire : e-mail à renseigner dans Copropriétaires & lots'}${m.ogm?'':' · sans communication structurée : à attribuer dans Copropriétaires & lots'}.`});
@@ -5641,7 +5635,7 @@ ${syndic}, syndic de ${cn}
   const html=`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.bg}" style="background-color:${T.bg};margin:0;padding:0"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.card}" style="width:560px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:10px">
 <tr><td style="padding:18px 28px;border-bottom:1px solid ${T.line}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td valign="middle" style="width:34px;padding-right:10px"><img src="cid:logo@lazysyndic" width="34" height="34" alt="" style="display:block;width:34px;height:34px;border:0;border-radius:8px"></td>
+<td valign="middle" width="34" style="width:34px;padding-right:10px">${LSConvocation.mark(34)}</td>
 <td valign="middle" style="${base}font-size:17px;line-height:22px;color:${T.deep}"><span style="font-weight:800">Lazy</span><span style="font-weight:600">Syndic</span></td>
 <td valign="middle" align="right" style="${base}font-size:12px;line-height:18px;color:${T.muted};white-space:nowrap">Rappel de paiement · ${escH(fmtDateLong(todayISO()))}</td></tr></table></td></tr>
 <tr><td bgcolor="${T.primary}" style="background-color:${T.primary};padding:24px 28px">
@@ -5657,8 +5651,7 @@ ${ibanTxt?`<table role="presentation" width="100%" cellpadding="0" cellspacing="
 <p style="margin:0 0 20px;${base}font-size:14px;line-height:22px;color:${T.ink}">Cordialement,<br><b>${escH(syndic)}</b>, syndic de ${escH(cn)}</p></td></tr>
 <tr><td style="padding:12px 28px 16px;border-top:1px solid ${T.line};${base}font-size:11px;line-height:16px;color:${T.muted}">Message préparé avec LazySyndic.</td></tr>
 </table></td></tr></table>`;
-  const logo=await brandMarkPng();
-  const eml=LSConvocation.eml({from:syndicEmail||undefined, fromName:syndic, to:to?[to]:[], subject, text, html, logo:logo?{bytes:logo, cid:'logo@lazysyndic'}:null});
+  const eml=LSConvocation.eml({from:syndicEmail||undefined, fromName:syndic, to:to?[to]:[], subject, text, html});
   const blob=new Blob([eml],{type:'message/rfc822'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`rappel-${sansAccents(short).replace(/[^A-Za-z0-9_-]+/g,'_')}-${o.year}.eml`;
   document.body.appendChild(a); a.click(); a.remove();

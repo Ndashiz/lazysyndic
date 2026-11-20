@@ -19,7 +19,7 @@
      timeLabel ('19h00' ou ''), start (Date ou null, pour le .ics), lieu,
      points:[{n, title, kind:'decision'|'info', maj:'Majorité absolue', pct:51, body}],
      syndic:{name, email}, sentLabel ('25/10/2026'), delayDays (entier ou null),
-     recipient:{name, lots} ou null (message générique), logoSrc ('cid:…' ou URL ou ''),
+     recipient:{name, lots} ou null (message générique),
      logo (Uint8Array PNG, pour le PDF) ou null
    }
    ============================================================ */
@@ -131,6 +131,22 @@ const chip = (label, bg, fg) => `<span style="display:inline-block;padding:2px 9
 // bouton « à l'épreuve des balles » : la cellule porte le fond, le lien porte le texte
 const button = (href, label, solid) => `<table ${TBL} align="left"><tr><td style="padding:0 10px 8px 0"><table ${TBL}><tr><td align="center" bgcolor="${solid ? T.primary : T.card}" style="background-color:${solid ? T.primary : T.card};border:1px solid ${T.primary};border-radius:8px"><a href="${esc(href)}" style="display:inline-block;padding:11px 18px;${base}font-size:14px;line-height:20px;font-weight:700;color:${solid ? '#FFFFFF' : T.primary};text-decoration:none">${label}</a></td></tr></table></td></tr></table>`;
 
+// Le symbole de LazySyndic (la façade à pignon du logo), dessiné en cellules de tableau : aucune image.
+// Une image jointe au message (cid:) le casse dès qu'on y répond ou qu'on le transfère dans Mail
+// (macOS, iOS) : Mail sort les images jointes du tableau, les affiche en taille réelle et coupe la
+// mise en page en deux. Une image distante, elle, est bloquée par défaut dans Outlook. Ici, rien à
+// charger ni à joindre : le symbole survit à la réponse, au transfert et au copier-coller.
+const CREAM = '#F4F0E6';
+const px = (w, h, color) => `<td width="${w}" height="${h}" bgcolor="${color}" style="width:${w}px;height:${h}px;background-color:${color};font-size:1px;line-height:1px;mso-line-height-rule:exactly;padding:0">&nbsp;</td>`;
+function mark(size = 32){
+  const step = (w, h) => `<table ${TBL} align="center" width="${w}" style="width:${w}px"><tr>${px(w, h, CREAM)}</tr></table>`;
+  const band = (h, a, b) => `<tr>${px(3, h, CREAM)}${px(3, h, a)}${px(4, h, CREAM)}${px(3, h, b)}${px(3, h, CREAM)}</tr>`;
+  return `<table ${TBL} width="${size}" bgcolor="${T.deep}" style="width:${size}px;background-color:${T.deep};border-radius:${Math.round(size/4)}px"><tr><td align="center" valign="middle" height="${size}" style="height:${size}px;padding:0;font-size:1px;line-height:1px">`
+    + step(4, 3) + step(8, 2) + step(12, 3)                                     // le pignon à gradins
+    + `<table ${TBL} align="center" width="16" style="width:16px">${band(1, CREAM, CREAM)}${band(3, T.deep, T.deep)}${band(2, CREAM, CREAM)}${band(4, T.clay, T.deep)}</table>`   // deux fenêtres, puis la fenêtre d'argile et la porte
+    + `</td></tr></table>`;
+}
+
 // La page de calendrier du billet ; '' sans date lisible.
 function dateTile(d){
   if (!validDate(d.start)) return '';
@@ -190,9 +206,7 @@ ${td(`padding:0 0 8px;${base}font-size:12px;line-height:18px;color:${T.muted}`, 
 // Le corps seul (ce qui est collé dans un message Outlook) ; html() l'enveloppe dans un document.
 function htmlBody(d){
   const cn = esc(coproName(d)), ty = typeLabel(d);
-  const logo = d.logoSrc
-    ? `<img src="${esc(d.logoSrc)}" width="32" height="32" alt="" style="display:block;width:32px;height:32px;border:0;border-radius:8px">`
-    : `<table ${TBL}><tr><td bgcolor="${T.deep}" style="width:32px;height:32px;border-radius:8px"></td></tr></table>`;
+  const logo = mark(32);
   const n = (d.points||[]).length, nDec = (d.points||[]).filter(isDecision).length;
   const meta = [n ? `${n} point${n > 1 ? 's' : ''}` : '', nDec ? `${nDec} décision${nDec > 1 ? 's' : ''} à prendre` : ''].filter(Boolean).join(' · ');
   const addr = [d.copro.addr, d.copro.kbo ? 'BCE ' + String(d.copro.kbo).replace(/^\s*BCE\s*/i,'') : ''].filter(Boolean).join(' · ');
@@ -343,7 +357,8 @@ const bnd = tag => `=_LazySyndic_${tag}_` + Math.random().toString(36).slice(2) 
 const part = (headers, body) => headers.join('\r\n') + '\r\n\r\n' + body;
 
 /* m = { from, fromName, to:[e-mails], subject, text, html,
-         logo:{bytes:Uint8Array, cid:'logo@lazysyndic'} | null,   — image inline du HTML
+         logo:{bytes:Uint8Array, cid:'logo@lazysyndic'} | null,   — image inline du HTML ; À ÉVITER : Mail la
+                                                                    sort du tableau à la réponse (voir mark())
          pdf:{name, bytes:Uint8Array} | null, ics:{name, text} | null } — pièces jointes
    X-Unsent : Outlook ouvre le fichier comme un brouillon prêt à partir, destinataires et pièces jointes en place. */
 function eml(m){
@@ -616,7 +631,7 @@ function fileName(d, ext){
   return `Convocation_AG_${slug(coproName(d)) || 'copropriete'}_${day}${who}.${ext}`;
 }
 
-const api = { subject, text, html, htmlBody, eml, ics, buildPdf, fileName, rules, when, T };
+const api = { subject, text, html, htmlBody, mark, eml, ics, buildPdf, fileName, rules, when, T };
 root.LSConvocation = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

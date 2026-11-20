@@ -112,7 +112,8 @@ function html(m){
   const cn = esc(coproName(m)), base = `font-family:${FONT};`;
   const td = (st, inner, attrs='') => `<td ${attrs} style="${st}">${inner}</td>`;
   const rows = m.rows.map(r => `<tr>${td(`${base}font-size:13px;line-height:20px;color:${T.ink};padding:5px 0;border-bottom:1px solid ${T.line}`, `${r.n}. ${esc(frDateLong(r.due))}`)}${td(`${base}font-size:13px;line-height:20px;color:${T.ink};padding:5px 0;border-bottom:1px solid ${T.line};font-weight:700`, esc(eur(r.amount)), 'align="right"')}</tr>`).join('');
-  const logo = m.logoCid ? `<img src="cid:${esc(m.logoCid)}" width="34" height="34" alt="" style="display:block;width:34px;height:34px;border:0;border-radius:8px">` : `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${T.deep}" style="width:34px;height:34px;border-radius:8px"></td></tr></table>`;
+  // le symbole sans image (LSConvocation.mark) : une image jointe casse le message à la réponse dans Mail
+  const logo = (root.LSConvocation && root.LSConvocation.mark) ? root.LSConvocation.mark(34) : `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${T.deep}" style="width:34px;height:34px;border-radius:8px"></td></tr></table>`;
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.bg}" style="background-color:${T.bg};margin:0;padding:0"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.card}" style="width:560px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:10px">
 <tr><td style="padding:18px 28px;border-bottom:1px solid ${T.line}"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
