@@ -135,14 +135,19 @@ const button = (href, label, solid) => `<table ${TBL} align="left"><tr><td style
 // mise en page en deux. Une image distante, elle, est bloquée par défaut dans Outlook. Ici, rien à
 // charger ni à joindre : le symbole survit à la réponse, au transfert et au copier-coller.
 const CREAM = '#F4F0E6';
-const px = (w, h, color) => `<td width="${w}" height="${h}" bgcolor="${color}" style="width:${w}px;height:${h}px;background-color:${color};font-size:1px;line-height:1px;mso-line-height-rule:exactly;padding:0">&nbsp;</td>`;
+// Des cellules VIDES, hauteur donnée : pas le moindre caractère dedans. Avec un &nbsp;, Mail applique
+// sa taille de police minimale (9 px) à chaque rangée de 1 à 4 px et la façade s'étire en tour de
+// 63 px (vu le 2026-11-20). Les deux <div> bornent en plus la hauteur : si un client gonfle quand
+// même une rangée, le symbole est rogné au lieu de déformer l'en-tête.
+const px = (w, h, color) => `<td width="${w}" height="${h}" bgcolor="${color}" style="width:${w}px;height:${h}px;background-color:${color};font-size:1px;line-height:1px;mso-line-height-rule:exactly;padding:0"></td>`;
 function mark(size = 32){
   const step = (w, h) => `<table ${TBL} align="center" width="${w}" style="width:${w}px"><tr>${px(w, h, CREAM)}</tr></table>`;
   const band = (h, a, b) => `<tr>${px(3, h, CREAM)}${px(3, h, a)}${px(4, h, CREAM)}${px(3, h, b)}${px(3, h, CREAM)}</tr>`;
-  return `<table ${TBL} width="${size}" bgcolor="${T.deep}" style="width:${size}px;background-color:${T.deep};border-radius:${Math.round(size/4)}px"><tr><td align="center" valign="middle" height="${size}" style="height:${size}px;padding:0;font-size:1px;line-height:1px">`
+  const clip = (w, h, more='') => `width:${w}px;height:${h}px;max-height:${h}px;overflow:hidden;font-size:1px;line-height:1px;${more}`;
+  return `<div style="${clip(size, size, `border-radius:${Math.round(size/4)}px`)}"><table ${TBL} width="${size}" bgcolor="${T.deep}" style="width:${size}px;background-color:${T.deep};border-radius:${Math.round(size/4)}px"><tr><td align="center" valign="middle" height="${size}" style="height:${size}px;padding:0;font-size:1px;line-height:1px"><div style="${clip(16, 18, 'margin:0 auto')}">`
     + step(4, 3) + step(8, 2) + step(12, 3)                                     // le pignon à gradins
     + `<table ${TBL} align="center" width="16" style="width:16px">${band(1, CREAM, CREAM)}${band(3, T.deep, T.deep)}${band(2, CREAM, CREAM)}${band(4, T.clay, T.deep)}</table>`   // deux fenêtres, puis la fenêtre d'argile et la porte
-    + `</td></tr></table>`;
+    + `</div></td></tr></table></div>`;
 }
 
 // La page de calendrier du billet ; '' sans date lisible.

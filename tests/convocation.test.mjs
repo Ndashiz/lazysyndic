@@ -98,6 +98,9 @@ test('HTML : bandeau, billet, réponses, points échappés et typés, règles, p
   assert.doesNotMatch(h, /<img/); assert.doesNotMatch(h, /cid:/);
   assert.match(h, /bgcolor="#F4F0E6"/); assert.match(h, /bgcolor="#C9854A"/);
   assert.ok(h.includes(C.mark(32)));
+  // aucun caractère dans le symbole : Mail gonfle à sa taille de police minimale la moindre rangée qui en contient
+  assert.equal(C.mark(32).replace(/<[^>]*>/g, ''), '');
+  assert.match(C.mark(34), /^<div style="width:34px;height:34px;max-height:34px;overflow:hidden/);
   assert.match(h, /data-syndic>Alex Martin<\/div>/);
   // moteur Word d'Outlook : tableaux et styles inline, pas de variable CSS ni de SVG
   assert.doesNotMatch(h, /var\(--/); assert.doesNotMatch(h, /<svg/); assert.doesNotMatch(h, /<style/);
