@@ -83,7 +83,7 @@ function addCategory(name){
 const SUBCAT_DEFAULTS = {
   'Énergie':          ['Électricité','Gaz','Eau','Chauffage'],
   'Assurance':        ['RC','Incendie','Dégâts des eaux'],
-  'Frais ACP':        ['Banque','Frais de gestion','Divers'],
+  'Frais ACP':        ['Banque','Divers'],   // « Frais de gestion » retiré le 2026-11-22 : la plateforme du syndic a sa propre sous-catégorie, saisie dans les réglages
   'Entretien':        ['Nettoyage','Ascenseur','Jardin','Réparations','Communs'],
   'Charges':          ['Compte de paiement','Fonds de réserve'],
   'Fonds de réserve': [],
