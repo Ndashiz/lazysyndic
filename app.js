@@ -1012,10 +1012,10 @@ function renderExtInfo(box){
   const cats = allCats().filter(c=>!isIncomeCat(c));
   const lab = t => `<div class="l" style="font-size:12px;color:var(--ink-faint)">${t}</div>`;
   box.innerHTML = `
-    <div class="h-row" style="align-items:flex-start;gap:16px">
-      <div style="flex:1 1 380px"><h2 style="margin:0">Hors comptes de l’ACP</h2>
+    <div class="h-row" style="align-items:flex-start;gap:12px 16px;flex-wrap:wrap">
+      <div style="flex:1 1 300px;min-width:0"><h2 style="margin:0">Hors comptes de l’ACP</h2>
         <div class="sub" style="margin-top:4px;max-width:640px">Les dépenses de l’immeuble payées ailleurs que sur les comptes de l’ACP, comme une assurance réglée directement à l’assureur. Elles comptent dans la comptabilité, dans leur catégorie. Elles ne touchent ni les soldes des comptes, ni les rapprochements, ni les relevés, ni le budget.</div></div>
-      <div style="text-align:right">${lab('Total hors comptes')}
+      <div style="text-align:right;margin-left:auto;white-space:nowrap">${lab('Total hors comptes')}
         <div style="font-family:var(--display);font-size:22px;font-weight:600;margin-top:2px">${rows.length ? signed(tot) : '—'}</div>
         <div class="sub">${rows.length} mouvement${rows.length>1?'s':''}</div></div>
     </div>
