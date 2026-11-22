@@ -94,29 +94,56 @@ test('buildDashboard: reserve with no target set does not divide by zero', () =>
   assert.equal(d.reserve.pct, 0);
 });
 
+// Le « maintenant » des tests : sans lui, le tableau dépendrait du jour où ils tournent.
+const now = new Date('2026-11-22');
+
 test('buildDashboard: who pays what, and receivables = sum of debtor balances', () => {
   // Alex owes 1000 and paid 1000; Lou owes 499 and paid 345 → 154 outstanding.
   const transactions = [
     { account: 'pay', amount: 1000, owner: 'Alex', tx_date: '2026-03-01' },
     { account: 'pay', amount: 345, owner: 'Lou', tx_date: '2026-04-01' },
   ];
-  const d = buildDashboard({ owners, transactions, settings });
+  const d = buildDashboard({ owners, transactions, settings }, { now });
   const [alex, lou] = d.owners;
   assert.deepEqual(
-    [alex.dueCents, alex.paidCents, alex.balanceCents, alex.late],
-    [100000, 100000, 0, false],
+    [alex.year, alex.dueCents, alex.paidCents, alex.balanceCents, alex.overdueCents, alex.late],
+    [2026, 100000, 100000, 0, 0, false],
   );
   assert.deepEqual([lou.dueCents, lou.paidCents, lou.balanceCents, lou.late], [49900, 34500, -15400, true]);
+  // Dix échéances échues au 22 novembre : 4 × 41,59 + 6 × 41,58 = 415,84 attendus, 345 versés.
+  assert.deepEqual([lou.expectedCents, lou.overdueCents], [41584, 7084]);
   assert.equal(d.balances.receivableCents, 15400);
   assert.equal(d.lastMovementDate, '2026-04-01');
 });
 
+// Même règle que l'accueil de l'app : le solde dit ce qui reste à verser d'ici la fin de
+// l'exercice, « late » ne s'allume que pour des échéances échues.
+test('buildDashboard: a negative balance mid-year is not late while instalments are paid', () => {
+  const transactions = [{ account: 'pay', amount: 500, owner: 'Alex', tx_date: '2026-02-01' }];
+  const d = buildDashboard({ owners: [owners[0]], transactions, settings }, { now: new Date('2026-06-15') });
+  const [alex] = d.owners;
+  assert.deepEqual([alex.balanceCents, alex.expectedCents, alex.overdueCents, alex.late], [-50000, 41669, 0, false]);
+  assert.equal(d.balances.receivableCents, 50000, 'le reste de l’année reste « à recevoir »');
+});
+
+// Budget 2027 appliqué en décembre 2026 : les provisions en vigueur sont celles de 2027, le
+// tableau reste sur 2026 avec le dû enregistré pour 2026 (settings.dues_by_year).
+test('buildDashboard: the ledger keeps the dues of the current exercise', () => {
+  const next = [{ ...owners[0], due_pay: 1500, due_res: 300 }];
+  const transactions = [{ account: 'pay', amount: 1000, owner: 'Alex', tx_date: '2026-03-01' }];
+  const d = buildDashboard({
+    owners: next, transactions,
+    settings: { ...settings, charges: { 2027: { applied: { at: '2026-12-01' } } }, dues_by_year: { 2026: { 'o-alex': { pay: 900, res: 100 } } } },
+  }, { now: new Date('2026-12-10') });
+  assert.deepEqual([d.owners[0].year, d.owners[0].dueCents, d.owners[0].balanceCents, d.owners[0].late], [2026, 100000, 0, false]);
+});
+
 test('buildDashboard: learned owner rules attribute a payment, like the app does', () => {
   const transactions = [{ account: 'pay', amount: 499, tiers: 'VIREMENT PARKING B12', tx_date: '2026-05-02' }];
-  const plain = buildDashboard({ owners, transactions, settings });
+  const plain = buildDashboard({ owners, transactions, settings }, { now });
   assert.equal(plain.balances.receivableCents, 49900 + 100000, 'unattributed: both owners look late');
 
-  const learned = buildDashboard({ owners, transactions, settings, ownerRules: { 'parking b12': 'Lou' } });
+  const learned = buildDashboard({ owners, transactions, settings, ownerRules: { 'parking b12': 'Lou' } }, { now });
   const lou = learned.owners.find((o) => o.short === 'Lou');
   assert.equal(lou.paidCents, 49900);
   assert.equal(lou.late, false);

@@ -1,7 +1,10 @@
 // Run: node --test  (from bridge/)  — no dependencies.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { norm, detectOwner, ownerLedger, ledgerYear, buildAlerts, coproStatus, bankAlerts } from './alerts.js';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { norm, detectOwner, ownerLedger, expectedToDate, todayIso, buildAlerts, coproStatus, bankAlerts } from './alerts.js';
 
 const owners = [
   { id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 900, due_res: 100 }, // due 1000
@@ -42,57 +45,165 @@ test('detectOwner: explicit rule > name match > none', () => {
 test('ownerLedger: verse from explicit owner + heuristic, solde = verse - due', () => {
   const now = new Date('2026-06-15');
   const tx = [
-    { amount: 600, owner: 'Alex', tx_date: '2026-01-05' },                 // explicit
-    { amount: 300, tiers: 'Alex Martin', tx_date: '2026-02-05' },          // heuristic → Alex
-    { amount: 500, owner: 'Sam', tx_date: '2026-03-05' },                  // Sam fully paid
-    { amount: -50, owner: 'Alex', tx_date: '2026-03-06' },                 // outflow ignored
-    { amount: 200, owner: 'Alex', deleted_at: '2026-01-01', tx_date: '2026-04-01' }, // soft-deleted ignored
+    { account: 'pay', amount: 600, owner: 'Alex', tx_date: '2026-01-05' },                 // explicit
+    { account: 'res', amount: 300, tiers: 'Alex Martin', tx_date: '2026-02-05' },          // heuristic → Alex
+    { account: 'pay', amount: 500, owner: 'Sam', tx_date: '2026-03-05' },                  // Sam fully paid
+    { account: 'pay', amount: -50, owner: 'Alex', tx_date: '2026-03-06' },                 // outflow ignored
+    { account: 'pay', amount: 200, owner: 'Alex', deleted_at: '2026-01-01', tx_date: '2026-04-01' }, // soft-deleted ignored
+    { account: 'ext', amount: 400, owner: 'Alex', tx_date: '2026-04-02' },                 // hors comptes : pas un versement
   ];
-  const led = ownerLedger(owners, tx, {}, {}, now);
+  const led = ownerLedger({ owners, transactions: tx }, { now });
   const alex = led.find((o) => o.short === 'Alex');
   const sam = led.find((o) => o.short === 'Sam');
-  assert.equal(alex.year, 2026);            // aucun budget appliqué : l'année civile
-  assert.equal(alex.verse, 900);            // 600 + 300
-  assert.equal(alex.report, 0);
+  assert.equal(alex.year, 2026);            // l'année civile en cours
+  assert.deepEqual([alex.versePay, alex.verseRes, alex.verse], [600, 300, 900]);
+  assert.deepEqual([alex.report, alex.reportKnown], [0, false]);   // dû 2025 inconnu : pas de report
   assert.equal(alex.solde, -100);           // 900 - 1000
   assert.equal(sam.solde, 0);               // 500 - 500
 });
 
-// app.js ownerLedger : le dû est annuel, le versé l'est aussi. Ce qui précède l'exercice devient un
-// report, net du dû des exercices déjà appliqués ; sans budget appliqué avant, l'ancien calcul.
-test('ownerLedger: le versé se borne à l’exercice du dû, le reste devient un report', () => {
+// app.js ownerLedger : « en retard » se dit des échéances échues, jamais du solde. En cours
+// d'année le solde est négatif pour tout le monde, puisqu'il reste des échéances à venir.
+test('ownerLedger: le retard ne compte que les échéances dont le mois est terminé', () => {
+  const copro = [
+    { id: 'm', short: 'Mia', name: 'Mia Roy', due_pay: 1200, due_res: 0 },                           // 100 par mois
+    { id: 'q', short: 'Quentin', name: 'Quentin Noel', due_pay: 1200, due_res: 0, periodicity: 'quarter' },
+    { id: 'y', short: 'Yann', name: 'Yann Colin', due_pay: 1200, due_res: 0, periodicity: 'year' },
+  ];
+  const paid = (short, amount) => ({ account: 'pay', amount, owner: short, tx_date: '2026-02-01' });
+  const at = (iso, tx) => Object.fromEntries(ownerLedger({ owners: copro, transactions: tx }, { now: new Date(iso) }).map((o) => [o.short, o]));
+
+  // 15 avril : janvier, février et mars sont échus ; avril est en cours.
+  const avril = at('2026-04-15', [paid('Mia', 300), paid('Quentin', 300), paid('Yann', 300)]);
+  assert.deepEqual([avril.Mia.expected, avril.Mia.retard, avril.Mia.enRetard, avril.Mia.solde], [300, 0, false, -900]);
+  assert.deepEqual([avril.Quentin.expected, avril.Quentin.retard, avril.Quentin.enRetard], [300, 0, false]);   // T1 échu, T2 dû le 1er avril : en cours
+  assert.deepEqual([avril.Yann.expected, avril.Yann.retard, avril.Yann.enRetard], [1200, 900, true]);         // l'appel annuel est échu fin janvier
+
+  // 1er mai : la mensualité d'avril et le deuxième trimestre deviennent exigibles.
+  const mai = at('2026-05-01', [paid('Mia', 300), paid('Quentin', 300)]);
+  assert.deepEqual([mai.Mia.expected, mai.Mia.retard, mai.Mia.enRetard], [400, 100, true]);
+  assert.deepEqual([mai.Quentin.expected, mai.Quentin.retard, mai.Quentin.enRetard], [600, 300, true]);
+
+  // Moins d'un euro d'écart (arrondis) n'est pas un retard : même seuil que l'app.
+  const juste = at('2026-05-01', [paid('Mia', 399.5)]);
+  assert.deepEqual([juste.Mia.retard, juste.Mia.enRetard], [0.5, false]);
+});
+
+// calls.js expectedToDate est la référence : le pont en garde une copie, les deux doivent rendre
+// le même attendu, au centime, quel que soit le rythme.
+test('expectedToDate: identique à calls.js', (t) => {
+  const file = fileURLToPath(new URL('../calls.js', import.meta.url));
+  if (!existsSync(file)) return t.skip('calls.js absent : pont déployé seul');
+  const loaded = createRequire(import.meta.url)(file);
+  const K = loaded && loaded.expectedToDate ? loaded : globalThis.LSCalls;
+  for (const annual of [0, 0.01, 100, 912.54, 952.63, 1000, 1192.63, 2238.99]) {
+    for (const per of ['month', 'quarter', 'year', undefined, 'bizarre']) {
+      for (const day of ['2025-12-31', '2026-01-01', '2026-01-31', '2026-02-01', '2026-04-15', '2026-10-01', '2026-12-31', '2027-01-01']) {
+        assert.equal(expectedToDate(annual, per, 2026, day), K.expectedToDate(annual, per, 2026, day).expected, `${annual} ${per} ${day}`);
+      }
+    }
+  }
+});
+
+// Le pont tourne en UTC, le syndic vit à Bruxelles : c'est son jour qui fait basculer une échéance.
+test('todayIso: le jour civil de Bruxelles, pas celui du serveur', () => {
+  assert.equal(todayIso(new Date('2026-06-15T10:00:00Z')), '2026-06-15');
+  assert.equal(todayIso(new Date('2026-04-30T22:30:00Z')), '2026-05-01');   // 00:30 à Bruxelles (heure d'été)
+  assert.equal(todayIso(new Date('2026-12-31T23:30:00Z')), '2027-01-01');   // 00:30 à Bruxelles (heure d'hiver)
+  assert.equal(todayIso(new Date('2026-12-31T22:30:00Z')), '2026-12-31');
+});
+
+// app.js ownerReport : ce qui précède l'exercice devient un report, tant que le dû des exercices
+// précédents est connu. Sans dû connu, les anciens versements ne sont plus une avance.
+test('ownerLedger: le versé se borne à l’exercice, le reste devient un report si le dû d’avant est connu', () => {
   const now = new Date('2026-06-15');
   const charges = {
     2025: { applied: { at: '2025-01-02', byOwner: { Alex: { pay: 700, res: 100 }, Sam: { pay: 400, res: 100 } } } },
     2026: { applied: { at: '2026-01-02', byOwner: {} } },
   };
   const tx = [
-    { amount: 800, owner: 'Alex', tx_date: '2025-06-01' },   // 2025, couvert par le dû 2025 (800)
-    { amount: 300, owner: 'Alex', tx_date: '2026-02-01' },   // exercice 2026
-    { amount: 600, owner: 'Sam', tx_date: '2025-06-01' },    // 2025 : 100 de trop
-    { amount: 400, owner: 'Sam', tx_date: '2026-02-01' },
-    { amount: 50, owner: 'Sam' },                            // sans date : antérieur à tout
+    { account: 'pay', amount: 800, owner: 'Alex', tx_date: '2025-06-01' },   // 2025, couvert par le dû 2025 (800)
+    { account: 'pay', amount: 300, owner: 'Alex', tx_date: '2026-02-01' },   // exercice 2026
+    { account: 'pay', amount: 600, owner: 'Sam', tx_date: '2025-06-01' },    // 2025 : 100 de trop
+    { account: 'pay', amount: 400, owner: 'Sam', tx_date: '2026-02-01' },
+    { account: 'pay', amount: 50, owner: 'Sam' },                            // sans date : dans aucun exercice
   ];
-  const led = ownerLedger(owners, tx, {}, charges, now);
+  const led = ownerLedger({ owners, transactions: tx, charges }, { now });
   const alex = led.find((o) => o.short === 'Alex'), sam = led.find((o) => o.short === 'Sam');
   assert.equal(alex.year, 2026);
-  assert.deepEqual([alex.verse, alex.report, alex.solde], [300, 0, -700]);
-  assert.deepEqual([sam.verse, sam.report, sam.solde], [400, 150, 50]);   // 150 + 400 − 500
-  // Sans budget appliqué avant l'exercice : versé cumulé − dû, comme avant.
-  const legacy = ownerLedger(owners, tx, {}, { 2026: { applied: { at: '2026-01-02' } } }, now);
-  assert.equal(legacy.find((o) => o.short === 'Alex').solde, 800 + 300 - 1000);
-  // Le dernier budget appliqué fixe l'exercice, même à venir ; sinon l'année civile.
-  assert.equal(ledgerYear({ 2027: { applied: {} } }, now), 2027);
-  assert.equal(ledgerYear({}, now), 2026);
+  assert.deepEqual([alex.verse, alex.report, alex.reportKnown, alex.solde], [300, 0, true, -700]);
+  // 5 échéances échues au 15 juin : 5 × 75 + (4 × 8,34 + 8,33) = 416,69 attendus, 300 versés.
+  assert.deepEqual([alex.expected, alex.retard, alex.enRetard], [416.69, 116.69, true]);
+  assert.deepEqual([sam.verse, sam.report, sam.solde, sam.enRetard], [400, 100, 0, false]);   // 100 + 400 − 500
+  // Le report d'avance couvre des échéances : 208,35 attendus, 100 d'avance + 100 versés → 8,35 de retard.
+  const less = ownerLedger({ owners, transactions: tx.map((t) => (t.owner === 'Sam' && t.tx_date === '2026-02-01' ? { ...t, amount: 100 } : t)), charges }, { now });
+  assert.equal(less.find((o) => o.short === 'Sam').retard, 8.35);
+  // Dû de 2025 inconnu : les versements de 2025 ne comptent plus comme une avance.
+  const legacy = ownerLedger({ owners, transactions: tx, charges: { 2026: { applied: { at: '2026-01-02' } } } }, { now });
+  assert.deepEqual([legacy.find((o) => o.short === 'Alex').report, legacy.find((o) => o.short === 'Alex').solde], [0, 300 - 1000]);
 });
 
-test('buildAlerts: one overdue_payment per late owner, correct amountCents', () => {
-  const tx = [{ amount: 900, owner: 'Alex' }, { amount: 500, owner: 'Sam' }];
-  const alerts = buildAlerts({ owners, transactions: tx });
+// Le budget de N+1 se prépare et s'applique pendant l'année N : les provisions en vigueur
+// (ls_owners.due_*) deviennent celles de N+1. Le suivi de N garde le dû enregistré pour N.
+test('ownerLedger: appliquer le budget suivant ne change pas le dû de l’exercice en cours', () => {
+  const now = new Date('2026-12-10');
+  const copro = [{ id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 1500, due_res: 300 }];   // provisions 2027
+  const charges = { 2027: { applied: { at: '2026-12-01', byOwner: { 'o-alex': { pay: 1500, res: 300 } } } } };
+  const duesByYear = { 2026: { 'o-alex': { pay: 900, res: 100 } }, 2027: { 'o-alex': { pay: 1500, res: 300 } } };
+  const tx = [{ account: 'pay', amount: 1000, owner: 'Alex', tx_date: '2026-03-01' }];
+  const [alex] = ownerLedger({ owners: copro, transactions: tx, charges, duesByYear }, { now });
+  assert.deepEqual([alex.year, alex.due, alex.dueKnown, alex.solde, alex.enRetard], [2026, 1000, true, 0, false]);
+  // L'exercice 2027, lui, lit les provisions en vigueur, avec 2026 en report.
+  const [next] = ownerLedger({ owners: copro, transactions: tx, charges, duesByYear }, { now, year: 2027 });
+  assert.deepEqual([next.due, next.report, next.expected, next.solde], [1800, 0, 0, -1800]);
+  // Sans trace du dû de 2026 (exercices-du.sql pas lancé) : dû inconnu, donc aucun retard inventé.
+  const [blind] = ownerLedger({ owners: copro, transactions: tx, charges }, { now });
+  assert.deepEqual([blind.due, blind.dueKnown, blind.enRetard], [0, false, false]);
+});
+
+// À la clôture, l'app fige le dû de l'exercice (freezeDues) : plus rien ne l'écrase ensuite, pas
+// même les provisions en vigueur quand elles portent sur la même année.
+test('ownerLedger: un exercice clôturé garde son dû figé', () => {
+  const now = new Date('2026-12-10');
+  const copro = [{ id: 'o-alex', short: 'Alex', name: 'Alex Martin', due_pay: 1200, due_res: 0 }];
+  const duesByYear = { 2026: { 'o-alex': { pay: 600, res: 0 } } };
+  const open = ownerLedger({ owners: copro, duesByYear }, { now })[0];
+  assert.equal(open.due, 1200);                       // exercice ouvert : les provisions en vigueur font foi
+  const closed = ownerLedger({ owners: copro, duesByYear, periods: [{ year: 2026, closed_at: '2026-12-05T10:00:00Z' }] }, { now })[0];
+  assert.equal(closed.due, 600);
+  const reopened = ownerLedger({ owners: copro, duesByYear, periods: [{ year: 2026, closed_at: null }] }, { now })[0];
+  assert.equal(reopened.due, 1200);
+});
+
+test('buildAlerts: one overdue_payment per late owner, the amount is what is overdue', () => {
+  const now = new Date('2026-07-10');   // six échéances échues : janvier à juin
+  const tx = [
+    { account: 'pay', amount: 300, owner: 'Alex', tx_date: '2026-02-01' },
+    { account: 'pay', amount: 260, owner: 'Sam', tx_date: '2026-02-01' },     // 250,02 attendus : à jour, mais il reste 240 à verser
+  ];
+  const alerts = buildAlerts({ owners, transactions: tx }, { now });
   const pay = alerts.filter((a) => a.kind === 'overdue_payment');
-  assert.equal(pay.length, 1);              // only Alex is short 100
-  assert.equal(pay[0].id, 'pay-o-alex');    // stable id
-  assert.equal(pay[0].amountCents, 10000);  // 100.00 €
+  assert.equal(pay.length, 1);              // Sam n'est pas en retard : son solde négatif n'est que le reste de l'année
+  assert.equal(pay[0].id, 'pay-o-alex-2026-6');   // copropriétaire, exercice, échéances échues
+  assert.equal(pay[0].amountCents, 20002);  // 6 × 75 + (4 × 8,34 + 2 × 8,33) = 500,02 attendus − 300 versés
+  assert.match(pay[0].title, /Alex Martin : 200,02 € en retard/);
+  assert.match(pay[0].detail, /Exercice 2026 · attendu à ce jour 500,02 € \(sur 1000,00 € pour l'année\) · versé 300,00 €$/);
+});
+
+// Jarvis ne garde qu'une alerte par identifiant et ne la met jamais à jour : l'identifiant doit
+// donc changer quand une nouvelle échéance reste impayée, et seulement à ce moment-là.
+test('buildAlerts: the overdue id is stable within a month and changes with each new overdue instalment', () => {
+  const tx = [{ account: 'pay', amount: 300, owner: 'Alex', tx_date: '2026-02-01' }];
+  const alex = [owners[0]];
+  const idAt = (iso) => buildAlerts({ owners: alex, transactions: tx }, { now: new Date(iso) }).filter((a) => a.kind === 'overdue_payment').map((a) => a.id);
+  assert.deepEqual(idAt('2026-04-20'), []);                         // 3 échéances échues (250,01) : 300 versés, à jour
+  assert.deepEqual(idAt('2026-05-02'), ['pay-o-alex-2026-4']);      // la 4e est échue : 333,35 attendus
+  assert.deepEqual(idAt('2026-05-28'), ['pay-o-alex-2026-4']);      // même mois : même alerte
+  assert.deepEqual(idAt('2026-06-01'), ['pay-o-alex-2026-5']);      // une échéance de plus : nouvelle alerte
+  // Rythme trimestriel : le compteur ne bouge qu'au trimestre.
+  const quarterly = [{ ...owners[0], periodicity: 'quarter' }];
+  const idQ = (iso) => buildAlerts({ owners: quarterly, transactions: [] }, { now: new Date(iso) }).map((a) => a.id);
+  assert.deepEqual([idQ('2026-01-20'), idQ('2026-02-01'), idQ('2026-04-30'), idQ('2026-05-01')], [[], ['pay-o-alex-2026-1'], ['pay-o-alex-2026-1'], ['pay-o-alex-2026-2']]);
 });
 
 test('buildAlerts: open reminders → notice, done ones skipped', () => {
@@ -177,16 +288,19 @@ test('coproStatus: rien à faire quand tout est catégorisé', () => {
 // Un versement encore en brouillon n'est pas de l'argent reçu : il ne doit pas éteindre l'alerte
 // d'impayé, sinon un import que le syndic écarte ensuite aura fait disparaître la relance.
 test('ownerLedger: un versement en brouillon ne solde aucun impayé', () => {
+  const now = new Date('2026-12-15');
   const owners = [{ short: 'Lou', name: 'Lou Petit', due_pay: 1000, due_res: 0 }];
-  const draft = [{ tx_date: '2026-07-05', tiers: 'Lou Petit', amount: 1000, owner: 'Lou', draft: true }];
-  const [pending] = ownerLedger(owners, draft, {});
+  const draft = [{ account: 'pay', tx_date: '2026-07-05', tiers: 'Lou Petit', amount: 1000, owner: 'Lou', draft: true }];
+  const [pending] = ownerLedger({ owners, transactions: draft }, { now });
   assert.equal(pending.verse, 0);
   assert.equal(pending.solde, -1000);
+  assert.equal(pending.enRetard, true);
 
   // La même ligne, une fois validée, solde bien la dette.
-  const [settled] = ownerLedger(owners, [{ ...draft[0], draft: false }], {});
+  const [settled] = ownerLedger({ owners, transactions: [{ ...draft[0], draft: false }] }, { now });
   assert.equal(settled.verse, 1000);
   assert.equal(settled.solde, 0);
+  assert.equal(settled.enRetard, false);
 });
 
 // Un relevé importé attend sa validation avant d'entrer dans les comptes. Jarvis ne lit qu'un

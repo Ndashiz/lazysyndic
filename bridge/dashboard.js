@@ -89,24 +89,30 @@ export function reminderBoard(reminders = []) {
  * La page de garde de LazySyndic, en une lecture.
  *
  * @param {{owners?:any[], transactions?:any[], reminders?:any[], settings?:any,
- *          ownerRules?:Record<string,string>}} data
+ *          ownerRules?:Record<string,string>, periods?:any[]}} data
+ *        settings porte aussi `charges` (budgets par exercice) et `dues_by_year` (dû par
+ *        exercice) ; periods = ls_periods (year, closed_at).
+ * @param {{now?:Date}} [opts]
  * @returns Le même immeuble que l'écran #dash : réserve, soldes, qui paie quoi, pense-bête,
  *          répartition des dépenses.
  */
-export function buildDashboard(data = {}) {
-  const { owners = [], transactions = [], reminders = [], settings = {}, ownerRules = {} } = data;
+export function buildDashboard(data = {}, opts = {}) {
+  const { owners = [], transactions = [], reminders = [], settings = {}, ownerRules = {}, periods = [] } = data;
 
   const opening = { pay: settings.opening_pay, res: settings.opening_res };
   const payCents = balanceCents(transactions, 'pay', opening);
   const resCents = balanceCents(transactions, 'res', opening);
 
-  // app.js:357 ownerLedger — le pont le partage déjà avec les alertes « impayé », donc la
-  // ligne rouge du tableau et l'alerte du même copropriétaire ne peuvent pas diverger.
-  const ledger = ownerLedger(owners, transactions, ownerRules, settings.charges || {});
+  // app.js ownerLedger — le pont le partage déjà avec les alertes « impayé », donc la ligne
+  // rouge du tableau et l'alerte du même copropriétaire ne peuvent pas diverger.
+  const ledger = ownerLedger({
+    owners, transactions, ownerRules, periods,
+    charges: settings.charges || {}, duesByYear: settings.dues_by_year || {},
+  }, { now: opts.now });
   const ownerRows = ledger.map((o) => {
     const balanceCts = cents(o.solde);
     return {
-      /** L'exercice du dû (dernier budget appliqué, sinon l'année civile) : le versé est le sien. */
+      /** L'exercice affiché : l'année civile en cours. Le dû et le versé sont les siens. */
       year: o.year,
       short: String(o.short || ''),
       name: String(o.name || o.short || ''),
@@ -114,15 +120,20 @@ export function buildDashboard(data = {}) {
       color: String(o.color || '#2F6B53'),
       dueCents: cents(o.due),
       paidCents: cents(o.verse),
-      /** Report des exercices précédents (versements d'avant − dû déjà appliqué d'avant). */
+      /** Report des exercices précédents dont le dû est connu (retard négatif, avance positive). */
       carryCents: cents(o.report),
+      /** Report + versé − dû de l'année : ce qui reste à verser d'ici la fin de l'exercice. */
       balanceCents: balanceCts,
-      // app.js:430 — le seuil est en euros là-bas (−0,005), soit un demi-centime ici.
-      late: balanceCts < 0,
+      /** Les échéances échues à ce jour, et ce qui en reste impayé. */
+      expectedCents: cents(o.expected),
+      overdueCents: cents(o.retard),
+      // « En retard » se dit des échéances échues, jamais du solde : en cours d'année le solde
+      // est négatif pour tout le monde (app.js ownerLedger, enRetard).
+      late: o.enRetard,
     };
   });
 
-  // app.js:246 receivables — « à recevoir » = ce que doivent les copropriétaires débiteurs.
+  // app.js receivables — « à recevoir » = le reste à verser de l'exercice (soldes débiteurs).
   const receivableCents = ownerRows
     .filter((o) => o.balanceCents < 0)
     .reduce((sum, o) => sum + -o.balanceCents, 0);

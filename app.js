@@ -479,7 +479,7 @@ function backfillAppliedByOwner(){
    - avant d'appliquer le budget d'un exercice ultérieur, celui en cours y est donc déjà ;
    - à la clôture, le dû de l'exercice est figé (freezeDues) : plus rien ne l'écrase ensuite.
    Le grand livre (ownerLedger : accueil, provisions, relances, rapports) lit ce même dû par exercice.
-   Le pont Jarvis (bridge/alerts.js) suit encore l'ancienne règle, celle du dernier budget appliqué. */
+   Le pont Jarvis (bridge/alerts.js) porte cette règle à l'identique : tout changement ici s'y reporte. */
 const exerciseNow = () => new Date().getFullYear();
 const periodClosed = y => periodsOf().some(p=>+p.year===+y && p.closed_at);
 // L'exercice auquel se rapportent les provisions en vigueur : l'année en cours, ou l'exercice
@@ -547,8 +547,8 @@ function ownerReport(o, y){
 //   attendu = les échéances échues à ce jour (une échéance compte une fois son mois terminé)
 //   retard  = attendu − versé − report, s'il est positif : ce qui devrait déjà être payé
 // « En retard » se dit du retard, jamais du solde : en cours d'année, le solde est négatif pour
-// tout le monde, puisqu'il reste des échéances à venir. Le pont Jarvis (bridge/alerts.js) n'a pas
-// encore cette règle : il compare toujours un solde annuel, sur l'exercice du dernier budget appliqué.
+// tout le monde, puisqu'il reste des échéances à venir. Le pont Jarvis (bridge/alerts.js
+// ownerLedger) porte cette règle à l'identique : tout changement ici s'y reporte.
 function ownerLedger(y){
   y = +y || exerciseNow();
   const today=todayISO(), r2=v=>Math.round((+v||0)*100)/100;

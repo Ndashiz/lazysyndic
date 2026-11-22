@@ -1,6 +1,6 @@
 // LazySyndic → Jarvis bridge — pure alert-building logic.
-// Ported faithfully from app.js (norm / detectOwner / verseFromTx / ownerLedger)
-// so the bridge's "impayés" match exactly what the dashboard shows.
+// Ported faithfully from app.js (norm / detectOwner / verseFromTx / ownerLedger / duesOf) and
+// calls.js (expectedToDate) so the bridge's "impayés" match exactly what the dashboard shows.
 // No external dependencies; unit-tested in alerts.test.js.
 
 /** app.js:48 — lowercase, collapse whitespace, trim. */
@@ -63,46 +63,147 @@ function appliedYears(charges) {
     .map(Number)
     .sort((a, b) => a - b);
 }
-/** app.js ledgerYear — l'exercice du dû : le dernier budget appliqué, sinon l'année civile. */
-export function ledgerYear(charges, now = new Date()) {
-  const ys = appliedYears(charges);
-  return ys.length ? ys[ys.length - 1] : now.getFullYear();
-}
-/** app.js appliedDue — la part de chacun figée à l'application (`applied.byOwner`, clé = id du
- *  copropriétaire). L'app recalcule un budget appliqué avant cette colonne ; ici, sans charges.js,
- *  il compte 0 jusqu'à ce qu'un admin rouvre l'app (backfillAppliedByOwner). */
-function appliedDue(o, b) {
-  const bo = (b && b.applied && b.applied.byOwner) || {};
-  const r = bo[o.id] || bo[o.short];
-  return r ? Number(r.pay || 0) + Number(r.res || 0) : 0;
-}
-const round2 = (n) => Math.round(n * 100) / 100;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
- * app.js ownerLedger — le grand livre par copropriétaire, borné à l'exercice du dû (kept 1:1).
- *   report = versements d'avant l'exercice − dû des exercices appliqués d'avant
- *   solde  = report + versé de l'exercice − dû de l'exercice
- * Sans budget appliqué avant l'exercice, les versements antérieurs comptent entiers (rien ne dit
- * ce qui était dû) : c'est l'ancien calcul « versé cumulé − dû », à l'identique.
- * @param {Record<string, any>} [charges]  ls_settings.charges (budgets par exercice)
- * @returns Array<{short,name,year,due,verse,report,solde,...}>
+ * Le jour civil du syndic (app.js todayISO, lu dans son navigateur). Le pont tourne en UTC sur le
+ * VPS : sans fuseau, l'échéance d'un mois et le changement d'exercice basculeraient une ou deux
+ * heures plus tard que dans l'app.
  */
-export function ownerLedger(owners, transactions, ownerRules, charges = {}, now = new Date()) {
+export function todayIso(now = new Date(), timeZone = 'Europe/Brussels') {
+  try {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+        .formatToParts(now).map((x) => [x.type, x.value]),
+    );
+    if (p.year && p.month && p.day) return `${p.year}-${p.month}-${p.day}`;
+  } catch { /* fuseau inconnu de ce Node : date locale du serveur */ }
+  const two = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+}
+
+// calls.js PERIODS / cleanPeriodicity — nombre d'échéances par an ; rythme inconnu : mensuel.
+const PERIOD_N = { month: 12, quarter: 4, year: 1 };
+/** calls.js schedule — le dû annuel réparti en échéances au centime (le reste sur les premières),
+ *  dues le 1er du mois qui ouvre leur période : janvier, avril, juillet, octobre pour un trimestre. */
+function schedule(annual, periodicity) {
+  const n = PERIOD_N[periodicity] || 12, total = Math.round((Number(annual) || 0) * 100);
+  const base = Math.floor(total / n), rest = total - base * n;
+  return Array.from({ length: n }, (_, i) => ({ month: 1 + i * (12 / n), amount: (base + (i < rest ? 1 : 0)) / 100 }));
+}
+/**
+ * calls.js expectedToDate (kept 1:1, alerts.test.js compare les deux) — ce qui est attendu d'un
+ * copropriétaire à une date : une échéance compte une fois son mois TERMINÉ. En avril, trois
+ * mensualités sont attendues ; celle d'avril le sera le 1er mai. Exercice passé : tout ; à venir : rien.
+ */
+export function expectedToDate(annual, periodicity, year, today) {
+  return round2(echues(annual, periodicity, year, today).reduce((s, e) => s + e.amount, 0));
+}
+/** Les échéances échues à une date (leur nombre ne dépend que du rythme, pas du montant). */
+function echues(annual, periodicity, year, today) {
+  const rows = schedule(annual, periodicity), y = String(year), t = String(today || '');
+  const ty = t.slice(0, 4), tm = Number(t.slice(5, 7)) || 0;
+  return ty > y ? rows : ty < y ? [] : rows.filter((e) => e.month < tm);
+}
+
+const filled = (o) => !!o && typeof o === 'object' && Object.keys(o).length > 0;
+/** app.js ownerKey — la clé d'un copropriétaire dans dues_by_year et applied.byOwner. */
+const ownerKey = (o) => String(o.id || o.short || '');
+// Les budgets appliqués avant l'arrivée des identifiants rangent encore leur part par nom court.
+const dueRow = (dues, o) => { const r = dues[ownerKey(o)] || dues[o.short] || {}; return { pay: Number(r.pay) || 0, res: Number(r.res) || 0 }; };
+
+/**
+ * app.js ownerLedger — le grand livre par copropriétaire pour un exercice, par défaut l'année
+ * civile en cours (kept 1:1 : ownerLedger / ownerYear / ownerReport / duesOf / duesYear).
+ *
+ * Le dû est celui DE l'exercice, pas les provisions du moment (app.js duesOf) :
+ *   1. exercice clôturé (ls_periods.closed_at) : le dû figé dans ls_settings.dues_by_year ;
+ *   2. exercice des provisions en vigueur (l'année en cours, ou l'exercice ultérieur dont le
+ *      budget est déjà appliqué) : ls_owners.due_pay / due_res ;
+ *   3. sinon dues_by_year, sinon la part figée à l'application du budget (applied.byOwner) ;
+ *   4. sinon inconnu : dû 0, `dueKnown` false.
+ *
+ *   versé   = entrées validées attribuées au copropriétaire, datées de l'exercice, sur les deux
+ *             comptes de l'ACP (pay, res) — un mouvement « hors comptes » (ext) n'en est pas un
+ *   report  = solde laissé par les exercices précédents dont le dû est connu, 0 sinon
+ *   solde   = report + versé − dû de l'année : ce qui reste à recevoir d'ici la fin de l'exercice
+ *   attendu = les échéances échues à ce jour, selon le rythme de chacun (expectedToDate)
+ *   retard  = attendu − versé − report, s'il est positif : ce qui devrait déjà être payé
+ *
+ * « En retard » se dit du retard, jamais du solde : en cours d'année le solde est négatif pour
+ * tout le monde, puisqu'il reste des échéances à venir. Le seuil (0,99 €) est celui de l'app.
+ *
+ * @param {{owners?:any[], transactions?:any[], ownerRules?:Record<string,string>,
+ *          charges?:Record<string,any>, duesByYear?:Record<string,any>, periods?:any[]}} data
+ *        charges = budgets par exercice ; duesByYear = ls_settings.dues_by_year ;
+ *        periods = ls_periods (year, closed_at).
+ * @param {{now?:Date, year?:number}} [opts]
+ * @returns Array<{short,name,year,due,dueKnown,verse,report,expected,echeances,retard,enRetard,solde,...}>
+ *          `echeances` (propre au pont) = le nombre d'échéances échues : il date l'alerte « impayé ».
+ */
+export function ownerLedger(data = {}, opts = {}) {
+  const { owners = [], transactions = [], ownerRules = {} } = data;
+  const charges = data.charges || {}, duesByYear = data.duesByYear || {}, periods = data.periods || [];
+  const today = todayIso(opts.now || new Date());
+  const yearNow = Number(today.slice(0, 4)), y = Number(opts.year) || yearNow;
+
+  const applied = appliedYears(charges);
+  const duesYear = Math.max(yearNow, applied.length ? applied[applied.length - 1] : 0);
+  const closed = (k) => periods.some((p) => Number(p.year) === k && p.closed_at);
+  const duesNow = Object.fromEntries(owners.map((o) => [ownerKey(o), { pay: round2(o.due_pay), res: round2(o.due_res) }]));
+  const duesOf = (k) => {
+    const rec = duesByYear[k];
+    if (closed(k) && filled(rec)) return rec;      // clôturé : le dû figé fait foi
+    if (k === duesYear) return duesNow;            // l'exercice des provisions en vigueur
+    if (filled(rec)) return rec;
+    const b = charges[k];
+    return b && b.applied && filled(b.applied.byOwner) ? b.applied.byOwner : null;
+  };
+
   // Les brouillons sont exclus : un relevé déposé mais pas encore validé n'est pas de l'argent
   // reçu. Le compter effacerait l'alerte « impayé » d'un copropriétaire sur la foi d'un import
   // que le syndic peut encore écarter.
-  const alive = transactions.filter((t) => !t.deleted_at && !t.draft);
-  const y = ledgerYear(charges, now), from = `${y}-01-01`, to = `${y}-12-31`, prevEnd = `${y - 1}-12-31`;
-  const prior = appliedYears(charges).filter((k) => k < y);
-  const total = (rows) => rows.reduce((a, t) => a + Number(t.amount), 0);
+  const paidBy = new Map();   // nom court → [{iso, account, amount}]
+  for (const t of transactions) {
+    if (t.deleted_at || t.draft || !(Number(t.amount) > 0)) continue;
+    if (t.account !== 'pay' && t.account !== 'res') continue;
+    const short = ownerOfTx(t, owners, ownerRules);
+    if (!short) continue;
+    if (!paidBy.has(short)) paidBy.set(short, []);
+    // tx_date vide : dans aucun exercice, comme dans l'app (parseDate qui échoue → iso '').
+    paidBy.get(short).push({ iso: String(t.tx_date || '').slice(0, 10), account: t.account, amount: Number(t.amount) });
+  }
+  /** app.js ownerYear — versé et dû sur un exercice, compte par compte. due = null : dû inconnu. */
+  const ownerYear = (o, k) => {
+    const dues = duesOf(k), from = `${k}-01-01`, to = `${k}-12-31`;
+    const paid = (acct) => round2((paidBy.get(o.short) || [])
+      .reduce((a, t) => a + (t.account === acct && t.iso >= from && t.iso <= to ? t.amount : 0), 0));
+    return { due: dues ? dueRow(dues, o) : null, paid: { pay: paid('pay'), res: paid('res') } };
+  };
+  /** app.js ownerReport — retard (négatif) ou avance (positif) laissés par les exercices
+   *  précédents, en remontant tant que leur dû est connu. null si le précédent ne l'est pas. */
+  const ownerReport = (o) => {
+    let r = 0, n = 0;
+    for (let k = y - 1; k >= 2000 && n < 30; k--) {
+      const s = ownerYear(o, k);
+      if (!s.due) break;
+      r += s.paid.pay + s.paid.res - (s.due.pay + s.due.res);
+      n++;
+    }
+    return n ? round2(r) : null;
+  };
+
   return owners.map((o) => {
-    const due = Number(o.due_pay || 0) + Number(o.due_res || 0);
-    const mine = alive.filter((t) => Number(t.amount) > 0 && ownerOfTx(t, owners, ownerRules) === o.short);
-    // tx_date vide : antérieure à tout, comme dans l'app (parseDate qui échoue → iso '').
-    const verse = total(mine.filter((t) => { const d = String(t.tx_date || ''); return d >= from && d <= to; }));
-    const before = total(mine.filter((t) => String(t.tx_date || '') <= prevEnd));
-    const report = round2(before - prior.reduce((a, k) => a + appliedDue(o, charges[k]), 0));
-    return { ...o, year: y, due, verse, report, solde: round2(report + verse - due) };
+    const s = ownerYear(o, y), rep = ownerReport(o);
+    const duePay = s.due ? s.due.pay : 0, dueRes = s.due ? s.due.res : 0, due = round2(duePay + dueRes);
+    const verse = round2(s.paid.pay + s.paid.res), report = rep === null ? 0 : rep;
+    const expected = round2(expectedToDate(duePay, o.periodicity, y, today) + expectedToDate(dueRes, o.periodicity, y, today));
+    const retard = Math.max(0, round2(expected - verse - report));
+    return {
+      ...o, year: y, duePay, dueRes, due, dueKnown: !!s.due, versePay: s.paid.pay, verseRes: s.paid.res, verse,
+      report, reportKnown: rep !== null, expected, echeances: echues(0, o.periodicity, y, today).length,
+      retard, enRetard: retard > 0.99, solde: round2(report + verse - due),
+    };
   });
 }
 
@@ -120,25 +221,30 @@ function toIsoDate(v) {
 
 /**
  * Build the alert list Jarvis expects (docs/08-lazysyndic-bridge.md §1).
- * @param {{owners:any[], transactions:any[], reminders?:any[], timeline?:any[], ownerRules?:Record<string,string>, charges?:Record<string,any>}} data
+ * @param {{owners:any[], transactions:any[], reminders?:any[], timeline?:any[], ownerRules?:Record<string,string>, charges?:Record<string,any>, duesByYear?:Record<string,any>, periods?:any[], bankLinks?:any[]}} data
  * @param {{now?:Date, documentWindowDays?:number}} [opts]
  * @returns Array<{id,kind,title,detail?,amountCents?,dueDate?}>
  */
 export function buildAlerts(data, opts = {}) {
-  const { owners = [], transactions = [], reminders = [], timeline = [], ownerRules = {}, charges = {} } = data;
+  const { reminders = [], timeline = [] } = data;
   const now = opts.now || new Date();
   const documentWindowDays = opts.documentWindowDays ?? 60;
   const alerts = [];
 
-  // 1) Impayés — late owners (solde < −0.005), one stable alert per owner.
-  for (const o of ownerLedger(owners, transactions, ownerRules, charges, now)) {
-    if (o.solde < -0.005) {
+  // 1) Impayés — un copropriétaire EN RETARD : des échéances échues restent impayées. Le reste à
+  //    verser de l'exercice (solde négatif) n'est pas un impayé.
+  //    L'identifiant porte l'exercice et le nombre d'échéances échues : Jarvis ne garde qu'une
+  //    alerte par identifiant et ne la met jamais à jour. Avec un identifiant par copropriétaire,
+  //    un retard réglé puis revenu, ou qui grossit d'une échéance, ne serait plus jamais signalé.
+  //    Stable tant qu'aucune nouvelle échéance n'échoit : pas de doublon d'un passage à l'autre.
+  for (const o of ownerLedger(data, { now })) {
+    if (o.enRetard) {
       alerts.push({
-        id: `pay-${o.id || o.short}`,
+        id: `pay-${o.id || o.short}-${o.year}-${o.echeances}`,
         kind: 'overdue_payment',
-        title: `Impayé — ${o.name || o.short} : ${eur(-o.solde)} en attente`,
-        detail: `Exercice ${o.year} · dû ${eur(o.due)} · versé ${eur(o.verse)}${Math.abs(o.report) >= 0.005 ? ` · report ${o.report < 0 ? '−' : '+'}${eur(Math.abs(o.report))}` : ''}`,
-        amountCents: Math.round(-o.solde * 100),
+        title: `Impayé — ${o.name || o.short} : ${eur(o.retard)} en retard`,
+        detail: `Exercice ${o.year} · attendu à ce jour ${eur(o.expected)} (sur ${eur(o.due)} pour l'année) · versé ${eur(o.verse)}${Math.abs(o.report) >= 0.005 ? ` · report ${o.report < 0 ? '−' : '+'}${eur(Math.abs(o.report))}` : ''}`,
+        amountCents: Math.round(o.retard * 100),
       });
     }
   }

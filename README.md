@@ -147,9 +147,10 @@ se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait d
 précédente. Les dépenses qu'aucun poste ne reprend sont signalées sous le tableau. La
 prévision est répartie par copropriétaire au centime près, et « Appliquer aux provisions »
 en fait le « dû — paiement » de chacun : le suivi des paiements et des retards s'y fie. Le dû
-est annuel, le versé l'est aussi : le suivi compare le dû de l'exercice (celui du dernier
-budget appliqué, sinon l'année civile) aux versements datés de cet exercice, et reporte ce qui
-précède, net du dû des exercices déjà appliqués (`ownerLedger`, même règle dans le bridge).
+est annuel, le versé l'est aussi : le suivi compare le dû de l'exercice en cours (l'année
+civile) aux versements datés de cet exercice, et reporte ce que les exercices précédents ont
+laissé quand leur dû est connu (`ownerLedger`, même règle dans le bridge ; voir « Versements des
+copropriétaires et dû par exercice »).
 L'Annexe 4 du rapport d'AG reprend ce budget dès qu'il a des postes.
 
 **Fonds de réserve** (même écran, carte suivante) : des postes à constituer sur le compte
@@ -251,8 +252,10 @@ d'AG) suit la même règle, pour l'exercice en cours par défaut :
   dit du retard, jamais du solde** : en cours d'année, le solde est négatif pour tout le monde ;
 - la relance réclame le retard, et l'appel de fonds d'un exercice reprend le dû de cet exercice.
 
-Le pont Jarvis (`bridge/alerts.js`) n'a pas encore cette règle : il compare toujours un solde
-annuel sur l'exercice du dernier budget appliqué.
+Le pont Jarvis (`bridge/alerts.js`, `bridge/dashboard.js`) applique la même règle, portée à
+l'identique : même dû par exercice, mêmes échéances échues (jour civil de Bruxelles), même seuil.
+Son alerte « impayé » réclame le retard, et son identifiant change à chaque nouvelle échéance
+impayée (`pay-<copropriétaire>-<exercice>-<échéances échues>`).
 
 Prérequis : lancer [`supabase/exercices-du.sql`](supabase/exercices-du.sql) à la main (une colonne
 `dues_by_year`). Sans lui, la vue fonctionne pour l'exercice en cours et prévient que le dû d'un

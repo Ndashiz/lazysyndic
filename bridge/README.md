@@ -16,12 +16,22 @@ implementing the pull contract in Jarvis's `docs/08-lazysyndic-bridge.md`.
 
 | Jarvis alert `kind` | Source | Logic |
 |---|---|---|
-| `overdue_payment` | `ls_owners` + `ls_transactions` | Ported from `app.js` `ownerLedger()`: `due = due_pay + due_res`, `verse = Σ` positive tx attributed to the owner (explicit `owner` col, else `detectOwner` heuristic). The verse is bounded to the exercise of the due (last applied budget in `ls_settings.charges`, else the calendar year); earlier payments net of earlier applied dues become a `report`. Late when `solde = report + verse − due < 0`. |
+| `overdue_payment` | `ls_owners` + `ls_transactions` + `ls_settings.dues_by_year` + `ls_periods` | Ported from `app.js` `ownerLedger()`, for the current calendar year. The **due is the one of that exercise** (`duesOf`): frozen in `dues_by_year` once the exercise is closed, `due_pay + due_res` when the provisions in force are for that year, else `dues_by_year`, else the applied budget's `byOwner`. `verse = Σ` validated positive tx of the year on `pay`/`res` attributed to the owner (explicit `owner` col, else `detectOwner`). `report` = what earlier exercises left, as long as their due is known. `expected` = instalments whose month has **ended** (`calls.js` `expectedToDate`, per owner `periodicity`). **Late when `retard = expected − verse − report > 0.99 €`** — never on the balance: mid-year `solde = report + verse − due` is negative for everyone, it is what remains to be paid. `amountCents` = the overdue amount. |
 | `notice` | `ls_reminders` | Open reminders (`done = false`). |
 | `document` | `ls_timeline` | Manual entries newer than `DOCUMENT_WINDOW_DAYS` (heuristic — tune or disable). |
 
 > The impayés logic mirrors the dashboard exactly today. If LazySyndic's attribution
-> heuristic (`detectOwner`) changes in `app.js`, mirror it in `alerts.js` (kept 1:1).
+> heuristic (`detectOwner`), its ledger (`ownerLedger`, `duesOf`) or its schedule
+> (`calls.js` `expectedToDate`) change, mirror them in `alerts.js` (kept 1:1; a test compares
+> the schedule with `calls.js` to the cent).
+>
+> **Alert id** — `pay-<owner id>-<year>-<number of overdue instalments>`. Jarvis keeps one alert
+> per id and never updates it, so the id changes each time one more instalment falls overdue
+> (a new alert with the new amount) and stays the same in between (no duplicate). Alerts already
+> stored in Jarvis under the old per-owner id (`pay-<owner id>`) stay there until marked read.
+>
+> **Day** — "today" is the civil day in Europe/Brussels (`todayIso`), not the server's UTC day,
+> so an instalment falls overdue at the same moment as in the app.
 
 ## Endpoints
 
@@ -37,6 +47,10 @@ All `/api/jarvis/*` routes require `Authorization: Bearer $BRIDGE_TOKEN`.
 
   The derivations live in `dashboard.js`, ported from `app.js` (`balance` / `receivables` /
   `ownerLedger` / `donutData` + the reserve banner) and unit-tested in `dashboard.test.js`.
+  In the who-pays-what rows, `balanceCents` is what remains to be paid for the exercise,
+  `expectedCents` / `overdueCents` the instalments already due and their unpaid part, and
+  `late` is true only when something is overdue (same rule as the alerts). `receivableCents`
+  is the sum of the negative balances, i.e. what is still to come in before year end.
   Drafts and soft-deleted rows move no balance, exactly as in the app: a statement that has
   been uploaded but not yet validated is not money in the accounts.
 

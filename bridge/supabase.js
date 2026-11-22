@@ -45,6 +45,20 @@ export function createRest(url, serviceRoleKey) {
   };
 
   /**
+   * Les copropriétaires. `ogm` (communication structurée) et `periodicity` (rythme des appels)
+   * sont arrivées avec calls.sql : sans ces colonnes, PostgREST répond 400 sur toute la requête,
+   * on retombe sur la liste d'avant. Sans rythme, le suivi compte en mensualités.
+   */
+  const OWNER_COLS = 'id,short,name,quotite,color,due_pay,due_res,sort';
+  const loadOwners = () =>
+    select('ls_owners', `select=${OWNER_COLS},ogm,periodicity`)
+      .catch(() => select('ls_owners', `select=${OWNER_COLS},ogm`))
+      .catch(() => select('ls_owners', `select=${OWNER_COLS}`));
+  /** Les exercices et leur clôture : un exercice clôturé garde le dû figé (alerts.js ownerLedger).
+   *  Table optionnelle (periods.sql). */
+  const loadPeriods = () => select('ls_periods', 'select=year,closed_at').catch(() => []);
+
+  /**
    * Les budgets par exercice, dans la forme que ownerLedger attend ({ "2026": {status, applied} }) :
    * la table ls_budgets (supabase/budgets.sql) ; tant qu'elle n'existe pas, l'ancien jsonb
    * ls_settings.charges passé en `fallback`. Le pont lit en membre : seuls les budgets publiés lui
@@ -58,21 +72,21 @@ export function createRest(url, serviceRoleKey) {
 
   /** Fetch exactly the columns the alert builder needs, in parallel. */
   async function loadForAlerts() {
-    const [owners, transactions, settingsRows, reminders, timeline, bankLinks] = await Promise.all([
-      // `ogm` (communication structurée, calls.sql) est arrivée après : sans la colonne, repli sur l'ancienne liste.
-      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort,ogm').catch(() =>
-        select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort')),
+    const [owners, transactions, settingsRows, reminders, timeline, bankLinks, periods] = await Promise.all([
+      loadOwners(),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,owner,deleted_at,draft&deleted_at=is.null'),
-      // `charges` (budgets appliqués) est arrivée après `owner_rules` : sans la colonne, PostgREST
-      // répond 400 sur toute la requête, on retombe sur les règles seules.
-      select('ls_settings', 'select=owner_rules,charges&id=eq.1').catch(() =>
-        select('ls_settings', 'select=owner_rules&id=eq.1'),
-      ),
+      // `charges` (budgets appliqués) puis `dues_by_year` (dû par exercice, exercices-du.sql) sont
+      // arrivées après `owner_rules` : sans la colonne, PostgREST répond 400 sur toute la requête,
+      // on retombe d'un cran à chaque fois.
+      select('ls_settings', 'select=owner_rules,charges,dues_by_year&id=eq.1')
+        .catch(() => select('ls_settings', 'select=owner_rules,charges&id=eq.1'))
+        .catch(() => select('ls_settings', 'select=owner_rules&id=eq.1')),
       select('ls_reminders', 'select=id,tx,due,done'),
       // ls_timeline is optional (may not be migrated yet) — tolerate a 404-ish empty.
       select('ls_timeline', 'select=id,event_date,title,description,kind').catch(() => []),
       // Synchro bancaire : optionnelle (table absente tant que le baseline n'est pas relancé).
       select('ls_bank_links', 'select=id,status,aspsp_name,valid_until,error,last_sync_at,last_ok_at,created_at&order=created_at.desc&limit=10').catch(() => []),
+      loadPeriods(),
     ]);
     const settings = settingsRows[0] || {};
     const charges = await loadBudgets(settings.charges);
@@ -85,8 +99,11 @@ export function createRest(url, serviceRoleKey) {
         id: r.id, date: r.event_date, title: r.title, description: r.description, kind: r.kind || 'manual',
       })),
       ownerRules: settings.owner_rules || {},
-      // Les budgets appliqués : le versé se borne à l'exercice du dû (alerts.js ownerLedger).
+      // Le dû de chaque exercice (alerts.js ownerLedger) : les budgets appliqués, le dû
+      // enregistré par exercice, et les clôtures qui le figent.
       charges,
+      duesByYear: settings.dues_by_year || {},
+      periods: periods || [],
     };
   }
 
@@ -101,25 +118,27 @@ export function createRest(url, serviceRoleKey) {
    * de réserve) — sans lesquels un solde n'est qu'une somme de mouvements.
    */
   async function loadForDashboard() {
-    const [owners, transactions, settingsRows, reminders] = await Promise.all([
-      select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort,ogm').catch(() =>
-        select('ls_owners', 'select=id,short,name,quotite,color,due_pay,due_res,sort')),
+    const [owners, transactions, settingsRows, reminders, periods] = await Promise.all([
+      loadOwners(),
       select('ls_transactions', 'select=tx_date,tiers,note,amount,account,high,owner,deleted_at,draft&deleted_at=is.null'),
       // `copro_name` a été ajoutée après coup : sur un déploiement qui n'a pas la colonne,
       // PostgREST répond 400 sur toute la requête. On retombe sur les colonnes du schéma
       // d'origine plutôt que de faire échouer la page entière pour un titre.
-      select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name,charges&id=eq.1')
+      select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name,charges,dues_by_year&id=eq.1')
+        .catch(() => select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name,charges&id=eq.1'))
         .catch(() => select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules,copro_name&id=eq.1'))
         .catch(() => select('ls_settings', 'select=opening_pay,opening_res,reserve_target,owner_rules&id=eq.1')),
       select('ls_reminders', 'select=id,tx,due,done,sort'),
+      loadPeriods(),
     ]);
     const settings = (settingsRows || [])[0] || {};
-    settings.charges = await loadBudgets(settings.charges);   // dashboard.js lit settings.charges
+    settings.charges = await loadBudgets(settings.charges);   // dashboard.js lit settings.charges et settings.dues_by_year
     return {
       owners: (owners || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
       transactions: transactions || [],
       reminders: (reminders || []).sort((a, b) => (a.sort || 0) - (b.sort || 0)),
       settings,
+      periods: periods || [],
       // Les mêmes règles apprises que pour les alertes : sans elles, un versement attribué à la
       // main dans LazySyndic redeviendrait « non attribué » ici, et le tableau « qui paie quoi »
       // contredirait l'alerte « impayé » construite sur les mêmes lignes.
