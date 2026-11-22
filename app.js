@@ -1025,11 +1025,13 @@ function renderAcctInfo(acct){
       <div class="l" style="font-size:12px;color:var(--ink-faint)">Objectif du fonds de réserve</div>
       <input class="fld" id="acctTarget" ${ed?'':'disabled'} style="width:150px" value="${eur(state.reserveTarget||0)}">
       <span class="sub">cible fixée en AG — pilote la jauge de l'accueil</span></div>` : ''}
+    ${bankRefreshHtml(acct)}
     <div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${reconHtml}<span style="margin-left:auto;display:flex;gap:14px;flex-wrap:wrap"><button class="lk" id="acctStmt">Relevé de compte (PDF)</button>${ed?`<button class="lk" id="acctReset" style="color:var(--coral)">↺ Réinitialiser ce compte</button>`:''}</span></div>`;
   box.querySelector('#acctStmt')?.addEventListener('click', ()=>window.LazySyndic.openStatement && window.LazySyndic.openStatement(acct));
   box.querySelectorAll('.recon-see').forEach(b=>b.onclick=()=>{ const c=reconCands[+b.dataset.i]; if(c && c.t && c.t.t) showTxDetail(c.t.t); });
   box.querySelectorAll('.recon-restore').forEach(b=>b.onclick=()=>{ const c=reconCands[+b.dataset.i]; if(c && c.t && c.t.id) restoreTrash([c.t.id]); });
   box.querySelectorAll('.recon-drafts').forEach(b=>b.onclick=()=>goToScreen('imp'));
+  box.querySelector('#acctSync')?.addEventListener('click', ()=>{ const l=bankCurrent(); if (l && l.status==='active' && !bank.busy) bankSyncNow(l); });
   if (ed){
     const ib=box.querySelector('#acctIban');
     ib.onchange=()=>{ const v=ib.value.trim(); state.ibans=state.ibans||{}; state.ibans[acct]=v;
@@ -2124,6 +2126,14 @@ async function bankLoad(){
   // Historique : table arrivée après ls_bank_links. Absente, la carte le dit au lieu d'échouer.
   try { bank.syncs = await window.LS.db.bankSyncs(); bank.syncsMissing = false; }
   catch(e){ bank.syncs = []; bank.syncsMissing = /ls_bank_syncs|schema cache|does not exist|relation/i.test(e.message||''); }
+  bankAcctRefresh();
+}
+/** La fiche du compte affiche le solde de la banque, l'heure de la dernière synchro et le bouton :
+ *  elle se redessine quand l'état de la synchro change, sauf pendant une saisie dans ses champs. */
+function bankAcctRefresh(){
+  const info = document.getElementById('acctInfo'), ae = document.activeElement;
+  if (!info || (ae && info.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) return;
+  try { renderAcctInfo(curAcct); } catch(e){ console.warn('fiche du compte', e.message||e); }
 }
 
 /** Historique des synchros (ls_bank_syncs) : une ligne par passage du pont, réussi ou non. */
@@ -2155,6 +2165,47 @@ function bankHistoryHtml(){
 function wireBankHistory(box){
   const d = box.querySelector('#bkHistory');
   if (d) d.ontoggle = ()=>{ bank.historyOpen = d.open; };
+}
+/** Dernière synchro bancaire d'un compte (pay / res) : le solde lu à la banque et l'heure de la
+ *  dernière synchro réussie ; `failedAt` si une tentative plus récente a échoué. null sans synchro. */
+function bankRefresh(acct){
+  const l = (bank.links||[]).find(x=>x.status==='active') || null;
+  const a = l && (l.accounts||[]).find(x=>bankAcctOf(l, x)===acct);
+  const okSync = (bank.syncs||[]).find(s=>s.ok && s.balances && s.balances[acct]!=null);
+  const at = (l && a && l.last_ok_at) || (okSync && okSync.at) || '';
+  if (!at) return null;
+  const amount = a && a.balance ? Number(a.balance.amount) : okSync ? Number(okSync.balances[acct]) : null;
+  const failedAt = l && l.last_sync_at && Date.parse(l.last_sync_at) - Date.parse(at) > 1000 ? l.last_sync_at : '';
+  return { at, amount, bank:(l && l.aspsp_name) || 'la banque', failedAt, live:!!(l && a) };
+}
+/** « 22/11/2026 à 14:05 » : l'horodatage d'une synchro, à la minute. */
+const bankWhen = iso => { const d = new Date(iso);
+  return `${d.toLocaleDateString('fr-BE', {day:'2-digit', month:'2-digit', year:'numeric'})} à ${d.toLocaleTimeString('fr-BE', {hour:'2-digit', minute:'2-digit'})}`; };
+/** La ligne « banque » de la fiche d'un compte : le solde lu à la banque, l'horodatage de la dernière
+ *  synchro, l'écart avec le solde calculé expliqué par les mouvements encore à valider, et le bouton
+ *  qui force une synchro. `canSync` : syndic en ligne (le pont n'écoute que lui). */
+function bankRefreshHtml(acct, canSync = bankAvailable()){
+  const r = bankRefresh(acct); if (!r) return '';
+  const ago = bankAgo(r.at), stamp = bankWhen(r.at);
+  let gap = '';
+  if (r.amount!=null){
+    const diff = +(balance(acct) - r.amount).toFixed(2);
+    const drafts = (state.draftTx||[]).filter(t=>t.account===acct), dSum = +sum(drafts.map(t=>+t.amount||0)).toFixed(2);
+    const rest = +(diff + dSum).toFixed(2);
+    gap = Math.abs(diff) < 0.01 ? ` <span class="status success">= solde calculé</span>`
+      : ` <span class="status ${Math.abs(rest)<0.01?'warning':'danger'}">Écart ${diff>0?'+':'−'}${eur(Math.abs(diff))}</span> <span class="sub">${drafts.length
+          ? `${drafts.length} mouvement${drafts.length>1?'s':''} à valider (${signed(dSum)})${Math.abs(rest)<0.01 ? ' : l’écart disparaît à la validation' : `, reste ${rest>0?'+':'−'}${eur(Math.abs(rest))} inexpliqué`} <button class="lk recon-drafts">Voir</button>`
+          : 'aucun mouvement en attente : une ligne manque, est en trop, ou le solde d’ouverture est à revoir'}</span>`;
+  }
+  const syncing = bank.busy==='sync';
+  const btn = canSync && r.live ? `<button class="btn btn-ghost btn-sm" id="acctSync" type="button" style="margin-left:auto" ${bank.busy?'disabled':''} title="Demande au pont de relire la banque tout de suite, sans attendre la synchro automatique (moins d’une minute)">${syncing?'Synchro en cours…':'↻ Synchroniser maintenant'}</button>` : '';
+  return `<div style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span class="l" style="font-size:12px;color:var(--ink-faint)">Solde ${escH(r.bank)}</span>
+    ${r.amount!=null?`<b style="font-variant-numeric:tabular-nums">${eur(r.amount)}</b>`:''}
+    <span class="sub" title="Dernière lecture réussie de la banque par Enable Banking">· dernière synchro le <b>${stamp}</b>${ago.startsWith('le ')?'':` (${ago})`}${r.live?'':' · connexion inactive'}</span>${gap}
+    ${r.failedAt?`<span class="sub" style="color:var(--danger)">· tentative du ${bankWhen(r.failedAt)} en échec</span>`:''}
+    ${bank.timeout?`<span class="sub" style="color:var(--danger)">· le pont de synchro ne répond pas</span>`:''}
+    ${btn}</div>`;
 }
 const bankStamp = () => new Date().toISOString();
 const bankDay = iso => iso ? new Date(iso).toLocaleDateString('fr-BE') : '—';
@@ -2281,7 +2332,7 @@ async function bankSyncNow(l){
   bankWait(l.id, x=>x.last_sync_at && Date.parse(x.last_sync_at) >= Date.parse(asked) - 1000, 180000, async x=>{
     const n = Object.values((x.last_sync||{}).added||{}).reduce((a,b)=>a+b, 0);
     if (x.last_sync && x.last_sync.error) showToast('Synchro en échec : '+x.last_sync.error, 'err');
-    else showToast(n ? `${n} nouveau(x) mouvement(s) — relevé à valider ci-dessus` : 'Synchro faite — rien de nouveau');
+    else showToast(n ? `${n} nouveau(x) mouvement(s) : relevé à valider dans « Importer des relevés »` : 'Synchro faite : rien de nouveau à la banque', '', 5000);
     if (n) await bankReloadData();
   });
 }
@@ -2294,6 +2345,7 @@ async function bankSetStatus(l, patch, waitFor){
 }
 
 function renderBankCard(){
+  bankAcctRefresh();
   const box = document.getElementById('bankSync');
   if (!box) return;
   if (!bankAvailable()){ box.innerHTML = ''; return; }
@@ -2376,13 +2428,13 @@ function renderBankCard(){
         <option value="pay" ${v==='pay'?'selected':''}>💳 Compte de paiement</option>
         <option value="res" ${v==='res'?'selected':''}>🏦 Compte de réserve</option>
         <option value="skip" ${v==='skip'?'selected':''}>Ignorer ce compte</option></select></td>
-      <td class="sub">${a.synced_to ? 'à jour au '+escH(bankDay(a.synced_to)) : (target ? 'première synchro à venir' : 'pas synchronisé')}</td>
+      <td class="sub">${a.synced_to ? 'synchro le '+escH(l.last_ok_at ? bankWhen(l.last_ok_at) : bankDay(a.synced_to)) : (target ? 'première synchro à venir' : 'pas synchronisé')}</td>
       <td class="num">${a.balance ? eur(a.balance.amount) : '—'}</td></tr>`;
   }).join('');
   const ls = l.last_sync || {};
   const added = Object.values(ls.added||{}).reduce((x,y)=>x+y, 0);
   const lastLine = l.last_sync_at
-    ? `Dernière synchro ${bankAgo(l.last_sync_at)} : ${ls.error ? '<b style="color:var(--danger)">en échec</b>' : (added ? `<b>${added}</b> nouveau(x) mouvement(s)` : 'rien de nouveau')}${(ls.known||ls.matched) ? ` · ${(ls.known||0)+(ls.matched||0)} déjà connu(s)` : ''}.`
+    ? `Dernière synchro le <b>${bankWhen(l.last_sync_at)}</b>${bankAgo(l.last_sync_at).startsWith('le ')?'':` (${bankAgo(l.last_sync_at)})`} : ${ls.error ? '<b style="color:var(--danger)">en échec</b>' : (added ? `<b>${added}</b> nouveau(x) mouvement(s)` : 'rien de nouveau')}${(ls.known||ls.matched) ? ` · ${(ls.known||0)+(ls.matched||0)} déjà connu(s)` : ''}.`
     : 'Première synchro en cours…';
   const unmapped = (l.accounts||[]).some(a=>!bankAcctOf(l, a) && (l.acct_map||{})[a.hash||a.uid]!=='skip');
   box.innerHTML = wrap(soon ? badge(daysLeft<0?'Expirée':`Expire dans ${Math.max(0,daysLeft)} j`,'b-late') : badge('Active','b-ok'), `
