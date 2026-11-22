@@ -1999,7 +1999,24 @@ wireDrop(document.getElementById('acctDrop'));
    attend passe avant ce qu'on s'apprête à ajouter. */
 let openDraftV = null;   // relevé déplié pour vérification
 
+/** La bannière « en attente de validation » : un mouvement importé ou synchronisé ne compte dans
+ *  aucun solde tant que le syndic ne l'a pas validé. On le dit en haut de chaque écran, sauf sur
+ *  Import où la liste est juste là (masquée en CSS). Redessinée avec la liste des relevés en attente. */
+function renderDraftBanner(){
+  const box = document.getElementById('draftBanner'); if (!box) return;
+  const d = state.draftTx || [];
+  if (!d.length){ box.innerHTML = ''; return; }
+  const part = a => { const r = d.filter(t=>t.account===a);
+    return r.length ? `${a==='res'?'compte de réserve':'compte de paiement'} : ${r.length} (${signed(+sum(r.map(t=>+t.amount||0)).toFixed(2))})` : ''; };
+  const n = d.length, pl = n>1, ed = canWrite();
+  box.innerHTML = `<div class="alert" role="status"><span class="ic">⏳</span>
+    <div style="flex:1 1 220px"><b>${n} mouvement${pl?'s':''} en attente de validation</b> <span class="draft-detail">· ${['pay','res'].map(part).filter(Boolean).join(' · ')}</span>
+      <div style="font-weight:400">${pl?'Ils ne comptent':'Il ne compte'} pas encore dans les soldes ni dans les listes des comptes${ed?'':` : le syndic doit ${pl?'les':'le'} valider`}.</div></div>
+    ${ed?'<button class="btn btn-primary btn-sm" id="draftBannerGo" type="button">Vérifier et valider</button>':''}</div>`;
+  box.querySelector('#draftBannerGo')?.addEventListener('click', ()=>goToScreen('imp'));
+}
 function renderPendingImports(){
+  renderDraftBanner();
   const box = document.getElementById('pendingImports');
   if (!box) return;
   const groups = pendingImports();
