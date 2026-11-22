@@ -3910,8 +3910,10 @@ function chargesBudget(y){ const b=(state.charges||{})[y]||{};
 function hideChargesExtras(){
   const res=document.getElementById('resCard'); if(res){ res.innerHTML=''; res.style.display='none'; }
   const t=document.getElementById('chgSplit'), bar=document.getElementById('chgApply'), title=document.getElementById('chgSplitTitle');
-  [t&&t.closest('.card'), bar, title].forEach(el=>{ if(el) el.style.display='none'; });
-  if(t) t.innerHTML=''; if(bar) bar.innerHTML='';
+  const o=document.getElementById('chgOwners'), oTitle=document.getElementById('chgOwnersTitle');
+  [t&&t.closest('.card'), bar, title, o&&o.closest('.card'), oTitle].forEach(el=>{ if(el) el.style.display='none'; });
+  if(t) t.innerHTML=''; if(bar) bar.innerHTML=''; if(o) o.innerHTML='';
+  const oNote=document.getElementById('chgOwnersNote'); if(oNote) oNote.textContent='';
 }
 const CHG_MON_SHORT = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const ymLabel = s => { const m=/^(\d{4})-(\d{2})$/.exec(s||''); return m ? {m:CHG_MON_SHORT[+m[2]-1], y:m[1]} : null; };
@@ -4092,6 +4094,14 @@ function ensureChargesCss(){
     #chgSplit tr.chg-group td{background:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding-top:8px;padding-bottom:8px}
     #chgSplit th .chg-sub{font-weight:400;text-transform:none;letter-spacing:0}
     #chgSplit td .chg-sub{white-space:normal}
+    #chgOwners th .chg-sub{font-weight:400;text-transform:none;letter-spacing:0}
+    #chgOwners th.emph{color:var(--primary)} #chgOwners td.emph{background:var(--secondary)}
+    /* le nom du copropriétaire reste visible quand le tableau défile sur un écran étroit */
+    #chgOwners th:first-child,#chgOwners td:first-child{position:sticky;left:0;z-index:1;background:var(--card);box-shadow:1px 0 0 var(--border)}
+    #chgOwners th:first-child{background:var(--background)}
+    #chgOwners .chg-evo{font-weight:700;white-space:nowrap}
+    #chgOwners .chg-evo.up{color:var(--warning-ink)} #chgOwners .chg-evo.down{color:var(--success)} #chgOwners .chg-evo.same{color:var(--ink-faint);font-weight:500}
+    #chgOwnersNote{font-size:12px;color:var(--ink-faint);background:var(--muted);padding:10px 14px;position:sticky;left:0}
     #chgApply{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 18px;font-size:13px}
     #chgApply .ok{color:var(--green-deep)}`;
   document.head.appendChild(s);
@@ -4211,6 +4221,7 @@ function renderCharges(){
       ${edit?`<button class="btn btn-ghost" id="chgAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste</button>`:''}
       ${edit&&seedable?`<button class="btn btn-ghost" id="chgSeed">${postes.length?`Ajouter les catégories de ${ref} sans poste`:`Proposer les postes depuis le réel ${ref}`}</button>`:''}
       ${edit&&!postes.length && !reserve.length && (prevB.postes.length||prevRes.length)?`<button class="btn btn-ghost" id="chgCopy">Reprendre le budget ${ref} (${[prevB.postes.length?`${prevB.postes.length} poste${prevB.postes.length>1?'s':''}`:'', prevRes.length?`${prevRes.length} de réserve en cours`:''].filter(Boolean).join(', ')})</button>`:''}
+      ${postes.length||reserve.length ? `<button class="btn btn-ghost" id="chgSeeOwners" title="Le total, la mensualité et l'évolution de chacun, sans rien publier">Voir par copropriétaire ↓</button>` : ''}
       ${pub ? `<button class="btn btn-ghost" id="chgUnpub">${bud.applied?`Annuler l'application et repasser en brouillon`:'Repasser en brouillon'}</button>` : (postes.length||reserve.length ? `<button class="btn btn-primary" id="chgPub">Publier le budget ${y}</button>` : '')}
     </div>`;
   const notes = [];
@@ -4228,6 +4239,7 @@ function renderCharges(){
   card.querySelector('#chgPrev').onclick=()=>{ chgYear=y-1; chgEdit=null; renderCharges(); };
   card.querySelector('#chgNext').onclick=()=>{ chgYear=y+1; chgEdit=null; renderCharges(); };
   card.querySelector('#chgUnpub')?.addEventListener('click', ()=>unpublishBudget(y));
+  card.querySelector('#chgSeeOwners')?.addEventListener('click', ()=>document.getElementById('chgOwnersTitle')?.scrollIntoView({behavior:'smooth', block:'start'}));
   if (edit){
     const upd=(i, patch)=>saveCharges(y, postes.map((p,k)=>k===i ? {...p, ...patch} : p));
     const updId=(id, patch)=>saveCharges(y, postes.map(p=>p.id===id ? {...p, ...patch} : p));
@@ -4364,7 +4376,62 @@ function renderReserve(y, postes, reserve){
   };
 }
 // Répartition de la prévision par copropriétaire, poste par poste, et écart avec le « dû » saisi.
+/* --- Par copropriétaire : ce que le budget représente pour chacun, et son évolution ---
+   Lisible dès le brouillon (aucune publication, aucune application aux provisions) : le total annuel
+   et la mensualité de chacun, puis l'écart en euros et en pour cent face aux budgets des exercices
+   précédents et face au dû aujourd'hui en vigueur. La répartition détaillée, poste par poste, reste
+   juste dessous. */
+// Ce que le budget d'un exercice donne à chacun : Map clé du copropriétaire → {total, pay, res} ;
+// null s'il n'y a pas de budget (ni poste ni réserve) pour cet exercice.
+function budgetOwnerTotals(y){
+  const b=(state.charges||{})[y];
+  if (!b || !((b.postes||[]).length || (b.reserve||[]).length)) return null;
+  try { const s=budgetSplit(y); return new Map(s.owners.map((o,i)=>[o.key, {total:s.total[i], pay:s.charges[i].annual, res:s.res[i].reserve}])); }
+  catch(e){ console.warn('budget '+y, e.message||e); return null; }
+}
+function renderChargesOwners(y){
+  const t=document.getElementById('chgOwners'), title=document.getElementById('chgOwnersTitle');
+  if (!t) return;
+  const b=budgetSplit(y), ow=b.owners, n=ow.length, bud=chargesBudget(y), pub=budgetPublished(bud);
+  const show=(b.postes.length>0 || b.reserve.length>0) && n>0;
+  [t.closest('.card'), title].forEach(el=>{ if(el) el.style.display = show ? '' : 'none'; });
+  if (!show){ t.innerHTML=''; return; }
+  if (title) title.textContent=`Par copropriétaire · budget ${y}${pub?'':' (brouillon)'}`;
+  // Références : les deux exercices précédents qui ont un budget, puis le dû en vigueur
+  const refs=[y-1, y-2].map(py=>({y:py, by:budgetOwnerTotals(py), pub:budgetPublished(chargesBudget(py))})).filter(r=>r.by);
+  const cur=new Map(ownersOf().map(o=>[ownerKey(o), o]));
+  const due=ow.map(o=>cur.has(o.key) ? Math.round(((+cur.get(o.key).due_pay||0)+(+cur.get(o.key).due_res||0))*100)/100 : null);
+  const hasDue=due.some(v=>v!=null && v>0);
+  const qTot=sum(ow.map(o=>+o.q||0));
+  const pctTxt = p => p==null ? '' : `${p>0?'+':p<0?'−':''}${Math.abs(p).toLocaleString('fr-BE',{minimumFractionDigits:1, maximumFractionDigits:1})} %`;
+  // hausse en ambre, baisse en vert, inchangé en gris : une hausse n'est pas une erreur, c'est ce qu'il faut annoncer
+  const evoCell = (now, before) => { const e=LSCharges.evolution(now, before);
+    if (!e) return '<td class="num"><span class="sub">—</span></td>';
+    const cls = Math.abs(e.delta)<0.005 ? 'same' : e.delta>0 ? 'up' : 'down';
+    return `<td class="num"><span class="chg-evo ${cls}">${cls==='same' ? 'inchangé' : `${signed(e.delta)}${e.pct==null?'':` · ${pctTxt(e.pct)}`}`}</span><div class="chg-sub">${cls==='same'?'':e.pct==null?'nouveau, ':''}était ${eur(e.before)}</div></td>`; };
+  const head=`<tr><th scope="col">Copropriétaire</th><th class="num" scope="col">Charges courantes</th><th class="num" scope="col">Fonds de réserve</th>
+      <th class="num emph" scope="col">Total annuel ${y}</th><th class="num" scope="col">Par mois</th>
+      ${refs.map(r=>`<th class="num" scope="col">Face au budget ${r.y}<div class="chg-sub">${r.pub?'publié':'brouillon'}</div></th>`).join('')}
+      ${hasDue?`<th class="num" scope="col">Face au dû actuel<div class="chg-sub">provisions en vigueur</div></th>`:''}</tr>`;
+  const rows=ow.map((o,i)=>`<tr><td><b>${escH(o.n||o.short)}</b><div class="chg-sub">${o.q} / ${qTot} millièmes</div></td>
+      <td class="num">${eur(b.charges[i].annual)}</td><td class="num">${eur(b.res[i].reserve)}</td>
+      <td class="num emph"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}</td>
+      ${refs.map(r=>evoCell(b.total[i], r.by.has(o.key) ? r.by.get(o.key).total : null)).join('')}
+      ${hasDue?evoCell(b.total[i], due[i]):''}</tr>`).join('');
+  const tot=v=>Math.round(sum(v)*100)/100;
+  const refTot=r=>{ const v=ow.map(o=>r.by.has(o.key)?r.by.get(o.key).total:null); return v.every(x=>x==null) ? null : tot(v.map(x=>x||0)); };
+  const totRow=`<tr class="chg-tot"><td>Ensemble des copropriétaires</td><td class="num">${eur(tot(b.charges.map(c=>c.annual)))}</td><td class="num">${eur(tot(b.res.map(r=>r.reserve)))}</td>
+      <td class="num emph">${eur(tot(b.total))}</td><td class="num">${eur(tot(b.total)/12)}</td>
+      ${refs.map(r=>evoCell(tot(b.total), refTot(r))).join('')}${hasDue?evoCell(tot(b.total), tot(due.map(v=>v||0))):''}</tr>`;
+  const note = pub ? `Budget ${y} publié : la répartition est celle figée à la publication.`
+    : `Brouillon : simulation d'après les postes ci-dessus, visible de vous seul. Rien n'est publié ni appliqué aux provisions, et chaque modification d'un poste se répercute ici tout de suite.`;
+  const noRef = refs.length ? '' : ` Aucun budget ${y-1} ou ${y-2} à comparer${hasDue?' : seule la comparaison au dû actuel est possible':''}.`;
+  t.innerHTML = head + rows + totRow;
+  // la note vit sous le tableau, pas dans une ligne : sur un écran étroit elle se replie au lieu de défiler avec lui
+  const nb=document.getElementById('chgOwnersNote'); if (nb) nb.textContent = note + noRef;
+}
 function renderChargesSplit(y){
+  renderChargesOwners(y);
   const t=document.getElementById('chgSplit'), bar=document.getElementById('chgApply'), title=document.getElementById('chgSplitTitle');
   if (!t || !bar) return;
   const b=budgetSplit(y), ow=b.owners, n=ow.length, {postes, reserve, charges, res}=b;

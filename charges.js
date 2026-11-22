@@ -376,6 +376,15 @@ function ownersSnapshot(owners){
   }));
 }
 // Ce qui a changé depuis l'instantané : arrivés, partis, quotités modifiées. La clé fait l'identité.
+// Évolution d'un montant face à une référence (budget précédent, dû en vigueur) : l'écart en euros
+// et en pour cent de la référence. null sans référence ; `pct` null quand la référence est nulle
+// (on ne divise pas par zéro : c'est un montant nouveau, pas une hausse infinie).
+function evolution(now, before){
+  if (before == null || before === '' || !Number.isFinite(Number(before))) return null;
+  const a = cents(now), b = cents(before), d = a - b;
+  return { before: b/100, delta: d/100, pct: b ? Math.round(d / Math.abs(b) * 1000) / 10 : null };
+}
+
 function ownersDiff(snapshot, current){
   const snap = ownersSnapshot(snapshot), cur = ownersSnapshot(current);
   const s = new Map(snap.map(o => [o.key, o])), c = new Map(cur.map(o => [o.key, o]));
@@ -397,7 +406,7 @@ function cleanSnapshot(s){
   };
 }
 
-const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished,
+const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished, evolution,
               cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, annexModel, REAL_FORMULA, FC_FORMULA,
               reserveSpan, reserveCall, legalBase, reserveSplit, cleanReserve, LEGAL_RATE,
               ownersSnapshot, ownersDiff, cleanSnapshot };

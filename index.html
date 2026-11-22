@@ -988,7 +988,10 @@
         <div class="card data-panel" id="chgCard" style="margin-bottom:16px"></div>
         <!-- fonds de réserve : postes à constituer sur une durée + minimum légal (renderReserve) -->
         <div class="card data-panel" id="resCard" style="margin-bottom:16px"></div>
-        <div class="mini-h" id="chgSplitTitle">Répartition par copropriétaire</div>
+        <!-- par copropriétaire : total, mensualité et évolution face aux budgets précédents, dès le brouillon (renderChargesOwners) -->
+        <div class="mini-h" id="chgOwnersTitle">Par copropriétaire</div>
+        <div class="card data-panel table-wrap" style="margin-bottom:16px"><table id="chgOwners"></table><div id="chgOwnersNote"></div></div>
+        <div class="mini-h" id="chgSplitTitle">Répartition détaillée, poste par poste</div>
         <div class="card data-panel table-wrap" style="margin-bottom:10px"><table id="chgSplit"></table></div>
         <div id="chgApply"></div>
         <div class="mini-h">Provisions attendues par copropriétaire (le « dû »)</div>
@@ -1052,16 +1055,16 @@
      quatre heures de cache navigateur (et cette page avec dix minutes). Sans lui, la page neuve tourne
      quatre heures avec les anciens scripts : un bouton ajouté ici ne fait rien, une correction n'arrive pas.
      Une seule valeur pour tous les scripts locaux (tests/cache.test.mjs le vérifie). -->
-<script src="config.js?v=2026-11-22f"></script>
-<script src="db.js?v=2026-11-22f"></script>
-<script src="signature.js?v=2026-11-22f"></script>
-<script src="statement.js?v=2026-11-22f"></script>
-<script src="convocation.js?v=2026-11-22f"></script>
-<script src="pdf.js?v=2026-11-22f"></script>
-<script src="charges.js?v=2026-11-22f"></script>
-<script src="calls.js?v=2026-11-22f"></script>
-<script src="recon.js?v=2026-11-22f"></script>
-<script src="app.js?v=2026-11-22f"></script>
+<script src="config.js?v=2026-11-22g"></script>
+<script src="db.js?v=2026-11-22g"></script>
+<script src="signature.js?v=2026-11-22g"></script>
+<script src="statement.js?v=2026-11-22g"></script>
+<script src="convocation.js?v=2026-11-22g"></script>
+<script src="pdf.js?v=2026-11-22g"></script>
+<script src="charges.js?v=2026-11-22g"></script>
+<script src="calls.js?v=2026-11-22g"></script>
+<script src="recon.js?v=2026-11-22g"></script>
+<script src="app.js?v=2026-11-22g"></script>
 
 <style>
   .vote{padding:2px}
@@ -1143,4 +1146,4 @@
 </style>
 
 <!-- Coque du design (barre du haut, page de garde, notifications) : après app.js, dont elle lit l'état. -->
-<script src="ui.js?v=2026-11-22f"></script>
+<script src="ui.js?v=2026-11-22g"></script>

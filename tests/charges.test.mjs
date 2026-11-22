@@ -348,3 +348,14 @@ test('instantané des copropriétaires : clé, nom, quotité ; différences depu
   assert.equal(C.cleanSnapshot({at:1, owners:snap, legalBasis:'x', legalBase:[]}).legalBasis, 'forecast');
   assert.equal(C.cleanSnapshot({at:1, owners:snap}).at, '');
 });
+
+test('évolution face à une référence : écart en euros et en pour cent, sans division par zéro', () => {
+  assert.deepEqual(C.evolution(467.02, 475.55), { before:475.55, delta:-8.53, pct:-1.8 });
+  assert.deepEqual(C.evolution(448.34, 912.54), { before:912.54, delta:-464.2, pct:-50.9 });
+  assert.deepEqual(C.evolution(110, 100), { before:100, delta:10, pct:10 });
+  assert.deepEqual(C.evolution(100, 100), { before:100, delta:0, pct:0 });
+  assert.deepEqual(C.evolution(120, 0), { before:0, delta:120, pct:null });   // montant nouveau : pas de pourcentage
+  assert.equal(C.evolution(120, null), null); assert.equal(C.evolution(120, undefined), null); assert.equal(C.evolution(120, 'abc'), null);
+  // au centime : pas d'écart fantôme dû aux flottants
+  assert.equal(C.evolution(0.1 + 0.2, 0.3).delta, 0);
+});
