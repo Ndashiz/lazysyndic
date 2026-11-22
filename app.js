@@ -4397,10 +4397,15 @@ function renderChargesOwners(y){
   [t.closest('.card'), title].forEach(el=>{ if(el) el.style.display = show ? '' : 'none'; });
   if (!show){ t.innerHTML=''; return; }
   if (title) title.textContent=`Par copropriétaire · budget ${y}${pub?'':' (brouillon)'}`;
-  // Références : les deux exercices précédents qui ont un budget, puis le dû en vigueur
-  const refs=[y-1, y-2].map(py=>({y:py, by:budgetOwnerTotals(py), pub:budgetPublished(chargesBudget(py))})).filter(r=>r.by);
+  // Références : les budgets PUBLIÉS des deux exercices précédents, puis les provisions en vigueur.
+  // Un brouillon n'a jamais été demandé à personne : s'y comparer donnerait une évolution qui n'a
+  // pas eu lieu (vu le 2026-11-22 : un brouillon 2026 incomplet affichait −1,8 % là où le budget
+  // réellement appliqué, celui des provisions, donnait −60,8 %). Il est écarté, et on le dit.
+  const prevAll=[y-1, y-2].map(py=>({y:py, by:budgetOwnerTotals(py), pub:budgetPublished(chargesBudget(py))})).filter(r=>r.by);
+  const refs=prevAll.filter(r=>r.pub), skipped=prevAll.filter(r=>!r.pub).map(r=>r.y);
   const cur=new Map(ownersOf().map(o=>[ownerKey(o), o]));
-  const due=ow.map(o=>cur.has(o.key) ? Math.round(((+cur.get(o.key).due_pay||0)+(+cur.get(o.key).due_res||0))*100)/100 : null);
+  const duePay=ow.map(o=>cur.has(o.key) ? +cur.get(o.key).due_pay||0 : null), dueRes=ow.map(o=>cur.has(o.key) ? +cur.get(o.key).due_res||0 : null);
+  const due=ow.map((o,i)=>duePay[i]==null ? null : Math.round((duePay[i]+dueRes[i])*100)/100);
   const hasDue=due.some(v=>v!=null && v>0);
   const qTot=sum(ow.map(o=>+o.q||0));
   const pctTxt = p => p==null ? '' : `${p>0?'+':p<0?'−':''}${Math.abs(p).toLocaleString('fr-BE',{minimumFractionDigits:1, maximumFractionDigits:1})} %`;
@@ -4409,23 +4414,31 @@ function renderChargesOwners(y){
     if (!e) return '<td class="num"><span class="sub">—</span></td>';
     const cls = Math.abs(e.delta)<0.005 ? 'same' : e.delta>0 ? 'up' : 'down';
     return `<td class="num"><span class="chg-evo ${cls}">${cls==='same' ? 'inchangé' : `${signed(e.delta)}${e.pct==null?'':` · ${pctTxt(e.pct)}`}`}</span><div class="chg-sub">${cls==='same'?'':e.pct==null?'nouveau, ':''}était ${eur(e.before)}</div></td>`; };
+  // Sous les charges et sous la réserve : leur évolution propre face à la provision en vigueur du
+  // même compte (le dû du compte de paiement, le dû du compte de réserve).
+  const evoSub = (now, before) => { const e = hasDue ? LSCharges.evolution(now, before) : null;
+    if (!e) return '';
+    const cls = Math.abs(e.delta)<0.005 ? 'same' : e.delta>0 ? 'up' : 'down';
+    return `<div class="chg-sub"><span class="chg-evo ${cls}">${cls==='same' ? 'inchangé' : e.pct==null ? signed(e.delta) : pctTxt(e.pct)}</span>${cls==='same'?'':` · était ${eur(e.before)}`}</div>`; };
   const head=`<tr><th scope="col">Copropriétaire</th><th class="num" scope="col">Charges courantes</th><th class="num" scope="col">Fonds de réserve</th>
       <th class="num emph" scope="col">Total annuel ${y}</th><th class="num" scope="col">Par mois</th>
-      ${refs.map(r=>`<th class="num" scope="col">Face au budget ${r.y}<div class="chg-sub">${r.pub?'publié':'brouillon'}</div></th>`).join('')}
-      ${hasDue?`<th class="num" scope="col">Face au dû actuel<div class="chg-sub">provisions en vigueur</div></th>`:''}</tr>`;
+      ${refs.map(r=>`<th class="num" scope="col">Face au budget ${r.y}<div class="chg-sub">publié</div></th>`).join('')}
+      ${hasDue?`<th class="num" scope="col">Face aux provisions en vigueur<div class="chg-sub">le dû actuel de chacun</div></th>`:''}</tr>`;
   const rows=ow.map((o,i)=>`<tr><td><b>${escH(o.n||o.short)}</b><div class="chg-sub">${o.q} / ${qTot} millièmes</div></td>
-      <td class="num">${eur(b.charges[i].annual)}</td><td class="num">${eur(b.res[i].reserve)}</td>
-      <td class="num emph"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}</td>
+      <td class="num">${eur(b.charges[i].annual)}${evoSub(b.charges[i].annual, duePay[i])}</td><td class="num">${eur(b.res[i].reserve)}${evoSub(b.res[i].reserve, dueRes[i])}</td>
+      <td class="num emph"><b>${eur(b.total[i])}</b></td><td class="num">${eur(b.monthly[i])}${hasDue && due[i]!=null ? `<div class="chg-sub">était ${eur(due[i]/12)}</div>` : ''}</td>
       ${refs.map(r=>evoCell(b.total[i], r.by.has(o.key) ? r.by.get(o.key).total : null)).join('')}
       ${hasDue?evoCell(b.total[i], due[i]):''}</tr>`).join('');
   const tot=v=>Math.round(sum(v)*100)/100;
   const refTot=r=>{ const v=ow.map(o=>r.by.has(o.key)?r.by.get(o.key).total:null); return v.every(x=>x==null) ? null : tot(v.map(x=>x||0)); };
-  const totRow=`<tr class="chg-tot"><td>Ensemble des copropriétaires</td><td class="num">${eur(tot(b.charges.map(c=>c.annual)))}</td><td class="num">${eur(tot(b.res.map(r=>r.reserve)))}</td>
-      <td class="num emph">${eur(tot(b.total))}</td><td class="num">${eur(tot(b.total)/12)}</td>
-      ${refs.map(r=>evoCell(tot(b.total), refTot(r))).join('')}${hasDue?evoCell(tot(b.total), tot(due.map(v=>v||0))):''}</tr>`;
+  const totPay=tot(b.charges.map(c=>c.annual)), totRes=tot(b.res.map(r=>r.reserve)), totDue=tot(due.map(v=>v||0));
+  const totRow=`<tr class="chg-tot"><td>Ensemble des copropriétaires</td><td class="num">${eur(totPay)}${evoSub(totPay, tot(duePay.map(v=>v||0)))}</td><td class="num">${eur(totRes)}${evoSub(totRes, tot(dueRes.map(v=>v||0)))}</td>
+      <td class="num emph">${eur(tot(b.total))}</td><td class="num">${eur(tot(b.total)/12)}${hasDue ? `<div class="chg-sub">était ${eur(totDue/12)}</div>` : ''}</td>
+      ${refs.map(r=>evoCell(tot(b.total), refTot(r))).join('')}${hasDue?evoCell(tot(b.total), totDue):''}</tr>`;
   const note = pub ? `Budget ${y} publié : la répartition est celle figée à la publication.`
     : `Brouillon : simulation d'après les postes ci-dessus, visible de vous seul. Rien n'est publié ni appliqué aux provisions, et chaque modification d'un poste se répercute ici tout de suite.`;
-  const noRef = refs.length ? '' : ` Aucun budget ${y-1} ou ${y-2} à comparer${hasDue?' : seule la comparaison au dû actuel est possible':''}.`;
+  const noRef = (skipped.length ? ` Le budget ${skipped.join(' et ')} de l'app est resté en brouillon, jamais publié : il ne sert pas de référence.` : '')
+    + (refs.length ? '' : hasDue ? ` La comparaison se fait avec les provisions en vigueur, c'est-à-dire le budget réellement appliqué aujourd'hui.` : ` Aucun budget publié ni provision en vigueur à comparer.`);
   t.innerHTML = head + rows + totRow;
   // la note vit sous le tableau, pas dans une ligne : sur un écran étroit elle se replie au lieu de défiler avec lui
   const nb=document.getElementById('chgOwnersNote'); if (nb) nb.textContent = note + noRef;
