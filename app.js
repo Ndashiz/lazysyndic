@@ -479,6 +479,70 @@ function backfillAppliedByOwner(){
   });
   changed.forEach(y=>budgetWrite(y, {...state.charges[y], snapshot:null, applied:state.charges[y].applied}));
 }
+/* ---------- Le dû de chaque exercice ----------
+   Les provisions en vigueur (owners.due_pay / due_res) sont un seul jeu de montants. Or le budget
+   de l'année N+1 se prépare, et parfois s'applique, pendant l'année N : sans mémoire par exercice,
+   le suivi de N se mettait à comparer ses versements au dû de N+1, et un exercice clôturé changeait
+   encore de dû après coup. `state.duesByYear` (ls_settings.dues_by_year, supabase/exercices-du.sql)
+   garde ce que chacun devait, exercice par exercice : { "2026": { clé: {pay, res} } }.
+   - l'exercice des provisions en vigueur (duesYear) y est recopié à chaque changement (syncDues) ;
+   - avant d'appliquer le budget d'un exercice ultérieur, celui en cours y est donc déjà ;
+   - à la clôture, le dû de l'exercice est figé (freezeDues) : plus rien ne l'écrase ensuite.
+   Le grand livre historique (ownerLedger, accueil, relances, pont Jarvis) garde sa propre règle. */
+const exerciseNow = () => new Date().getFullYear();
+const periodClosed = y => periodsOf().some(p=>+p.year===+y && p.closed_at);
+// L'exercice auquel se rapportent les provisions en vigueur : l'année en cours, ou l'exercice
+// ultérieur dont le budget a déjà été appliqué.
+function duesYear(){ const ys=appliedYears(); return Math.max(exerciseNow(), ys.length ? ys[ys.length-1] : 0); }
+function duesNow(){ return Object.fromEntries(ownersOf().map(o=>[ownerKey(o), {pay:Math.round((+o.due_pay||0)*100)/100, res:Math.round((+o.due_res||0)*100)/100}])); }
+const sameDues = (a, b) => { const ka=Object.keys(a||{}), kb=Object.keys(b||{});
+  return ka.length===kb.length && ka.every(k=>b[k] && Math.abs((+a[k].pay||0)-(+b[k].pay||0))<0.005 && Math.abs((+a[k].res||0)-(+b[k].res||0))<0.005); };
+// Ce que chacun devait pour l'exercice y : { clé: {pay, res} }, ou null quand rien ne le dit.
+function duesOf(y){
+  y=+y;
+  const rec=(state.duesByYear||{})[y], has=o=>o && Object.keys(o).length>0;
+  if (periodClosed(y) && has(rec)) return rec;            // clôturé : le dû figé fait foi
+  if (y===duesYear()) return duesNow();                    // l'exercice des provisions en vigueur : elles font foi
+  if (has(rec)) return rec;
+  const b=(state.charges||{})[y];
+  return b && b.applied && has(b.applied.byOwner) ? b.applied.byOwner : null;
+}
+function writeDues(next){
+  state.duesByYear=next; saveState();
+  if (!writeToDb()) return;
+  window.LS.db.updateSettings({dues_by_year: next}).then(()=>{ state.duesStoreMissing=false; },
+    e=>{ const m=e.message||String(e); state.duesStoreMissing=/dues_by_year|schema cache|column/i.test(m); if (!state.duesStoreMissing) console.warn('dû par exercice', m); renderOwnerPayments(); });
+}
+// Recopie les provisions en vigueur dans leur exercice (syndic seulement, jamais un exercice clôturé).
+function syncDues(){
+  if (!canWrite()) return;
+  const y=duesYear(), now=duesNow();
+  if (periodClosed(y) || !Object.keys(now).length) return;
+  const all=state.duesByYear||{};
+  if (sameDues(all[y], now)) return;
+  writeDues({...all, [y]:now});
+}
+// À la clôture : le dû de l'exercice est écrit une fois pour toutes.
+function freezeDues(y){
+  if (!canWrite()) return;
+  const d=duesOf(y); if (!d || !Object.keys(d).length) return;
+  const all=state.duesByYear||{};
+  if (!sameDues(all[y], d)) writeDues({...all, [y]:JSON.parse(JSON.stringify(d))});
+}
+// Versé et dû d'un copropriétaire sur un exercice, compte par compte. due = null : dû inconnu.
+function ownerYear(o, y){
+  const d=duesOf(y), k=ownerKey(o), from=`${y}-01-01`, to=`${y}-12-31`;
+  return {due: d ? {pay:+((d[k]||{}).pay)||0, res:+((d[k]||{}).res)||0} : null,
+          paid:{pay:Math.round(verseFromTx(o,'pay',from,to)*100)/100, res:Math.round(verseFromTx(o,'res',from,to)*100)/100}};
+}
+// Report à l'ouverture de l'exercice y : retard (négatif) ou avance (positif) laissés par les
+// exercices précédents, en remontant tant que leur dû est connu. null si le précédent ne l'est pas.
+function ownerReport(o, y){
+  let r=0, n=0;
+  for (let k=y-1; k>=2000 && n<30; k--){ const s=ownerYear(o, k); if (!s.due) break; r+=(s.paid.pay+s.paid.res)-(s.due.pay+s.due.res); n++; }
+  return n ? {amount:Math.round(r*100)/100, since:y-n} : null;
+}
+
 // Le grand livre par copropriétaire, borné à l'exercice du dû. Avant, le versé cumulait toutes les
 // entrées depuis le premier relevé contre un dû annuel : dès le deuxième budget appliqué, chacun
 // paraissait créditeur de ses versements des années d'avant, et plus aucun retard ne se voyait.
@@ -2337,7 +2401,7 @@ async function bankReloadData(){
     fresh.draftTx = fresh.draftTx || [];
     state = fresh;
     if (state.owners && state.owners.length) OWNERS = state.owners;
-    backfillAppliedByOwner();
+    backfillAppliedByOwner(); syncDues();
   } catch(e){ console.error(e); showToast('Rechargement impossible : '+(e.message||e), 'err'); return; }
   await classifyBankDrafts();
   renderAll();
@@ -4503,7 +4567,13 @@ async function applyCharges(y){
   const at=o=>idx.get(ownerKey(o)), pay=ow.map(o=>b.charges[at(o)].annual), res=ow.map(o=>b.res[at(o)].reserve), monthly=ow.map(o=>b.monthly[at(o)]);
   const lines=ow.map((o,i)=>`• ${o.n} : paiement ${eur(+o.due_pay||0)} → ${eur(pay[i])} · réserve ${eur(+o.due_res||0)} → ${eur(res[i])} (${eur(monthly[i])} / mois)`).join('\n')
     + (out.length?`\n\nHors répartition publiée, dû inchangé (à saisir dans Provisions) : ${out.map(o=>o.n).join(', ')}.`:'');
-  if (!confirm(`Remplacer le dû des copropriétaires par le budget ${y} ?\n\n${lines}\n\nLe suivi des paiements (qui paie quoi, retards) se basera sur ces montants.`)) return;
+  // Le budget d'un exercice ultérieur : l'exercice en cours garde son dû pour son propre suivi.
+  const curY=duesYear(), later=y>curY;
+  const keep = !later ? '' : state.duesStoreMissing
+    ? `\n\n⚠ Le dû de l'exercice ${curY} ne sera PAS conservé : lancez d'abord supabase/exercices-du.sql dans Supabase, sinon le suivi ${curY} n'aura plus de montants à comparer.`
+    : `\n\nL'exercice ${curY} garde son dû actuel pour son suivi (Comptabilité › Versements).`;
+  if (!confirm(`Remplacer le dû des copropriétaires par le budget ${y} ?\n\n${lines}\n\nLe suivi des paiements (qui paie quoi, retards) se basera sur ces montants.${keep}`)) return;
+  syncDues();   // le dû de l'exercice en cours est mis de côté avant d'être remplacé
   const before=ow.map(o=>({pay:+o.due_pay||0, res:+o.due_res||0}));
   ow.forEach((o,i)=>{ o.due_pay=pay[i]; o.due_res=res[i]; });
   if (writeToDb()){
@@ -4515,11 +4585,13 @@ async function applyCharges(y){
     byOwner:Object.fromEntries(b.owners.map((o,i)=>[o.key, {pay:b.charges[i].annual, res:b.res[i].reserve}]))}, status:'published', publishedAt:chargesBudget(y).publishedAt||new Date().toISOString()});   // appliqué = publié
   logTimeline({title:`Budget ${y} appliqué aux provisions`, kind:'manual',
     description:`Charges courantes ${eur(totPay)} et fonds de réserve ${eur(totRes)} répartis : `+b.owners.map((o,i)=>`${o.short} ${eur(b.total[i])}`).join(', ')+(out.length?` ; hors répartition publiée : ${out.map(o=>o.short||o.n).join(', ')}`:'')});
-  renderProvisions(); renderDashboard();
+  syncDues();   // et le nouveau dû rejoint son exercice
+  renderProvisions(); renderDashboard(); renderOwnerPayments();
 }
 // Provisions attendues par copropriétaire (le « dû »), éditable par l'admin.
 function renderProvisions(){
   const t=document.getElementById('provTable'); if(!t) return;
+  const pt=document.getElementById('provTitle'); if (pt) pt.textContent=`Provisions attendues par copropriétaire (le « dû ») · exercice ${duesYear()}`;
   const ed=canWrite(); const led=ownerLedger();
   if(!led.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
   const num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});   // 952,63 comme partout, relu par parseAmount
@@ -4564,7 +4636,8 @@ function saveProvision(inp, field){
   if(isNaN(v)){ renderProvisions(); return; }
   const o=(state.owners||[]).find(x=>x.id===id); if(o) o[field]=v;
   dbWrite(db=>db.updateOwner(id,{[field]:v}));
-  renderProvisions(); renderDashboard(); renderCharges();
+  syncDues();
+  renderProvisions(); renderDashboard(); renderCharges(); renderOwnerPayments();
 }
 // genBudget câblé dans la section GÉNÉRATEUR DE RAPPORTS (Annexe 4).
 
@@ -4921,7 +4994,7 @@ async function bootData(preloaded){
       state.draftTx = state.draftTx || [];
       if (window.LS.canWrite) window.LS.db.purgeOldTrash().catch(()=>{});
       if (state.owners && state.owners.length) OWNERS = state.owners;
-      backfillAppliedByOwner();
+      backfillAppliedByOwner(); syncDues();
     } catch(e){
       console.error(e);
       alert('Chargement des données impossible : '+(e.message||e));
@@ -6061,7 +6134,108 @@ function cfBuild(){
   const treso={}; mkeys.forEach(k=>{ run+=totNet[k]-(extNet[k]||0); treso[k]=run; });
   return {months,mkeys,agg,catTot,order,subsOf,totIn,totOut,totNet,treso,extNet,hasExt};
 }
+/* ============================================================
+   VERSEMENTS DES COPROPRIÉTAIRES (onglet Comptabilité)
+   Pour un exercice : ce que chacun a versé sur ce qu'il doit, une barre par compte (paiement,
+   réserve), avec un repère pour ce qui est attendu à ce jour (LSCalls.expectedToDate : une échéance
+   compte une fois son mois terminé). Le report des exercices précédents est dit à part, il n'entre
+   pas dans la barre. Le dû vient de duesOf(y) : celui de l'exercice, pas celui du moment.
+   ============================================================ */
+let opYear = null;
+function ownerPayYears(){
+  const ys=new Set([exerciseNow(), duesYear()]);
+  (state.tx||[]).forEach(t=>{ if (t.amount>0 && t.account!==EXT){ const d=parseDate(t.date); if (d) ys.add(+d.iso.slice(0,4)); } });
+  Object.keys(state.duesByYear||{}).forEach(y=>ys.add(+y));
+  return [...ys].filter(y=>y>=2000 && y<=2100).sort((a,b)=>a-b);
+}
+function ensureOwnPayCss(){
+  if (document.getElementById('ownPayCss')) return;
+  const s=document.createElement('style'); s.id='ownPayCss';
+  s.textContent=`
+    #ownPayCard .op-year{display:flex;align-items:center;gap:10px;font-size:15px}
+    #ownPayCard .op-year .lk{font-size:20px;line-height:1;padding:2px 8px}
+    #ownPayCard .op-year .lk:disabled{opacity:.3;cursor:default}
+    #ownPayCard .op-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-faint);margin:10px 0 2px}
+    #ownPayCard .op-legend i{display:inline-block;vertical-align:middle;margin-right:6px}
+    #ownPayCard .op-owner{padding:16px 0 6px;border-top:1px solid var(--border);margin-top:12px}
+    #ownPayCard .op-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    #ownPayCard .op-name{font-weight:600;font-size:14.5px}
+    #ownPayCard .op-row{display:grid;grid-template-columns:150px minmax(0,1fr);gap:5px 14px;align-items:center;margin-top:12px}
+    #ownPayCard .op-lbl{font-size:12.5px;color:var(--ink-soft)}
+    #ownPayCard .op-track{position:relative;height:12px;background:var(--muted);border-radius:999px}
+    #ownPayCard .op-fill{height:100%;border-radius:999px;background:var(--primary)}
+    #ownPayCard .op-fill.late{background:var(--warning)}
+    #ownPayCard .op-goal{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--foreground);border-radius:2px;transform:translateX(-1px)}
+    #ownPayCard .op-txt{grid-column:2;font-size:13px;display:flex;gap:4px 10px;flex-wrap:wrap;align-items:center}
+    #ownPayCard .op-sub{grid-column:2;font-size:12px;color:var(--ink-faint)}
+    #ownPayCard .op-report{font-size:12.5px;color:var(--ink-soft);margin-top:10px}
+    #ownPayCard .op-warn{font-size:12.5px;color:var(--warning-ink);background:var(--warning-soft);border-radius:6px;padding:8px 12px;margin-top:12px}
+    @media (max-width:640px){ #ownPayCard .op-row{grid-template-columns:minmax(0,1fr)} #ownPayCard .op-txt,#ownPayCard .op-sub{grid-column:1} }`;
+  document.head.appendChild(s);
+}
+function renderOwnerPayments(){
+  const card=document.getElementById('ownPayCard'); if (!card || typeof LSCalls==='undefined') return;
+  const ow=ownersOf();
+  if (!ow.length){ card.style.display='none'; card.innerHTML=''; return; }
+  card.style.display=''; ensureOwnPayCss();
+  const years=ownerPayYears(), nowY=exerciseNow();
+  if (opYear==null || !years.includes(opYear)) opYear=years.includes(nowY) ? nowY : years[years.length-1];
+  const y=opYear, today=todayISO(), r2=v=>Math.round((+v||0)*100)/100;
+  const per=o=>LSCalls.cleanPeriodicity(o.periodicity);
+  const unit=(o,n)=>({month:n>1?'mensualités':'mensualité', quarter:n>1?'échéances trimestrielles':'échéance trimestrielle', year:'échéance annuelle'})[per(o)];
+  const closed=periodsOf().find(p=>+p.year===y && p.closed_at);
+  const when = y>nowY ? 'à venir' : closed ? `clôturé le ${fmtDateLong(String(closed.closed_at).slice(0,10))}` : y<nowY ? 'terminé, pas encore clôturé' : 'en cours';
+  const dues=duesOf(y);
+  // Une ligne : la barre d'un compte. exp = {expected, count, of, next} ou null (pas de dû connu).
+  const line = (label, paid, due, exp, sub) => {
+    if (due==null) return `<div class="op-row"><div class="op-lbl">${label}</div><div class="op-txt" style="grid-column:auto"><b>${eur(paid)}</b> versés <span class="sub">· dû de l'exercice non enregistré</span></div></div>`;
+    if (due<=0.005) return `<div class="op-row"><div class="op-lbl">${label}</div><div class="op-txt" style="grid-column:auto">${paid>0.005 ? `<b>${eur(paid)}</b> versés <span class="sub">· rien n'était dû</span>` : '<span class="sub">Rien de dû pour cet exercice</span>'}</div></div>`;
+    const pct=v=>Math.max(0, Math.min(100, v/due*100)), gap=r2(paid-exp.expected);
+    const st = gap < -0.99 ? `<span class="status danger">Retard ${eur(-gap)}</span>` : gap > 0.99 && paid < due-0.005 ? `<span class="status success">Avance ${eur(gap)}</span>` : `<span class="status success">${paid>=due-0.005?'Exercice soldé':'À jour'}</span>`;
+    const over = paid>due+0.005 ? ` <span class="sub">· ${eur(paid-due)} de plus que l'année</span>` : '';
+    const goal = exp.expected>0.005 && exp.expected<due-0.005 ? `<div class="op-goal" style="left:${pct(exp.expected).toFixed(2)}%" title="Attendu à ce jour : ${eur(exp.expected)}"></div>` : '';
+    return `<div class="op-row"><div class="op-lbl">${label}</div>
+      <div class="op-track" role="img" aria-label="${escH(label)} : ${eur(paid)} versés sur ${eur(due)}, ${eur(exp.expected)} attendus à ce jour"><div class="op-fill${gap < -0.99 ? ' late' : ''}" style="width:${pct(paid).toFixed(2)}%"></div>${goal}</div>
+      <div class="op-txt"><span><b>${eur(paid)}</b> versés sur ${eur(due)}${over}</span>${st}</div>
+      <div class="op-sub">${sub}</div></div>`;
+  };
+  const subTxt = (o, exp) => y>nowY ? `Exercice à venir : rien n'est encore attendu.`
+    : y<nowY ? `Exercice terminé : la totalité était attendue.`
+    : `Attendu à ce jour : ${exp.count} ${unit(o, exp.count)} sur ${exp.of}, soit ${eur(exp.expected)}${exp.next ? ` · prochaine : ${eur(exp.next.amount)} d'ici fin ${CHG_MON[exp.next.month-1]}` : ''}.`;
+  const tot={pay:{paid:0,due:0,exp:0}, res:{paid:0,due:0,exp:0}};
+  const blocks=ow.map(o=>{
+    const s=ownerYear(o, y), rep=ownerReport(o, y);
+    const rows=['pay','res'].map(a=>{
+      const due=s.due ? s.due[a] : null, exp=due!=null ? LSCalls.expectedToDate(due, per(o), y, today) : null;
+      tot[a].paid+=s.paid[a]; if (due!=null){ tot[a].due+=due; tot[a].exp+=exp.expected; }
+      return line(a==='pay'?'Compte de paiement':'Fonds de réserve', s.paid[a], due, exp, exp ? subTxt(o, exp) : '');
+    }).join('');
+    const repTxt = rep==null ? (years[0]<y ? `Report : le dû de ${y-1} n'est pas enregistré, aucun report n'est calculé.` : '')
+      : Math.abs(rep.amount)<0.005 ? `Report des exercices précédents : à zéro.`
+      : rep.amount>0 ? `Report des exercices précédents : <b style="color:var(--success)">avance de ${eur(rep.amount)}</b>, hors barre.`
+      : `Report des exercices précédents : <b style="color:var(--danger)">retard de ${eur(-rep.amount)}</b>, hors barre.`;
+    return `<div class="op-owner"><div class="op-head"><span class="a" style="background:${o.c};width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700">${escH((o.short||o.n||'?')[0])}</span>
+        <span class="op-name">${escH(o.n||o.short)}</span><span class="sub">${({month:'paie chaque mois', quarter:'paie chaque trimestre', year:'paie une fois par an'})[per(o)]}</span></div>
+      ${rows}${repTxt?`<div class="op-report">${repTxt}</div>`:''}</div>`;
+  }).join('');
+  const totalBlock = dues && ow.length>1 ? `<div class="op-owner"><div class="op-head"><span class="op-name">Ensemble des copropriétaires</span></div>
+      ${['pay','res'].map(a=>{ const t=tot[a]; return line(a==='pay'?'Compte de paiement':'Fonds de réserve', r2(t.paid), r2(t.due), {expected:r2(t.exp)},
+        y===nowY ? `Attendu à ce jour : ${eur(t.exp)}.` : y<nowY ? 'Exercice terminé : la totalité était attendue.' : `Exercice à venir : rien n'est encore attendu.`); }).join('')}</div>` : '';
+  const i=years.indexOf(y);
+  const warn = canWrite() && state.duesStoreMissing ? `<div class="op-warn">Le dû n'est pas encore gardé exercice par exercice : lancez <b>supabase/exercices-du.sql</b> dans Supabase (SQL Editor). D'ici là, un nouveau budget appliqué ou une clôture ferait perdre le dû de l'exercice en cours.</div>` : '';
+  const noDue = dues ? '' : `<div class="op-warn">Le dû de l'exercice ${y} n'a pas été enregistré : seuls les versements sont connus, sans objectif ni retard.</div>`;
+  card.innerHTML=`<div class="h-row"><div><h2>Versements des copropriétaires · exercice ${y} <span class="status ${closed?'success':y===nowY?'warning':''}" style="vertical-align:middle;margin-left:6px">${when}</span></h2>
+      <div class="sub">Du 01/01/${y} au 31/12/${y} : ce que chacun a versé sur ce qu'il doit pour l'exercice, compte par compte.</div></div>
+      <div class="op-year"><button class="lk" id="opPrev" ${i<=0?'disabled':''} aria-label="Exercice précédent">‹</button><b>${y}</b><button class="lk" id="opNext" ${i>=years.length-1?'disabled':''} aria-label="Exercice suivant">›</button></div></div>
+    <div class="op-legend"><span><i style="width:22px;height:8px;border-radius:999px;background:var(--primary)"></i>versé</span>
+      <span><i style="width:2px;height:14px;background:var(--foreground)"></i>attendu à ce jour (une échéance compte une fois son mois terminé)</span>
+      <span><i style="width:22px;height:8px;border-radius:999px;background:var(--warning)"></i>en retard sur l'attendu</span></div>
+    ${warn}${noDue}${blocks}${totalBlock}`;
+  card.querySelector('#opPrev').onclick=()=>{ if (i>0){ opYear=years[i-1]; renderOwnerPayments(); } };
+  card.querySelector('#opNext').onclick=()=>{ if (i<years.length-1){ opYear=years[i+1]; renderOwnerPayments(); } };
+}
 function renderComptabilite(){
+  renderOwnerPayments();
   const box=document.getElementById('cfMatrix'); if(!box) return;
   ensureCfCss();
   renderPeriods();
@@ -6141,6 +6315,7 @@ async function closePeriod(y){
     closing_pay:r2(balanceAt('pay',end)), closing_res:r2(balanceAt('res',end)),
     approved_ag_id:ag?ag.id:null, report_html:html};
   if(!confirm(`Clôturer l'exercice ${y} ?\n\nSoldes au 31/12/${y} : paiement ${eur(row.closing_pay)}, réserve ${eur(row.closing_res)}.\nLes mouvements de ${y} ne pourront plus être modifiés ni supprimés (drapeau et commentaire exceptés) ; le rapport financier ${y} est archivé tel quel.`)) return;
+  freezeDues(y);   // avant de poser la clôture : ce que chacun devait pour l'exercice ne changera plus
   state.periods=[...periodsOf().filter(p=>+p.year!==y), row].sort((a,b)=>(+a.year)-(+b.year));
   saveState();
   dbWrite(async db=>{ try { await db.periodUpsert(row); } catch(e){ throw new Error(periodsHint(e.message||String(e))); } });

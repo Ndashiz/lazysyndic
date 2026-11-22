@@ -60,3 +60,25 @@ test('modèle : charges + réserve par échéance, somme exacte, communication e
   // sans communication valide : pas de ligne fausse
   assert.equal(K.callModel({ ...o, ogm:'' }, { pay:1, res:0 }, { year:2026 }).ogm, '');
 });
+
+test('attendu à ce jour : une échéance compte une fois son mois terminé', () => {
+  // mensuel, 952,63 € par an : 79,39 € les sept premiers mois, 79,38 € ensuite (le reste au centime)
+  const A = 952.63;
+  assert.deepEqual(K.expectedToDate(A, 'month', 2026, '2026-04-15'), { expected:238.17, count:3, of:12, next:{ month:4, amount:79.39, by:'2026-04-30' } });
+  assert.equal(K.expectedToDate(A, 'month', 2026, '2026-01-20').count, 0);            // janvier en cours : rien d'échu
+  assert.equal(K.expectedToDate(A, 'month', 2026, '2026-04-30').count, 3);            // dernier jour du mois : pas encore
+  assert.equal(K.expectedToDate(A, 'month', 2026, '2026-05-01').count, 4);
+  const dec = K.expectedToDate(A, 'month', 2026, '2026-12-31');
+  assert.equal(dec.count, 11); assert.deepEqual(dec.next, { month:12, amount:79.38, by:'2026-12-31' });
+  // exercice passé : tout est attendu ; exercice à venir : rien
+  assert.deepEqual(K.expectedToDate(A, 'month', 2026, '2027-01-01'), { expected:952.63, count:12, of:12, next:null });
+  assert.deepEqual(K.expectedToDate(A, 'month', 2027, '2026-11-22'), { expected:0, count:0, of:12, next:{ month:1, amount:79.39, by:'2027-01-31' } });
+  // trimestriel : janvier, avril, juillet, octobre ; l'échéance d'avril compte en mai
+  assert.equal(K.expectedToDate(240, 'quarter', 2026, '2026-04-10').count, 1);
+  assert.deepEqual(K.expectedToDate(240, 'quarter', 2026, '2026-05-02'), { expected:120, count:2, of:4, next:{ month:7, amount:60, by:'2026-07-31' } });
+  // annuel : dû fin janvier ; février d'une année bissextile pour la date butoir
+  assert.equal(K.expectedToDate(600, 'year', 2026, '2026-02-01').expected, 600);
+  assert.equal(K.expectedToDate(120, 'month', 2028, '2028-02-10').next.by, '2028-02-29');
+  // rien à payer : rien d'attendu
+  assert.equal(K.expectedToDate(0, 'month', 2026, '2026-06-15').expected, 0);
+});

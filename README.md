@@ -223,6 +223,32 @@ Prérequis : lancer [`supabase/hors-comptes.sql`](supabase/hors-comptes.sql) à 
 `account` n'acceptait que `'pay'` et `'res'`). Sans lui, l'ajout est refusé par la base et l'app
 dit quoi lancer. Un exercice clôturé refuse aussi l'ajout : il faut le rouvrir.
 
+## Versements des copropriétaires et dû par exercice
+
+**Comptabilité › Versements des copropriétaires** montre, pour un exercice (année civile), ce que
+chacun a versé sur ce qu'il doit : une barre par compte (paiement, réserve) et un repère pour ce
+qui est attendu à ce jour. Une échéance compte une fois son mois terminé
+(`LSCalls.expectedToDate`) : en avril, trois mensualités sont attendues. Le report des exercices
+précédents est dit à part, hors barre.
+
+Le dû est celui **de l'exercice**, pas celui du moment. Les provisions en vigueur
+(`ls_owners.due_pay` / `due_res`) sont un seul jeu de montants, alors que le budget N+1 se prépare,
+et parfois s'applique, pendant l'année N. `ls_settings.dues_by_year` garde donc ce que chacun
+devait, exercice par exercice (`duesOf`, `syncDues`, `freezeDues` dans `app.js`) :
+
+- l'exercice des provisions en vigueur (`duesYear` : l'année en cours, ou l'exercice ultérieur dont
+  le budget est déjà appliqué) y est recopié à chaque changement du dû ;
+- appliquer le budget d'un exercice ultérieur ne touche donc pas au suivi de l'exercice en cours ;
+- la clôture d'un exercice fige son dû : plus rien ne l'écrase ensuite.
+
+Un exercice dont le dû n'a jamais été enregistré n'affiche que ses versements. Le grand livre de
+l'accueil (soldes, retards, relances) et le pont Jarvis gardent leur règle propre : l'exercice du
+dernier budget appliqué (`ledgerYear`).
+
+Prérequis : lancer [`supabase/exercices-du.sql`](supabase/exercices-du.sql) à la main (une colonne
+`dues_by_year`). Sans lui, la vue fonctionne pour l'exercice en cours et prévient que le dû d'un
+exercice serait perdu au prochain budget appliqué.
+
 ## Exercices comptables
 
 Écran **Comptabilité** › carte « Exercices » : une ligne par année civile, avec les soldes

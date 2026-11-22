@@ -66,6 +66,22 @@ function expectedInMonth(annual, periodicity, year, month){
   return r2(schedule(annual, periodicity, year).filter(e => e.month === month).reduce((s, e) => s + e.amount, 0));
 }
 
+// Ce qui est attendu d'un copropriétaire à une date, pour le suivi des versements (Comptabilité) :
+// une échéance compte une fois son mois TERMINÉ. En avril, trois mensualités sont attendues
+// (janvier, février, mars) ; celle d'avril le sera le 1er mai, celle de décembre le 1er janvier.
+// L'appel de fonds, lui, annonce l'échéance au 1er du mois : le suivi laisse le mois pour payer.
+// → { expected, count, of, next } ; `next` = la prochaine échéance {month, amount, by:'AAAA-MM-JJ'
+//   (dernier jour de son mois)} ou null quand tout est échu. Exercice passé : tout ; à venir : rien.
+function expectedToDate(annual, periodicity, year, todayIso){
+  const rows = schedule(annual, periodicity, year), y = String(year), t = String(todayIso || '');
+  const ty = t.slice(0, 4), tm = Number(t.slice(5, 7)) || 0;
+  const due = ty > y ? rows : ty < y ? [] : rows.filter(e => e.month < tm);
+  const nx = rows[due.length] || null;
+  const lastDay = m => new Date(Date.UTC(Number(year), m, 0)).getUTCDate();
+  return { expected: r2(due.reduce((s, e) => s + e.amount, 0)), count: due.length, of: rows.length,
+    next: nx ? { month: nx.month, amount: nx.amount, by: `${y}-${String(nx.month).padStart(2, '0')}-${String(lastDay(nx.month)).padStart(2, '0')}` } : null };
+}
+
 /* ------------------------------------------------------------
    Le modèle d'un appel de fonds
    o = {name, short, q, email, ogm, periodicity} ; amounts = {pay, res} (dû annuel : charges courantes,
@@ -247,7 +263,7 @@ async function buildPdf(PDFLib, models, opts){
 const slug = s => String(s||'').normalize('NFD').replace(/\p{M}/gu,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
 function fileName(m, ext){ return `appel-de-fonds-${m.year}${m.owner && m.owner.short ? '-' + slug(m.owner.short) : ''}.${ext || 'pdf'}`; }
 
-const api = { PERIODS, cleanPeriodicity, ogmFromSeed, ogmFromDigits, ogmValid, ogmFormat, ogmIn, schedule, expectedInMonth, callModel, subject, text, html, buildPdf, fileName, fmtIban, eur };
+const api = { PERIODS, cleanPeriodicity, ogmFromSeed, ogmFromDigits, ogmValid, ogmFormat, ogmIn, schedule, expectedInMonth, expectedToDate, callModel, subject, text, html, buildPdf, fileName, fmtIban, eur };
 root.LSCalls = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

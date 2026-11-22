@@ -125,6 +125,10 @@
       categories: settings.categories || [],
       subcats: settings.subcats || {},
       ownerRules: settings.owner_rules || {},
+      // Le dû de chaque exercice (supabase/exercices-du.sql) : { "2026": { clé → {pay, res} } }. Sans la
+      // colonne, la clé est absente de la ligne : l'app le sait et le dit (duesStoreMissing).
+      duesByYear: settings.dues_by_year || {},
+      duesStoreMissing: !('dues_by_year' in settings),
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||'',
         ogm:r.ogm||'', periodicity:r.periodicity||'month'})),   // appels de fonds (supabase/calls.sql)
