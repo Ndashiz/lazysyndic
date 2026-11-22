@@ -51,6 +51,8 @@ test('objet et texte brut : copropriété, type, date, lieu, points et règles d
   assert.match(t, /Quorum : /); assert.match(t, /Procuration : /); assert.match(t, /art\. 3\.88/);
   // le délai entre l'envoi et la séance n'est dit nulle part dans le message
   assert.doesNotMatch(t + C.html(d), /jours? avant la séance|minimum légal|Délai/);
+  // ni la date d'envoi : à côté de la date de la séance, elle laisserait lire le délai
+  assert.doesNotMatch(t + C.html(d), /25\/10\/2026|Envoyée le|adressée le/);
   assert.match(t, /Alex Martin\nSyndic de ACP Démo\nalex@exemple\.be/);
   // ce que lit le copropriétaire ne porte aucun tiret cadratin
   assert.doesNotMatch(C.subject(d) + t + C.html(d), /—/);

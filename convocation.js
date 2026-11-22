@@ -223,12 +223,12 @@ function htmlBody(d){
 <tr><td align="center" style="padding:24px 8px 8px">
 <table ${TBL} width="600" bgcolor="${T.card}" style="width:600px;max-width:100%;background-color:${T.card};border:1px solid ${T.line};border-radius:14px">
 
-<!-- en-tête -->
+<!-- en-tête : le symbole et le nom, sans date d'envoi (avec la date de la séance juste en dessous,
+     elle laissait lire le délai ; le message porte de toute façon sa date dans la messagerie) -->
 <tr><td style="padding:18px ${PAD}px">
 <table ${TBL} width="100%"><tr>
 ${td('width:32px;padding-right:10px', logo, 'valign="middle" width="32"')}
 ${td(`${base}font-size:17px;line-height:22px;color:${T.deep};letter-spacing:-.2px`, `<span style="font-weight:800">Lazy</span><span style="font-weight:600">Syndic</span>`, 'valign="middle"')}
-${td(`${base}font-size:12px;line-height:18px;color:${T.muted}`, `Envoyée le ${esc(d.sentLabel)}`, 'valign="middle" align="right"')}
 </tr></table>
 </td></tr>
 
