@@ -509,7 +509,9 @@ function duesOf(y){
 }
 function writeDues(next){
   state.duesByYear=next; saveState();
-  if (!writeToDb()) return;
+  // colonne absente (SQL pas encore lancé) : on le sait dès le chargement, inutile d'envoyer une
+  // écriture que la base refusera à chaque fois ; la vue affiche l'avertissement.
+  if (!writeToDb() || state.duesStoreMissing) return;
   window.LS.db.updateSettings({dues_by_year: next}).then(()=>{ state.duesStoreMissing=false; },
     e=>{ const m=e.message||String(e); state.duesStoreMissing=/dues_by_year|schema cache|column/i.test(m); if (!state.duesStoreMissing) console.warn('dû par exercice', m); renderOwnerPayments(); });
 }
