@@ -6,7 +6,7 @@
    • un poste = {id, label, vendor, cat:{high, sub}|null, key:'quote'|'indiv', forecast,
                  realFormula, fcFormula, fcNote}
      vendor = le bénéficiaire (fournisseur), texte libre, proposé par vendorOf()
-     realFormula = formule du réel N-1 ('' = standard : réel à ce jour ramené à 12 mois)
+     realFormula = formule du réel N-1 ('' = standard : réel à ce jour ramené à 12 mois, plus ce qui a été payé hors comptes)
      fcFormula = formule de la prévision ('' = montant saisi) ; fcNote = explication libre
    • un budget porte aussi `marge` (en %, 3 par défaut) : [marge] dans les formules
    • evalFormula() — formule façon tableur ; resolve() — un poste avec estimé N-1, réel N-1,
@@ -25,6 +25,11 @@ const cents = n => Math.round((Number(n)||0)*100);
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const INCOME = new Set(['Charges', 'Fonds de réserve']);   // rentrées, jamais un poste de dépense
 const ACCT = 'pay';                                       // les charges courantes sortent du compte de paiement
+// … ou sont payées hors des comptes de l'ACP (account 'ext' : une assurance réglée directement).
+// C'est une charge de l'immeuble quand même : elle entre dans le réel d'un poste, sans être
+// ramenée à 12 mois (c'est une facture, pas une dépense étalée) et sans compter dans les mois couverts.
+const EXT = 'ext';
+const isBank = t => t.account === ACCT, isOut = t => t.account === EXT, counts = t => isBank(t) || isOut(t);
 const yearOf = t => String(t.iso||'').slice(0,4);
 
 function catLabel(c){ return !c ? 'Nouveau poste' : c.sub ? `${c.high} › ${c.sub}` : `${c.high} (toute la catégorie)`; }
@@ -44,7 +49,10 @@ const cleanMarge = v => Number.isFinite(+v) && +v >= 0 && +v <= 100 ? Math.round
    Jamais de code : l'analyseur ne connaît que ça ; un champ inconnu, une division par zéro ou un
    reste inattendu donnent une erreur lisible, pas une exception.
    ------------------------------------------------------------ */
-const REAL_FORMULA = '[réel à ce jour] × 12 ÷ [mois couverts]';
+const REAL_FORMULA = '[réel à ce jour] × 12 ÷ [mois couverts] + [hors comptes]';
+// La formule standard d'avant les dépenses hors comptes : un poste qui la porte en toutes lettres
+// (enregistrée telle quelle) suit la nouvelle, sinon ses dépenses hors comptes resteraient à 0.
+const OLD_REAL_FORMULA = '[réel à ce jour] × 12 ÷ [mois couverts]';
 const FC_FORMULA = '[réel] × (1 + [marge])';
 const normKey = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 function evalFormula(src, fields){
@@ -85,9 +93,10 @@ function fieldsFor(tx, p, year, cov, prev, marge){
   const q = matchPrev(prev, p);
   return {
     'réel à ce jour': r ? r.total : 0,
+    'hors comptes': r ? r.ext : 0,
     'mois couverts': cov ? cov.months : 0,
     'moyenne mensuelle': r && r.avg != null ? r.avg : 0,
-    'réel précédent': r2 ? r2.total : 0,
+    'réel précédent': r2 ? Math.round((r2.total + r2.ext) * 100) / 100 : 0,
     'budget précédent': q ? q.forecast : 0,
     'marge': cleanMarge(marge) / 100,
   };
@@ -98,14 +107,14 @@ function fieldsFor(tx, p, year, cov, prev, marge){
 function resolve(p, ctx){
   const f = fieldsFor(ctx.tx, p, ctx.year, ctx.cov, ctx.prev, ctx.marge);
   const hasRef = !!p.cat && !!ctx.cov && ctx.cov.months > 0;
-  const rf = p.realFormula || REAL_FORMULA;
+  const rf = !p.realFormula || p.realFormula === OLD_REAL_FORMULA ? REAL_FORMULA : p.realFormula;
   const real = hasRef ? evalFormula(rf, f) : { value: null, error: null };
   f['réel'] = real.value == null ? 0 : real.value;
   const q = matchPrev(ctx.prev, p), est = q ? q.forecast : null;
   const delta = est != null && real.value != null ? Math.round((est - real.value) * 100) / 100 : null;
   let forecast = p.forecast, fc = { value: null, error: null };
   if (p.fcFormula && !ctx.frozen) { fc = evalFormula(p.fcFormula, f); if (fc.value != null) forecast = Math.max(0, fc.value); }
-  return { ...p, forecast, calc: { fields: f, hasRef, real: real.value, realError: real.error, realFormula: rf, est, delta, fcError: fc.error, toDate: f['réel à ce jour'], months: f['mois couverts'] } };
+  return { ...p, forecast, calc: { fields: f, hasRef, real: real.value, realError: real.error, realFormula: rf, est, delta, fcError: fc.error, toDate: f['réel à ce jour'], ext: f['hors comptes'], months: f['mois couverts'] } };
 }
 // Le modèle de l'Annexe 4, prêt à être mis en page : synthèse, fonds de roulement (par groupe,
 // avec la part de chacun), fonds de réserve, total par copropriétaire. `bud` = un budget résolu
@@ -165,7 +174,7 @@ const GENERIC_TIERS = /sepa|credit transfer|instant transfer|direct debit|subscr
 function vendorOf(tx, cat, year){
   if (!cat) return '';
   const seen = new Map();
-  tx.filter(t => t.account === ACCT && yearOf(t) === String(year) && t.amount < 0 && matches(t, cat)).forEach(t => {
+  tx.filter(t => counts(t) && yearOf(t) === String(year) && t.amount < 0 && matches(t, cat)).forEach(t => {
     const s = String(t.tiers || '').trim();
     if (!s || GENERIC_TIERS.test(s)) return;
     const e = seen.get(s.toLowerCase()) || { label: s, count: 0 };
@@ -196,7 +205,7 @@ function conflicts(postes){
 // Mois de `year` couverts par les relevés : du premier au dernier mouvement connu, tous comptes.
 // Un registre commencé en mars ne compte pas janvier et février comme des mois sans dépense.
 function coverage(tx, year){
-  const isos = tx.map(t => t.iso).filter(i => ISO.test(i||'')).sort();
+  const isos = tx.filter(t => !isOut(t)).map(t => t.iso).filter(i => ISO.test(i||'')).sort();   // une dépense hors comptes n'est pas un relevé
   const y = String(year), none = {months:0, from:0, to:0};
   if (!isos.length) return none;
   const first = isos[0], last = isos[isos.length-1];
@@ -211,10 +220,11 @@ function coverage(tx, year){
 // null pour un nouveau poste : pas de catégorie, donc pas d'historique.
 function reference(tx, cat, year, cov){
   if (!cat) return null;
-  const rows = tx.filter(t => t.account === ACCT && yearOf(t) === String(year) && matches(t, cat));
-  const c = 0 - rows.reduce((s, t) => s + cents(t.amount), 0);   // 0 - 0 : jamais « -0,00 € »
+  const rows = tx.filter(t => counts(t) && yearOf(t) === String(year) && matches(t, cat));
+  const c = 0 - rows.filter(isBank).reduce((s, t) => s + cents(t.amount), 0);   // 0 - 0 : jamais « -0,00 € »
+  const e = 0 - rows.filter(isOut).reduce((s, t) => s + cents(t.amount), 0);    // payé hors comptes de l'ACP
   const months = cov ? cov.months : 0;
-  return { total: c/100, count: rows.length, months, avg: months ? Math.round(c / months)/100 : null };
+  return { total: c/100, ext: e/100, count: rows.length, months, avg: months ? Math.round(c / months)/100 : null };
 }
 
 // Montant A (centimes) réparti selon des poids, au centime près : la somme des parts vaut A
@@ -244,7 +254,7 @@ function split(postes, owners){
 // Dépenses de l'année de référence qu'aucun poste ne reprend (mouvements « à catégoriser » compris).
 function uncovered(tx, postes, year){
   const cats = postes.map(p => p.cat).filter(Boolean);
-  const rows = tx.filter(t => t.account === ACCT && yearOf(t) === String(year) && t.amount < 0
+  const rows = tx.filter(t => counts(t) && yearOf(t) === String(year) && t.amount < 0
     && (t.high === '?' || !t.high || isExpenseCat(t.high)) && !cats.some(c => matches(t, c)));
   const unc = rows.filter(t => !t.high || t.high === '?');
   const total = rows.reduce((s, t) => s - cents(t.amount), 0), tUnc = unc.reduce((s, t) => s - cents(t.amount), 0);
@@ -259,7 +269,7 @@ const newId = () => 'p' + Date.now().toString(36) + (++_n).toString(36) + Math.r
 // deux postes sur les mêmes mouvements. Prévision = moyenne mensuelle × 12, arrondie à l'euro supérieur.
 function seed(tx, year, cov, keyFor){
   const y = String(year), byHigh = new Map();
-  tx.filter(t => t.account === ACCT && yearOf(t) === y && isExpenseCat(t.high)).forEach(t => {
+  tx.filter(t => counts(t) && yearOf(t) === y && isExpenseCat(t.high)).forEach(t => {
     const h = byHigh.get(t.high) || {subs:new Set(), bare:false};
     if (t.sub) h.subs.add(t.sub); else h.bare = true;
     byHigh.set(t.high, h);
@@ -269,8 +279,8 @@ function seed(tx, year, cov, keyFor){
     const cats = h.bare ? [{high, sub:''}] : [...h.subs].sort((a, b) => a.localeCompare(b, 'fr')).map(sub => ({high, sub}));
     cats.forEach(cat => {
       const r = reference(tx, cat, year, cov);
-      if (!(r.total > 0) || r.avg == null) return;            // remboursements nets : rien à budgéter
-      out.push({ id:newId(), label: cat.sub || cat.high, vendor: vendorOf(tx, cat, year), cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12), realFormula: '', fcFormula: FC_FORMULA, fcNote: '' });
+      if (!(r.total + r.ext > 0) || r.avg == null) return;    // remboursements nets : rien à budgéter
+      out.push({ id:newId(), label: cat.sub || cat.high, vendor: vendorOf(tx, cat, year), cat, key: keyFor ? keyFor(cat) : 'quote', forecast: Math.ceil(r.avg * 12 + r.ext), realFormula: '', fcFormula: FC_FORMULA, fcNote: '' });
     });
   }
   return out.sort((a, b) => b.forecast - a.forecast);

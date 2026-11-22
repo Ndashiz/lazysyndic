@@ -236,7 +236,7 @@ test('formule façon tableur : nombres, champs, priorités, parenthèses, pource
   assert.equal(C.evalFormula('2 ) 3', f).error, 'caractère inattendu : )');
   assert.equal(C.evalFormula('alert(1)', f).error, 'caractère inattendu : a');                        // jamais de code
   assert.equal(C.evalFormula('', f).error, 'formule vide');
-  assert.equal(C.shortFormula(C.REAL_FORMULA), 'réel à ce jour × 12 ÷ mois couverts');
+  assert.equal(C.shortFormula(C.REAL_FORMULA), 'réel à ce jour × 12 ÷ mois couverts + hors comptes');
 });
 
 test('poste résolu : estimé N-1, réel ramené à 12 mois, delta, prévision par formule ou saisie', () => {
@@ -358,4 +358,39 @@ test('évolution face à une référence : écart en euros et en pour cent, sans
   assert.equal(C.evolution(120, null), null); assert.equal(C.evolution(120, undefined), null); assert.equal(C.evolution(120, 'abc'), null);
   // au centime : pas d'écart fantôme dû aux flottants
   assert.equal(C.evolution(0.1 + 0.2, 0.3).delta, 0);
+});
+
+test('dépenses hors comptes : dans le réel du poste, sans être ramenées à 12 mois ni compter comme relevé', () => {
+  const T = (iso, account, high, sub, amount, tiers) => ({ iso, account, high, sub, amount, tiers });
+  const tx = [
+    T('2026-01-01', 'ext', 'Assurance', 'Incendie', -915.52, 'AG Assurance'),       // payé hors comptes de l'ACP
+    T('2026-02-10', 'pay', 'Énergie', 'Eau', -300, 'Vivaqua'),
+    T('2026-11-18', 'pay', 'Énergie', 'Eau', -380, 'Vivaqua'),
+    T('2024-11-11', 'ext', 'Frais ACP', 'Divers', -180, 'Syndic Yourself'),          // avant le premier relevé
+  ];
+  // la couverture vient des relevés : février à novembre 2026, et rien en 2024
+  assert.deepEqual(C.coverage(tx, 2026), { months:10, from:2, to:11 });
+  assert.deepEqual(C.coverage(tx, 2024), { months:0, from:0, to:0 });
+  const cov = C.coverage(tx, 2026), inc = { high:'Assurance', sub:'Incendie' }, eau = { high:'Énergie', sub:'Eau' };
+  assert.deepEqual(C.reference(tx, inc, 2026, cov), { total:0, ext:915.52, count:1, months:10, avg:0 });
+  assert.deepEqual(C.reference(tx, eau, 2026, cov), { total:680, ext:0, count:2, months:10, avg:68 });
+  // le poste : la prime telle quelle (pas × 12 ÷ 10), l'eau ramenée à 12 mois comme avant
+  const ctx = { tx, year:2026, cov, prev:[], marge:3, frozen:false };
+  const pInc = C.resolve({ id:'i', label:'Assurance incendie', cat:inc, key:'quote', forecast:0, realFormula:'', fcFormula:C.FC_FORMULA }, ctx);
+  assert.equal(pInc.calc.real, 915.52); assert.equal(pInc.calc.ext, 915.52); assert.equal(pInc.calc.toDate, 0);
+  assert.equal(pInc.forecast, 942.99);                                              // réel × (1 + 3 %)
+  const pEau = C.resolve({ id:'e', label:'Eau', cat:eau, key:'indiv', forecast:0, realFormula:'', fcFormula:'' }, ctx);
+  assert.equal(pEau.calc.real, 816); assert.equal(pEau.calc.ext, 0);
+  // un poste qui porte l'ancienne formule standard en toutes lettres suit la nouvelle
+  assert.equal(C.resolve({ id:'o', label:'Assurance incendie', cat:inc, key:'quote', forecast:0, realFormula:'[réel à ce jour] × 12 ÷ [mois couverts]', fcFormula:'' }, ctx).calc.real, 915.52);
+  // une formule choisie par le syndic est respectée telle quelle
+  assert.equal(C.resolve({ id:'c', label:'Assurance incendie', cat:inc, key:'quote', forecast:0, realFormula:'[réel à ce jour]', fcFormula:'' }, ctx).calc.real, 0);
+  // bénéficiaire, dépenses sans poste et proposition de postes en tiennent compte
+  assert.equal(C.vendorOf(tx, inc, 2026), 'AG Assurance');
+  assert.equal(C.uncovered(tx, [{ id:'e', cat:eau }], 2026).total, 915.52);
+  const seeded = C.seed(tx, 2026, cov).find(p => p.cat.sub === 'Incendie');
+  assert.equal(seeded.forecast, 916);                                               // la prime, arrondie à l'euro supérieur, pas extrapolée
+  // le réel de l'année d'avant additionne compte de paiement et hors comptes
+  const tx2 = [...tx, T('2025-03-05', 'pay', 'Assurance', 'Incendie', -100, 'AG'), T('2025-01-01', 'ext', 'Assurance', 'Incendie', -878.88, 'AG Assurance')];
+  assert.equal(C.fieldsFor(tx2, { cat:inc }, 2026, C.coverage(tx2, 2026), [], 3)['réel précédent'], 978.88);
 });

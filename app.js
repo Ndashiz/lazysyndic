@@ -4175,7 +4175,7 @@ function ensureChargesCss(){
 let chgEdit = null;   // éditeur de formule ouvert : {id du poste, which:'real'|'fc'}
 // Champs qu'une formule peut utiliser : [token, libellé] ; « réel » n'existe que pour la prévision.
 const chgFieldList = ref => [
-  ['réel', `Réel ${ref} ramené à 12 mois`], ['réel à ce jour', `Réel ${ref} à ce jour`], ['mois couverts', `Mois couverts en ${ref}`],
+  ['réel', `Réel ${ref} ramené à 12 mois`], ['réel à ce jour', `Réel ${ref} à ce jour`], ['hors comptes', `Payé hors comptes en ${ref}`], ['mois couverts', `Mois couverts en ${ref}`],
   ['moyenne mensuelle', `Moyenne mensuelle ${ref}`], ['réel précédent', `Réel ${ref-1}`], ['budget précédent', `Budget ${ref}`], ['marge', 'Marge'],
 ];
 // Ligne d'éditeur de formule, sous le poste : champs à insérer, formule, résultat, appliquer.
@@ -4219,7 +4219,7 @@ function renderCharges(){
   const prevRes=prevB.reserve.filter(p=>LSCharges.reserveSpan(p, y).inYear>0);
   const vendors=postes.map(p=>LSCharges.vendorOf(tx, p.cat, ref));
   const today = ref===new Date().getFullYear() ? ' à ce jour' : '';
-  const covTxt = `Estimation ${y} établie sur le réel ${ref} du compte de paiement` + (!cov.months ? ` : aucun relevé en ${ref}, saisissez les estimations.`
+  const covTxt = `Estimation ${y} établie sur le réel ${ref} du compte de paiement, plus les dépenses payées hors comptes` + (!cov.months ? ` : aucun relevé en ${ref}, saisissez les estimations.`
     : cov.months<12 ? `${today}, relevés de ${CHG_MON[cov.from-1]} à ${CHG_MON[cov.to-1]} ramenés à 12 mois.` : ` sur l'année complète.`)
     + ` « Estimé pour ${ref} » rappelle le budget ${ref} ; l'écart est la différence entre ce budget et le réel. Budget ${y} = réel × (1 + marge) par défaut ; la formule et son explication se modifient poste par poste (ƒ).`;
   const totEst=sum(postes.map(p=>p.calc.est||0)), hasEst=postes.some(p=>p.calc.est!=null);
@@ -4240,7 +4240,7 @@ function renderCharges(){
     const estCell = c.est==null ? `<span class="sub">—</span><div class="chg-sub">${prev.length?`absent du budget ${ref}`:`pas de budget ${ref}`}</div>` : `${eur(c.est)}<div class="chg-sub">budget ${ref}</div>`;
     const realCell = !c.hasRef ? `<span class="sub">—</span><div class="chg-sub">${p.cat?`pas de relevé en ${ref}`:'nouveau poste'}</div>`
       : c.real==null ? `<span class="sub">erreur</span><div class="chg-warn">${escH(c.realError||'')}</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`
-      : `${eur(c.real)}<div class="chg-sub">${eur(c.toDate)} sur ${c.months} mois</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`;
+      : `${eur(c.real)}<div class="chg-sub">${eur(c.toDate)} sur ${c.months} mois${c.ext ? ` + ${eur(c.ext)} hors comptes` : ''}</div><div>${chip(p,'real', LSCharges.shortFormula(c.realFormula))}</div>`;
     const fcLabel = p.fcFormula ? LSCharges.shortFormula(p.fcFormula) : 'saisie';
     // Le poste porte tout ce qui le définit : nom, catégorie de la comptabilité, bénéficiaire, clé.
     const meta = edit
