@@ -114,8 +114,10 @@
       if (r && !r.ok) out.push({ic:'landmark', t:`Écart de ${eur(Math.abs(r.diff))} — compte de ${a === 'res' ? 'réserve' : 'paiement'}`, d:'Le solde calculé ne correspond pas à la clôture du dernier relevé.', go:'acc'});
     });
     try {
-      ownerLedger().filter(o => o.solde < -0.005).forEach(o =>
-        out.push({ic:'users', t:`${o.n} : ${eur(-o.solde)} en retard`, d:'Charges et provisions de l’exercice.', go:'dash'}));
+      // en retard = des échéances échues restent impayées ; le solde, lui, est négatif pour tout le
+      // monde en cours d'année (il reste des échéances à venir)
+      ownerLedger().filter(o => o.enRetard).forEach(o =>
+        out.push({ic:'users', t:`${o.n} : ${eur(o.retard)} en retard`, d:`Échéances échues de l’exercice ${o.year}.`, go:'dash'}));
     } catch(e){}
     const soon = (() => { const d = new Date(); d.setDate(d.getDate() + 7); const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; })();
     (state.reminders || []).filter(r => !r.done && /^\d{4}-\d{2}-\d{2}$/.test(r.due || '') && r.due <= soon).forEach(r =>
@@ -266,7 +268,7 @@
     if (!led.length){ box.innerHTML = ''; return; }
     if (due <= 0){ box.innerHTML = '<div class="sub">Renseignez le dû de chacun dans Budget → Provisions pour suivre les paiements.</div>'; return; }
     const paid = led.reduce((a, o) => a + Math.min(o.verse || 0, o.due || 0), 0);
-    const ok = led.filter(o => o.solde >= -0.005).length;
+    const ok = led.filter(o => !o.enRetard).length;
     const pct = Math.min(100, Math.round(paid / due * 100));
     box.innerHTML = `<div class="op-row"><span>${ok} copropriétaire${ok > 1 ? 's' : ''} sur ${led.length} à jour</span><b>${eur(paid)} / ${eur(due)}</b></div>
       <div class="track"><div class="fill" data-w="${pct}" style="width:${pct}%"></div></div>`;

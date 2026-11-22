@@ -241,9 +241,18 @@ devait, exercice par exercice (`duesOf`, `syncDues`, `freezeDues` dans `app.js`)
 - appliquer le budget d'un exercice ultérieur ne touche donc pas au suivi de l'exercice en cours ;
 - la clôture d'un exercice fige son dû : plus rien ne l'écrase ensuite.
 
-Un exercice dont le dû n'a jamais été enregistré n'affiche que ses versements. Le grand livre de
-l'accueil (soldes, retards, relances) et le pont Jarvis gardent leur règle propre : l'exercice du
-dernier budget appliqué (`ledgerYear`).
+Un exercice dont le dû n'a jamais été enregistré n'affiche que ses versements.
+
+Le grand livre de l'app (`ownerLedger` : accueil, provisions, « Ma situation », relances, rapport
+d'AG) suit la même règle, pour l'exercice en cours par défaut :
+
+- `solde` = report + versé − dû de l'année : ce qui reste à recevoir d'ici la fin de l'exercice ;
+- `retard` = attendu à ce jour − versé − report : ce qui devrait déjà être payé. **« En retard » se
+  dit du retard, jamais du solde** : en cours d'année, le solde est négatif pour tout le monde ;
+- la relance réclame le retard, et l'appel de fonds d'un exercice reprend le dû de cet exercice.
+
+Le pont Jarvis (`bridge/alerts.js`) n'a pas encore cette règle : il compare toujours un solde
+annuel sur l'exercice du dernier budget appliqué.
 
 Prérequis : lancer [`supabase/exercices-du.sql`](supabase/exercices-du.sql) à la main (une colonne
 `dues_by_year`). Sans lui, la vue fonctionne pour l'exercice en cours et prévient que le dû d'un

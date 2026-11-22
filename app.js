@@ -449,19 +449,9 @@ function verseFromTx(o, acct, from, to){
     return (!from || iso>=from) && (!to || iso<=to);
   }).map(t=>t.amount));
 }
-// L'exercice du dû : celui du dernier budget appliqué aux provisions (le dû de chacun en vient),
-// sinon l'année civile. Le dû est annuel ; le versé doit l'être aussi.
+// Les exercices dont le budget a été appliqué aux provisions.
 function appliedYears(){
   return Object.keys(state.charges||{}).filter(y=>/^\d{4}$/.test(y) && (state.charges[y]||{}).applied).map(Number).sort((a,b)=>a-b);
-}
-function ledgerYear(){ const ys=appliedYears(); return ys.length ? ys[ys.length-1] : new Date().getFullYear(); }
-// Dû d'un copropriétaire pour un exercice appliqué : figé à l'application (applied.byOwner), sinon
-// recalculé depuis le budget de l'époque (budgets appliqués avant que byOwner n'existe).
-function appliedDue(o, y){
-  const b=(state.charges||{})[y]; if(!b||!b.applied) return 0;
-  const key=o.id||o.short||o.n, bo=b.applied.byOwner||{};
-  if (bo[key]) return (+bo[key].pay||0)+(+bo[key].res||0);
-  try { const s=budgetSplit(y), i=s.owners.findIndex(x=>x.key===key); return i>=0 ? s.total[i] : 0; } catch(e){ return 0; }
 }
 // Les budgets appliqués avant que l'application ne fige la part de chacun (applied.byOwner) la
 // reçoivent une fois, pour que le bridge Jarvis, qui n'a pas charges.js, lise le même dû ; et les
@@ -488,7 +478,8 @@ function backfillAppliedByOwner(){
    - l'exercice des provisions en vigueur (duesYear) y est recopié à chaque changement (syncDues) ;
    - avant d'appliquer le budget d'un exercice ultérieur, celui en cours y est donc déjà ;
    - à la clôture, le dû de l'exercice est figé (freezeDues) : plus rien ne l'écrase ensuite.
-   Le grand livre historique (ownerLedger, accueil, relances, pont Jarvis) garde sa propre règle. */
+   Le grand livre (ownerLedger : accueil, provisions, relances, rapports) lit ce même dû par exercice.
+   Le pont Jarvis (bridge/alerts.js) suit encore l'ancienne règle, celle du dernier budget appliqué. */
 const exerciseNow = () => new Date().getFullYear();
 const periodClosed = y => periodsOf().some(p=>+p.year===+y && p.closed_at);
 // L'exercice auquel se rapportent les provisions en vigueur : l'année en cours, ou l'exercice
@@ -545,22 +536,40 @@ function ownerReport(o, y){
   return n ? {amount:Math.round(r*100)/100, since:y-n} : null;
 }
 
-// Le grand livre par copropriétaire, borné à l'exercice du dû. Avant, le versé cumulait toutes les
-// entrées depuis le premier relevé contre un dû annuel : dès le deuxième budget appliqué, chacun
-// paraissait créditeur de ses versements des années d'avant, et plus aucun retard ne se voyait.
-//   report = versements d'avant l'exercice − dû des exercices appliqués d'avant
-//   solde  = report + versé de l'exercice − dû de l'exercice
-// Sans budget appliqué avant l'exercice, les versements antérieurs comptent entiers (rien ne dit
-// ce qui était dû) : c'est l'ancien calcul, à l'identique. Même règle dans bridge/alerts.js.
-function ownerLedger(){
-  const y=ledgerYear(), from=`${y}-01-01`, to=`${y}-12-31`, prior=appliedYears().filter(k=>k<y);
+// Le grand livre par copropriétaire, pour un exercice : par défaut celui en cours (l'année civile).
+// Avant, il suivait l'exercice du dernier budget appliqué : appliquer le budget N+1 en décembre le
+// faisait basculer sur N+1 d'un coup, avec les provisions de N+1 et tous les versements passés
+// comptés comme une avance. Il lit maintenant le dû DE l'exercice (duesOf), comme la vue
+// Comptabilité › Versements :
+//   dû      = celui de l'exercice, pas les provisions du moment
+//   report  = solde laissé par les exercices précédents dont le dû est connu (ownerReport), 0 sinon
+//   solde   = report + versé − dû de l'année : ce qui reste à recevoir d'ici la fin de l'exercice
+//   attendu = les échéances échues à ce jour (une échéance compte une fois son mois terminé)
+//   retard  = attendu − versé − report, s'il est positif : ce qui devrait déjà être payé
+// « En retard » se dit du retard, jamais du solde : en cours d'année, le solde est négatif pour
+// tout le monde, puisqu'il reste des échéances à venir. Le pont Jarvis (bridge/alerts.js) n'a pas
+// encore cette règle : il compare toujours un solde annuel, sur l'exercice du dernier budget appliqué.
+function ownerLedger(y){
+  y = +y || exerciseNow();
+  const today=todayISO(), r2=v=>Math.round((+v||0)*100)/100;
+  const calls = typeof LSCalls!=='undefined';
   return ownersOf().map(o => {
-    const duePay = +(o.due_pay||0), dueRes = +(o.due_res||0), due = duePay+dueRes;
-    const versePay = verseFromTx(o,'pay',from,to), verseRes = verseFromTx(o,'res',from,to), verse = versePay+verseRes;
-    const before = verseFromTx(o, null, null, `${y-1}-12-31`);
-    const report = Math.round((before - sum(prior.map(k=>appliedDue(o,k))))*100)/100;
-    return {...o, year:y, duePay, dueRes, due, versePay, verseRes, verse, report, solde: Math.round((report+verse-due)*100)/100};
+    const s=ownerYear(o, y), rep=ownerReport(o, y);
+    const duePay=s.due ? s.due.pay : 0, dueRes=s.due ? s.due.res : 0, due=r2(duePay+dueRes);
+    const versePay=s.paid.pay, verseRes=s.paid.res, verse=r2(versePay+verseRes);
+    const report=rep ? rep.amount : 0;
+    const per=calls ? LSCalls.cleanPeriodicity(o.periodicity) : 'month';
+    const expected=calls ? r2(LSCalls.expectedToDate(duePay, per, y, today).expected + LSCalls.expectedToDate(dueRes, per, y, today).expected) : due;
+    const retard=Math.max(0, r2(expected-verse-report));
+    return {...o, year:y, duePay, dueRes, due, dueKnown:!!s.due, versePay, verseRes, verse, report, reportKnown:!!rep,
+            expected, retard, enRetard:retard>0.99, solde:r2(report+verse-due)};
   });
+}
+// Le dû d'un copropriétaire pour un exercice, compte par compte ; à défaut de trace, les
+// provisions en vigueur si c'est leur exercice, sinon rien.
+function ownerDue(o, y){
+  const d=duesOf(y), k=ownerKey(o);
+  return d ? {pay:+((d[k]||{}).pay)||0, res:+((d[k]||{}).res)||0} : {pay:0, res:0};
 }
 
 /* ============================================================
@@ -628,8 +637,9 @@ function renderDashboard(){
     const ledger = ownerLedger(), ly = ledger.length ? ledger[0].year : '';
     tbl.innerHTML = `<tr><th>Propriétaire</th><th class="num">Quotité</th><th class="num">Dû ${ly}</th><th class="num">Versé ${ly}</th><th class="num">Solde</th><th></th></tr>` +
       ledger.map(o=>{
-        const late = o.solde < -0.005;
-        const rep = Math.abs(o.report)>=0.005 ? `<div class="sub" style="font-size:11px">report ${o.report<0?'−':'+'}${eur(Math.abs(o.report))}</div>` : '';
+        const late = o.enRetard;
+        const rep = (Math.abs(o.report)>=0.005 ? `<div class="sub" style="font-size:11px">report ${o.report<0?'−':'+'}${eur(Math.abs(o.report))}</div>` : '')
+          + (late ? `<div class="sub" style="font-size:11px;color:var(--coral)">dont ${eur(o.retard)} déjà échus</div>` : '');
         return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${o.short[0]}</span> ${o.n}</div></td>
           <td class="num">${o.q}</td>
           <td class="num">${eur(o.due)}</td>
@@ -3874,7 +3884,7 @@ function fundCallModel(o, y){
   const m=(window.LS&&window.LS.member)||{}, b=(state.charges||{})[y]||{};
   const pubAt = b.publishedAt ? new Date(b.publishedAt) : null;
   return LSCalls.callModel({name:o.n, short:o.short, q:o.q, email:o.email, ogm:o.ogm, periodicity:o.periodicity},
-    {pay:+o.due_pay||0, res:+o.due_res||0},
+    duesOf(y) ? ownerDue(o, y) : {pay:+o.due_pay||0, res:+o.due_res||0},   // le dû de l'exercice appelé, pas celui du moment
     {year:y, qTot:sum(ownersOf().map(x=>+x.q||0))||1000, copro:{name:state.coproName||'', addr:state.coproAddr||'', kbo:state.coproKbo||''},
      iban:(state.ibans||{}).pay||'', syndic:{name:(m.full_name||'').trim()||'Le syndic', email:String(m.userEmail||m.email||'').trim()},
      issuedAt:todayISO(), approved: b.approved && b.approved.date ? `budget ${y} approuvé par l'assemblée générale du ${fmtDateLong(b.approved.date)}` : pubAt && !isNaN(pubAt) ? `budget ${y} publié le ${fmtDateLong(pubAt.toISOString().slice(0,10))}` : ''});
@@ -4594,7 +4604,7 @@ async function applyCharges(y){
 function renderProvisions(){
   const t=document.getElementById('provTable'); if(!t) return;
   const pt=document.getElementById('provTitle'); if (pt) pt.textContent=`Provisions attendues par copropriétaire (le « dû ») · exercice ${duesYear()}`;
-  const ed=canWrite(); const led=ownerLedger();
+  const ed=canWrite(); const led=ownerLedger(duesYear());   // les provisions en vigueur, donc leur exercice
   if(!led.length){ t.innerHTML='<tr><td class="sub" style="padding:14px">Aucun propriétaire enregistré.</td></tr>'; return; }
   const num=v=>(+v||0).toLocaleString('fr-BE',{minimumFractionDigits:2, maximumFractionDigits:2});   // 952,63 comme partout, relu par parseAmount
   const ly=led[0].year;
@@ -4607,7 +4617,7 @@ function renderProvisions(){
     return `<b>${eur(first)}</b><div class="chg-sub">${PER_LBL[per]}${per!=='month'?` · ${eur(o.due/12)} / mois`:''}</div>`; };
   t.innerHTML=`<tr><th>Propriétaire</th><th class="num">Dû ${ly} · paiement</th><th class="num">Dû ${ly} · réserve</th><th class="num">Total dû</th><th class="num">Par mois</th><th class="num">Versé ${ly}</th><th class="num">Solde</th>${calls?`<th>Appel de fonds ${ly}</th>`:''}</tr>`
     + led.map(o=>{
-      const late=o.solde<-0.005;
+      const late=o.enRetard;
       const cell=(cls, v, lbl)=> ed
         ? `<input class="fld ${cls}" data-id="${o.id||''}" value="${num(v)}" inputmode="decimal" aria-label="${escH(lbl)} de ${escH(o.n)}" style="width:92px;text-align:right">`
         : eur(v);
@@ -5339,13 +5349,13 @@ function fillReportPeriod(){
       <div class="r-sub" style="margin-top:8px">Résultat de l'exercice : <b class="${res>=0?'pos':'neg'}">${res>=0?'Excédent ':'Déficit '}${eur(Math.abs(res))}</b></div>
       ${(ext=>ext.length ? `<div class="r-sub" style="margin-top:4px">Dont <b>${eur(Math.abs(sum(ext.map(t=>t.amount))))}</b> de dépenses payées hors des comptes de l’ACP (${ext.map(t=>`${escH(t.tiers)}, ${t.date}`).join(' ; ')}) : comprises dans ce résultat, sans effet sur les soldes des comptes.</div>` : '')(txList.filter(isExt))}`;
   }
-  function ownersSection(){
-    const led = ownerLedger(), ly = led.length ? led[0].year : '', qTot = sum(led.map(o=>+o.q||0))||1000;
+  function ownersSection(p){
+    const led = ownerLedger(p && p.toIso ? +String(p.toIso).slice(0,4) : undefined), ly = led.length ? led[0].year : '', qTot = sum(led.map(o=>+o.q||0))||1000;
     const sg = v => `${v<0?'−':''}${eur(Math.abs(v))}`;
     const rows = led.map(o=>`<tr><td>${o.n}</td><td class="num">${o.q}/${qTot}</td>
       <td class="num">${sg(o.report)}</td><td class="num">${eur(o.due)}</td><td class="num">${eur(o.verse)}</td>
       <td class="num ${o.solde<0?'neg':'pos'}">${sg(o.solde)}</td>
-      <td>${o.solde<-0.005?'En retard':'À jour'}</td></tr>`).join('');
+      <td>${o.enRetard?`En retard de ${eur(o.retard)}`:'À jour'}</td></tr>`).join('');
     const tRep=sum(led.map(o=>o.report)), tDue=sum(led.map(o=>o.due)), tVer=sum(led.map(o=>o.verse)), tSol=sum(led.map(o=>o.solde));
     return `<h2>Récapitulatif par copropriétaire — exercice ${ly}</h2>
       <table><tr><th>Copropriétaire</th><th class="num">Quotité</th><th class="num">Report</th><th class="num">Dû ${ly}</th><th class="num">Versé ${ly}</th><th class="num">Solde</th><th>Statut</th></tr>
@@ -5471,7 +5481,7 @@ function fillReportPeriod(){
       body = headEl(title,p)
         + soldesSection([PAY,RES],p)
         + resultatSection(allTx,p,'')
-        + ownersSection()
+        + ownersSection(p)
         + chronoSection(p)
         + annexeTxSection('pay',p,'Annexe 2 — Transactions du compte de paiement')
         + annexeTxSection('res',p,'Annexe 3 — Transactions du compte de réserve')
@@ -5816,7 +5826,7 @@ function renderMySituation(){
   const led = short ? ownerLedger().find(o=>(o.short||o.n)===short) : null;
   if(!led){ box.style.display='none'; box.innerHTML=''; return; }
   box.style.display='block';
-  const late=led.solde<-0.005;
+  const late=led.enRetard;
   const myTx=state.tx.filter(t=>t.amount>0 && ownerOfTx(t)===short)
     .sort((a,b)=>{const da=parseDate(a.date),db=parseDate(b.date);return (db?db.iso:'').localeCompare(da?da.iso:'');});
   const histo = myTx.length
@@ -5834,7 +5844,7 @@ function renderMySituation(){
     <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
       <div class="kpi"><div class="l">Dû ${led.year} (charges + réserve)</div><div class="v">${eur(led.due)}</div></div>
       <div class="kpi"><div class="l">Versé ${led.year}</div><div class="v" style="color:var(--green)">${eur(led.verse)}</div></div>
-      <div class="kpi"><div class="l">Solde</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${led.solde<0?'−':''}${eur(Math.abs(led.solde))}</div></div>
+      <div class="kpi"><div class="l">${led.solde<0?'Reste à verser':'Solde'}</div><div class="v" style="color:${late?'var(--coral)':'var(--green)'}">${eur(Math.abs(led.solde))}</div>${late?`<div class="sub" style="color:var(--coral)">dont ${eur(led.retard)} déjà échus</div>`:led.solde<-0.005?'<div class="sub">échéances à venir, rien en retard</div>':''}</div>
     </div>
     ${Math.abs(led.report)>=0.005 ? `<div class="sub" style="margin-top:8px">Report des exercices précédents : ${led.report<0?'−':'+'}${eur(Math.abs(led.report))}</div>` : ''}
     ${typeof LSCalls!=='undefined' && led.due>0.005 ? (()=>{ const cm=fundCallModel(led, led.year); return `<div class="card" style="margin-top:14px;padding:12px 16px;background:var(--secondary);border-left:3px solid var(--clay)">
@@ -5876,31 +5886,37 @@ function renderPaymentTracking(){
   const header='<tr><th>Copropriétaire</th><th class="num">Attendu</th>'
     + months.map(m=>`<th class="num">${MON[m.m-1]} ${String(m.y).slice(2)}</th>`).join('')+'</tr>';
   const per = o => typeof LSCalls!=='undefined' ? LSCalls.cleanPeriodicity(o.periodicity) : 'month';
-  const expIn = (o, m) => typeof LSCalls!=='undefined' ? LSCalls.expectedInMonth(o.due_pay||0, per(o), m.y, m.m) : (o.due_pay||0)/12;
+  // le dû de l'année du mois affiché (duesOf), pas les provisions du moment
+  const duePay = (o, y) => { const d=duesOf(y); return d ? ownerDue(o, y).pay : 0; };
+  const expIn = (o, m) => typeof LSCalls!=='undefined' ? LSCalls.expectedInMonth(duePay(o, m.y), per(o), m.y, m.m) : duePay(o, m.y)/12;
+  const nowD=new Date(), isCur = m => m.y===nowD.getFullYear() && m.m===nowD.getMonth()+1;
   const rows=ow.map(o=>{
     const short=o.short||o.n;
-    const first = typeof LSCalls!=='undefined' ? (LSCalls.schedule(o.due_pay||0, per(o), new Date().getFullYear())[0]||{}).amount||0 : (o.due_pay||0)/12;
+    const first = typeof LSCalls!=='undefined' ? (LSCalls.schedule(duePay(o, exerciseNow()), per(o), exerciseNow())[0]||{}).amount||0 : duePay(o, exerciseNow())/12;
     const everyLbl = ({month:'/ mois', quarter:'/ trimestre', year:'/ an'})[per(o)];
     const cells=months.map(m=>{
       const paid=paidInMonth(short,m), exp=expIn(o, m); let inner;
       if(exp>0){ inner = paid>=exp*0.95 ? '<span class="badge b-ok">✓</span>'
         : paid>0 ? '<span class="badge" style="background:var(--clay-soft);color:var(--warning-ink)">partiel</span>'
+        : isCur(m) ? '<span class="sub" title="Attendu d’ici la fin du mois">en cours</span>'
         : '<span class="badge b-late">✗</span>'; }
       else inner = paid>0 ? eur(paid) : '—';
       return `<td class="num" title="${eur(paid)} versé en ${MON[m.m-1]}">${inner}</td>`;
     }).join('');
     return `<tr><td><div class="who"><span class="a" style="background:${o.c}">${short[0]}</span> ${o.n}</div></td><td class="num">${first>0?`${eur(first)}<div class="chg-sub">${everyLbl}</div>`:'—'}</td>${cells}</tr>`;
   }).join('');
-  const last=months[months.length-1];
-  const late=ow.filter(o=>{ const exp=expIn(o, last); return exp>0 && paidInMonth(o.short||o.n,last) < exp*0.95; });
+  // En retard = des échéances échues restent impayées (grand livre de l'exercice en cours), pas
+  // « le mois en cours n'est pas encore payé » : une mensualité est attendue à la fin de son mois.
+  const led=ownerLedger(), late=ow.filter(o=>{ const l=led.find(x=>ownerKey(x)===ownerKey(o)); return l && l.enRetard; });
+  const retardOf=o=>(led.find(x=>ownerKey(x)===ownerKey(o))||{}).retard||0;
   const relance = late.length
     ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <span class="sub">⚠ En retard sur ${MON[last.m-1]} ${String(last.y).slice(2)} :</span>`
+        <span class="sub">⚠ Échéances échues impayées (exercice ${exerciseNow()}) :</span>`
       + late.map(o=>canWrite()
-          ? `<button class="btn btn-ghost relance-btn" data-short="${o.short||o.n}" style="padding:6px 12px;font-size:13px">✉ Relancer ${o.short||o.n}</button>`
-          : `<span class="badge b-late">${o.short||o.n}</span>`).join('')+'</div>'
+          ? `<button class="btn btn-ghost relance-btn" data-short="${o.short||o.n}" style="padding:6px 12px;font-size:13px" title="${eur(retardOf(o))} en retard">✉ Relancer ${o.short||o.n} · ${eur(retardOf(o))}</button>`
+          : `<span class="badge b-late">${o.short||o.n} · ${eur(retardOf(o))}</span>`).join('')+'</div>'
     : '';
-  const hint = ow.some(o=>o.due_pay>0) ? '' : ' · renseignez le dû dans Budget → Provisions pour détecter les retards';
+  const hint = led.some(o=>o.due>0) ? '' : ' · renseignez le dû dans Budget → Provisions pour détecter les retards';
   box.innerHTML=`<div class="card">
     <div class="h-row"><div><h2>Suivi des charges payées</h2><div class="sub">par copropriétaire · 6 derniers mois${hint}</div></div></div>
     <div style="overflow-x:auto"><table>${header}${rows}</table></div>
@@ -5920,11 +5936,13 @@ async function relanceOwner(short){
   const iban=String((state.ibans||{}).pay||'').trim();
   const ibanTxt=iban && window.LSStatement ? LSStatement.fmtIban(iban) : iban;
   const sg=v=>`${v<0?'−':''}${eur(Math.abs(v))}`;
-  const amount=eur(Math.abs(o.solde)), hasRep=Math.abs(o.report)>=0.005;
+  // Ce qu'on réclame : le retard (échéances échues impayées). À défaut de retard, le reste de l'année.
+  const lateAmt=o.retard>0.005 ? o.retard : Math.max(0, -o.solde);
+  const amount=eur(lateAmt), hasRep=Math.abs(o.report)>=0.005;
   const subject=`Rappel de paiement de charges · ${cn}`;
   const text=`Bonjour ${o.n},
 
-Sauf erreur de notre part, votre compte présente un solde en attente de ${amount} au titre des charges de ${cn}, exercice ${o.year} : dû ${eur(o.due)}, versé ${eur(o.verse)}${hasRep?`, report des exercices précédents ${sg(o.report)}`:''}.
+Sauf erreur de notre part, votre compte présente un retard de ${amount} sur les provisions de ${cn}, exercice ${o.year} : attendu à ce jour ${eur(o.expected)} (sur ${eur(o.due)} pour l'année), versé ${eur(o.verse)}${hasRep?`, report des exercices précédents ${sg(o.report)}`:''}.
 
 Merci de régulariser dès que possible${ibanTxt?` sur le compte de paiement de la copropriété, ${ibanTxt}`:''}. Si un versement a déjà été effectué, n'en tenez pas compte et n'hésitez pas à me le signaler.
 
@@ -5941,12 +5959,12 @@ ${syndic}, syndic de ${cn}
 <td valign="middle" align="right" style="${base}font-size:12px;line-height:18px;color:${T.muted};white-space:nowrap">Rappel de paiement · ${escH(fmtDateLong(todayISO()))}</td></tr></table></td></tr>
 <tr><td bgcolor="${T.primary}" style="background-color:${T.primary};padding:24px 28px">
 <div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${T.mint}">${escH(cn)} · exercice ${o.year}</div>
-<div style="${base}font-size:26px;line-height:32px;font-weight:800;color:#FFFFFF;margin-top:6px">${escH(amount)} en attente</div></td></tr>
+<div style="${base}font-size:26px;line-height:32px;font-weight:800;color:#FFFFFF;margin-top:6px">${escH(amount)} en retard</div></td></tr>
 <tr><td style="padding:24px 28px 8px;${base}color:${T.ink}">
 <p style="margin:0 0 14px;${base}font-size:15px;line-height:22px;font-weight:700;color:${T.ink}">Bonjour ${escH(o.n)},</p>
-<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Sauf erreur de notre part, votre compte présente un solde en attente de <b>${escH(amount)}</b> au titre des charges de <b>${escH(cn)}</b>.</p>
+<p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Sauf erreur de notre part, votre compte présente un retard de <b>${escH(amount)}</b> sur les provisions de <b>${escH(cn)}</b> échues à ce jour.</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid ${T.line};border-bottom:1px solid ${T.line};margin:0 0 14px">
-${row(`Dû ${o.year} (charges et réserve)`, eur(o.due))}${row(`Versé ${o.year}`, eur(o.verse))}${hasRep?row('Report des exercices précédents', sg(o.report)):''}${row('Solde', sg(o.solde), true)}</table>
+${row(`Attendu à ce jour (sur ${eur(o.due)} pour ${o.year})`, eur(o.expected))}${row(`Versé ${o.year}`, eur(o.verse))}${hasRep?row('Report des exercices précédents', sg(o.report)):''}${row('Retard', eur(lateAmt), true)}</table>
 ${ibanTxt?`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.secondary}" style="background-color:${T.secondary};border-radius:8px;margin:0 0 14px"><tr><td style="padding:12px 14px;border-left:3px solid ${T.clay}"><div style="${base}font-size:11px;line-height:16px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${T.deep}">Compte de paiement de la copropriété</div><div style="${base}font-size:16px;line-height:22px;font-weight:700;color:${T.ink};margin-top:3px">${escH(ibanTxt)}</div></td></tr></table>`:''}
 <p style="margin:0 0 14px;${base}font-size:14px;line-height:22px;color:${T.ink}">Merci de régulariser dès que possible. Si un versement a déjà été effectué, n'en tenez pas compte et n'hésitez pas à me le signaler.</p>
 <p style="margin:0 0 20px;${base}font-size:14px;line-height:22px;color:${T.ink}">Cordialement,<br><b>${escH(syndic)}</b>, syndic de ${escH(cn)}</p></td></tr>
@@ -5957,7 +5975,7 @@ ${ibanTxt?`<table role="presentation" width="100%" cellpadding="0" cellspacing="
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`rappel-${sansAccents(short).replace(/[^A-Za-z0-9_-]+/g,'_')}-${o.year}.eml`;
   document.body.appendChild(a); a.click(); a.remove();
   logTimeline({title:`Rappel de paiement préparé pour ${o.n}`, kind:'manual',
-    description:`${amount} en attente, exercice ${o.year} (dû ${eur(o.due)}, versé ${eur(o.verse)}). Brouillon .eml ${to?`adressé à ${to}`:'sans destinataire : e-mail du copropriétaire à renseigner dans Copropriétaires & lots'}.`});
+    description:`${amount} en retard, exercice ${o.year} (attendu à ce jour ${eur(o.expected)}, versé ${eur(o.verse)}). Brouillon .eml ${to?`adressé à ${to}`:'sans destinataire : e-mail du copropriétaire à renseigner dans Copropriétaires & lots'}.`});
   showToast(to ? `Brouillon de rappel prêt pour ${o.n} (${to}) : il s'ouvre dans votre messagerie.` : `Brouillon prêt, sans destinataire : ${o.n} n'a pas d'e-mail dans Copropriétaires & lots.`, to?'':'err');
 }
 
