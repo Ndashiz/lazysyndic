@@ -239,7 +239,7 @@
     box.innerHTML = '<table><thead><tr><th>Transaction</th><th>Date</th><th class="num">Montant</th><th>Statut</th><th></th></tr></thead><tbody>'
       + list.map(t => {
         const inc = t.amount > 0, unm = !t.high || t.high === '?';
-        const detail = unm ? (t.account === 'res' ? 'Compte de réserve' : 'Compte de paiement') : [t.high, t.sub].filter(Boolean).join(' › ');
+        const detail = unm ? (t.account === 'res' ? 'Compte de réserve' : t.account === 'ext' ? 'Hors comptes de l’ACP' : 'Compte de paiement') : [t.high, t.sub].filter(Boolean).join(' › ');
         return `<tr><td><div class="tx-cell"><span class="file-ic${inc ? ' in' : ''}">${ic(inc ? 'in' : 'file')}</span>
             <div style="min-width:0"><b>${esc(t.tiers || t.note || '—')}</b><small>${esc(detail)}</small></div></div></td>
           <td class="sub" style="white-space:nowrap">${esc(frDate(isoOf(t)) || t.date)}</td>

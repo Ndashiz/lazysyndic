@@ -619,6 +619,7 @@
         <div class="seg" id="acctseg">
           <button class="on" data-acct="pay">Compte de paiement · 895,25 €</button>
           <button data-acct="res">Compte de réserve · 496,43 €</button>
+          <button data-acct="ext" title="Dépenses de l'immeuble payées ailleurs que sur les comptes de l'ACP : comptées dans la comptabilité, sans effet sur les soldes">Hors comptes</button>
         </div>
       </div>
 
@@ -629,7 +630,7 @@
       <div class="card" id="bfrCard" style="margin-bottom:16px"></div>
 
       <!-- report generation -->
-      <div class="card" style="margin-bottom:16px;display:flex;align-items:end;gap:14px;flex-wrap:wrap">
+      <div class="card" id="repCard" style="margin-bottom:16px;display:flex;align-items:end;gap:14px;flex-wrap:wrap">
         <div><div class="l" style="font-size:12px;color:var(--ink-faint)">Rapports — période</div>
           <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
             <input class="fld" id="repFrom" placeholder="jj/mm/aaaa" style="width:120px"><span style="color:var(--ink-faint)">→</span><input class="fld" id="repTo" placeholder="jj/mm/aaaa" style="width:120px">
@@ -665,7 +666,7 @@
       </div>
 
       <!-- monthly evolution chart -->
-      <div class="card" style="margin-bottom:16px">
+      <div class="card" id="chartCard" style="margin-bottom:16px">
         <div class="h-row"><div><h2>Évolution mensuelle</h2><div class="sub" id="chartSub">Compte de paiement · entrées, sorties &amp; solde</div></div>
           <div style="display:flex;gap:14px;font-size:12px;color:var(--ink-soft)">
             <span><span class="sw" style="display:inline-block;background:var(--chart-in)"></span> Entrées</span>
@@ -1051,16 +1052,16 @@
      quatre heures de cache navigateur (et cette page avec dix minutes). Sans lui, la page neuve tourne
      quatre heures avec les anciens scripts : un bouton ajouté ici ne fait rien, une correction n'arrive pas.
      Une seule valeur pour tous les scripts locaux (tests/cache.test.mjs le vérifie). -->
-<script src="config.js?v=2026-11-22c"></script>
-<script src="db.js?v=2026-11-22c"></script>
-<script src="signature.js?v=2026-11-22c"></script>
-<script src="statement.js?v=2026-11-22c"></script>
-<script src="convocation.js?v=2026-11-22c"></script>
-<script src="pdf.js?v=2026-11-22c"></script>
-<script src="charges.js?v=2026-11-22c"></script>
-<script src="calls.js?v=2026-11-22c"></script>
-<script src="recon.js?v=2026-11-22c"></script>
-<script src="app.js?v=2026-11-22c"></script>
+<script src="config.js?v=2026-11-22d"></script>
+<script src="db.js?v=2026-11-22d"></script>
+<script src="signature.js?v=2026-11-22d"></script>
+<script src="statement.js?v=2026-11-22d"></script>
+<script src="convocation.js?v=2026-11-22d"></script>
+<script src="pdf.js?v=2026-11-22d"></script>
+<script src="charges.js?v=2026-11-22d"></script>
+<script src="calls.js?v=2026-11-22d"></script>
+<script src="recon.js?v=2026-11-22d"></script>
+<script src="app.js?v=2026-11-22d"></script>
 
 <style>
   .vote{padding:2px}
@@ -1142,4 +1143,4 @@
 </style>
 
 <!-- Coque du design (barre du haut, page de garde, notifications) : après app.js, dont elle lit l'état. -->
-<script src="ui.js?v=2026-11-22c"></script>
+<script src="ui.js?v=2026-11-22d"></script>

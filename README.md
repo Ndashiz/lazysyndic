@@ -202,6 +202,27 @@ Prérequis : lancer [`supabase/calls.sql`](supabase/calls.sql) à la main (colon
 `periodicity`, reprises dans le baseline). Code : `calls.js` (pur : OGM, échéancier, modèle, PDF) ;
 tests : `node --test tests/calls.test.mjs` (aucune dépendance).
 
+## Mouvements hors comptes de l'ACP
+
+Une dépense de l'immeuble payée ailleurs que sur les comptes de l'ACP (l'assurance incendie
+réglée directement à l'assureur, par exemple) se saisit dans **Comptes bancaires › Hors comptes**.
+Elle entre dans `ls_transactions` avec `account = 'ext'` :
+
+- elle **compte dans la comptabilité** : sa catégorie, les totaux et le compte de résultats des
+  rapports, avec une ligne « dont hors comptes de l'ACP » ;
+- elle **ne touche aucun compte** : ni solde, ni rapprochement, ni relevé de compte, ni synchro
+  bancaire, ni trésorerie de l'écran Comptabilité. Tout cela filtre sur `'pay'` ou `'res'` ;
+- elle **reste hors du budget** : `charges.js` ne lit que le compte de paiement, le « réel » d'un
+  poste et les appels de provisions ne bougent pas.
+
+Piège à connaître : partout où le code écrit `acct==='res' ? … : …`, tout ce qui n'est pas la
+réserve tombe sur le compte de paiement. Un nouveau geste par compte doit traiter `'ext'` à part
+(`EXT`, `isExt`, `acctNom` dans `app.js`).
+
+Prérequis : lancer [`supabase/hors-comptes.sql`](supabase/hors-comptes.sql) à la main (la colonne
+`account` n'acceptait que `'pay'` et `'res'`). Sans lui, l'ajout est refusé par la base et l'app
+dit quoi lancer. Un exercice clôturé refuse aussi l'ajout : il faut le rouvrir.
+
 ## Exercices comptables
 
 Écran **Comptabilité** › carte « Exercices » : une ligne par année civile, avec les soldes

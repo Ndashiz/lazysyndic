@@ -75,7 +75,7 @@ create table if not exists public.ls_transactions (
   high       text,
   sub        text,
   amount     numeric(12,2) not null,       -- signé : + entrée, − sortie
-  account    text not null check (account in ('pay','res')),
+  account    text not null check (account in ('pay','res','ext')),   -- 'ext' : payé hors comptes de l'ACP (supabase/hors-comptes.sql sur une base existante)
   note       text,
   flag       boolean default false,
   comment    text,

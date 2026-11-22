@@ -240,6 +240,17 @@ window.LazySyndic = { state:()=>state, reset(){ if(ONLINE){location.reload();ret
 
 /* ---------- Dérivations ---------- */
 const txOf = acct => state.tx.filter(t => t.account === acct);
+/* ---------- Mouvements « hors comptes de l'ACP » ----------
+   Une dépense de l'immeuble payée ailleurs que sur les comptes de l'ACP (l'assurance incendie réglée
+   directement à l'assureur, par exemple). Elle compte dans la comptabilité (catégories, compte de
+   résultats) et jamais dans un solde bancaire, un rapprochement, un relevé, la synchro ou le budget
+   (charges.js ne lit que le compte de paiement). Elle porte `account = 'ext'` : tout ce qui filtre
+   par compte l'ignore de lui-même, et c'est voulu. La base n'accepte 'ext' qu'après
+   supabase/hors-comptes.sql. */
+const EXT = 'ext';
+const isExt = t => !!t && t.account === EXT;
+const acctNom = a => a==='res' ? 'compte de réserve' : a===EXT ? 'hors comptes de l’ACP' : 'compte de paiement';
+const extHint = m => /ls_transactions_account_check|check constraint|violates check/i.test(m) ? 'La base n’accepte pas encore les mouvements hors comptes : lancez supabase/hors-comptes.sql dans Supabase (SQL Editor), puis réessayez.' : m;
 const sum = arr => arr.reduce((a,b)=>a+b, 0);
 
 function balance(acct){
@@ -754,7 +765,8 @@ function renderTx(acct){
         ? `<button class="cat cat-pick ${catClass(t.high)}" title="Changer la catégorie">${catLabel}<span class="caret">▾</span></button>`
         : `<span class="cat ${catClass(t.high)}">${catLabel}</span>`;
     const who = t.amount>0 ? `Versé par <b>${escH(ownerDisp(ownerOfTx(t))||'—')}</b>` : '';
-    const line2 = [who, hasC ? `<span class="cmt-mark" title="${esc(t.comment)}">${escH(short(t.comment,48))}</span>` : ''].filter(Boolean).join(' · ');
+    const extTag = isExt(t) ? `<span title="Payé ailleurs que sur les comptes de l’ACP : compté dans la comptabilité, sans effet sur les soldes" style="color:var(--warning-ink);font-weight:600">Hors comptes de l’ACP</span>` : '';
+    const line2 = [extTag, who, hasC ? `<span class="cmt-mark" title="${esc(t.comment)}">${escH(short(t.comment,48))}</span>` : ''].filter(Boolean).join(' · ');
     const st = reqMiss ? ['danger','Commentaire obligatoire'] : (!t.high||t.high==='?') ? ['warning','À catégoriser'] : t.flag ? ['warning','À revoir'] : ['success','Classé'];
     const first = txSelectMode && canWrite() && !locked
       ? `<input type="checkbox" class="tx-sel" data-id="${t.id}" aria-label="Sélectionner ${esc(t.tiers)}">`
@@ -812,7 +824,7 @@ function renderTxTools(acct){
        <button class="btn btn-ghost" id="txSelOff">Terminer</button>
        <span class="sub">Cochez les mouvements à retirer · récupérables 7 jours · un exercice clôturé ne se coche pas</span>`
     : `<button class="btn btn-ghost" id="txSelOn">Sélectionner</button>
-       <button class="btn btn-ghost" id="txDelAll" style="color:var(--danger);margin-left:auto">Tout supprimer ce compte (${all.length})</button>`;
+       <button class="btn btn-ghost" id="txDelAll" style="color:var(--danger);margin-left:auto">${curAcct===EXT?'Tout supprimer':'Tout supprimer ce compte'} (${all.length})</button>`;
   document.getElementById('txDelSel')?.addEventListener('click', ()=>deleteSelectedTx(acct));
   document.getElementById('txSelOn')?.addEventListener('click', ()=>{ txSelectMode=true; renderTx(acct); });
   document.getElementById('txSelOff')?.addEventListener('click', ()=>{ txSelectMode=false; renderTx(acct); });
@@ -859,7 +871,7 @@ function renderTrash(){
   const rows=trash.map(t=>{
     const days=Math.max(0, 7-Math.floor((Date.now()-Date.parse(t.deleted_at))/86400000));
     return `<tr><td>${t.date}</td><td>${t.tiers}</td><td class="num ${t.amount<0?'neg':'pos'}">${signed(t.amount)}</td>
-      <td class="sub">${t.account==='res'?'réserve':'paiement'} · reste ${days} j</td>
+      <td class="sub">${t.account==='res'?'réserve':isExt(t)?'hors comptes':'paiement'} · reste ${days} j</td>
       <td style="text-align:right;white-space:nowrap"><button class="lk restore-one" data-id="${t.id}">restaurer</button> · <button class="lk del purge-one" data-id="${t.id}">suppr. définitive</button></td></tr>`;
   }).join('');
   box.innerHTML=`<div class="mini-h" style="margin-top:22px">🗑 Corbeille (${trash.length}) — récupérable 7 jours</div>
@@ -878,7 +890,9 @@ function deleteSelectedTx(acct){
   const accts=[...new Set(state.tx.filter(t=>ids.includes(t.id)).map(t=>t.account))];
   trashTx(ids);
   const patch={};
-  accts.forEach(a=>{ if(txOf(a).length===0){ state.opening=state.opening||{}; state.opening[a]=0;
+  // « hors comptes » n'a ni solde d'ouverture ni rapprochement : sans ce filtre, vider cet onglet
+  // remettait à zéro l'ouverture du compte de paiement (tout ce qui n'est pas 'res' y tombait).
+  accts.filter(a=>a!==EXT).forEach(a=>{ if(txOf(a).length===0){ state.opening=state.opening||{}; state.opening[a]=0;
     state.recon=state.recon||{}; delete state.recon[a]; patch[a==='res'?'opening_res':'opening_pay']=0; } });
   if(Object.keys(patch).length){ patch.recon=state.recon; saveState(); dbWrite(db=>db.updateSettings(patch)); }
   renderAll();
@@ -889,6 +903,11 @@ function deleteAllTx(acct){ resetAccount(acct); }
 function resetAccount(acct){
   if(!canWrite()){ alert('Lecture seule.'); return; }
   if(txOf(acct).some(txLocked)){ showToast('Ce compte a des mouvements dans un exercice clôturé : rouvrez l’exercice (Comptabilité › Exercices) avant de réinitialiser.', 'err'); return; }
+  if(acct===EXT){   // hors comptes : seulement ses mouvements, aucun solde ni rapprochement d'un compte de l'ACP
+    const extIds = txOf(EXT).map(t=>t.id);
+    if(!extIds.length || !confirm(`Mettre à la corbeille les ${extIds.length} mouvement(s) hors comptes ?\n\nRécupérables pendant 7 jours. Les comptes de l’ACP ne sont pas touchés.`)) return;
+    trashTx(extIds); renderAll(); return;
+  }
   const lbl = acct==='res'?'compte de réserve':'compte de paiement';
   const ids = txOf(acct).map(t=>t.id);
   if(!confirm(`Réinitialiser le ${lbl} ?\n\n${ids.length} transaction(s) → corbeille (récupérables 7 jours), solde d'ouverture remis à 0, réconciliation effacée.`)) return;
@@ -934,6 +953,8 @@ function refreshAccountChrome(){
   const segBtns = document.querySelectorAll('#acctseg button');
   if (segBtns[0]) segBtns[0].textContent = `Compte de paiement · ${eur(balance('pay'))}`;
   if (segBtns[1]) segBtns[1].textContent = `Compte de réserve · ${eur(balance('res'))}`;
+  const nExt = txOf(EXT).length;
+  if (segBtns[2]) segBtns[2].textContent = nExt ? `Hors comptes · ${nExt}` : 'Hors comptes';
   renderAcctInfo(curAcct);
 }
 
@@ -985,9 +1006,62 @@ function acctHolder(acct){
 const holderHint = m => /holders|schema cache|column/i.test(m) ? m+' — lancez supabase/releve.sql dans Supabase (SQL Editor).' : m;
 
 // Carte d'info compte : IBAN + titulaire + solde d'ouverture (éditables) + solde calculé + réconciliation.
+/** La fiche de l'onglet « Hors comptes » : ce que c'est, le total, et la saisie d'une dépense. */
+function renderExtInfo(box){
+  const rows = txOf(EXT), tot = +sum(rows.map(t=>+t.amount||0)).toFixed(2), ed = canWrite();
+  const cats = allCats().filter(c=>!isIncomeCat(c));
+  const lab = t => `<div class="l" style="font-size:12px;color:var(--ink-faint)">${t}</div>`;
+  box.innerHTML = `
+    <div class="h-row" style="align-items:flex-start;gap:16px">
+      <div style="flex:1 1 380px"><h2 style="margin:0">Hors comptes de l’ACP</h2>
+        <div class="sub" style="margin-top:4px;max-width:640px">Les dépenses de l’immeuble payées ailleurs que sur les comptes de l’ACP, comme une assurance réglée directement à l’assureur. Elles comptent dans la comptabilité, dans leur catégorie. Elles ne touchent ni les soldes des comptes, ni les rapprochements, ni les relevés, ni le budget.</div></div>
+      <div style="text-align:right">${lab('Total hors comptes')}
+        <div style="font-family:var(--display);font-size:22px;font-weight:600;margin-top:2px">${rows.length ? signed(tot) : '—'}</div>
+        <div class="sub">${rows.length} mouvement${rows.length>1?'s':''}</div></div>
+    </div>
+    ${ed ? `<form id="extForm" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end" autocomplete="off">
+      <label style="flex:0 1 130px">${lab('Date du paiement')}<input class="fld" id="extDate" style="width:100%;margin-top:4px" placeholder="jj/mm/aaaa" required></label>
+      <label style="flex:2 1 180px">${lab('Bénéficiaire')}<input class="fld" id="extTiers" style="width:100%;margin-top:4px" placeholder="Ex. AG Assurance" required></label>
+      <label style="flex:0 1 130px">${lab('Montant payé')}<input class="fld" id="extAmount" style="width:100%;margin-top:4px" placeholder="0,00" inputmode="decimal" required></label>
+      <label style="flex:1 1 200px">${lab('Catégorie')}<select class="fld" id="extCat" style="width:100%;margin-top:4px">${cats.map(c=>{
+          const subs=subcatsOf(c); return `<optgroup label="${escH(c)}"><option value="${escH(c+CAT_SEP)}">${escH(c)}</option>${subs.map(x=>`<option value="${escH(c+CAT_SEP+x)}">${escH(c+' › '+x)}</option>`).join('')}</optgroup>`; }).join('')}</select></label>
+      <label style="flex:3 1 240px">${lab('Commentaire (qui a payé, pourquoi hors comptes)')}<input class="fld" id="extComment" style="width:100%;margin-top:4px" placeholder="Ex. prime annuelle payée directement par les copropriétaires"></label>
+      <button class="btn btn-primary" type="submit">Ajouter la dépense</button>
+    </form>` : ''}`;
+  const f = box.querySelector('#extForm');
+  if (f){
+    const cat = f.querySelector('#extCat'); if (allCats().includes('Assurance')) cat.value = 'Assurance'+CAT_SEP;
+    f.onsubmit = e=>{ e.preventDefault(); addExtTx(f); };
+  }
+}
+/** Ajoute une dépense hors comptes : validée d'emblée (aucun relevé ne viendra la confirmer). */
+async function addExtTx(f){
+  if (!canWrite()){ showToast('Lecture seule : seul le syndic peut ajouter un mouvement.', 'err'); return; }
+  const val = id => f.querySelector('#'+id).value.trim();
+  const d = parseDate(val('extDate')), amt = Math.abs(parseAmount(val('extAmount'))), tiers = val('extTiers');
+  if (!d || !d.iso){ showToast('Date illisible : écrivez-la sous la forme 01/01/2026.', 'err'); return; }
+  if (!tiers){ showToast('Indiquez le bénéficiaire.', 'err'); return; }
+  if (!Number.isFinite(amt) || amt < 0.01){ showToast('Montant illisible : écrivez-le sous la forme 915,52.', 'err'); return; }
+  const cy = closedYearOf(d.iso);
+  if (cy!=null){ showToast(`L’exercice ${cy} est clôturé : rouvrez-le (Comptabilité › Exercices) pour y ajouter ce mouvement, puis clôturez-le à nouveau.`, 'err'); return; }
+  const [high, sub] = String(f.querySelector('#extCat').value||'').split(CAT_SEP);
+  const disp = `${d.iso.slice(8,10)}/${d.iso.slice(5,7)}/${d.iso.slice(2,4)}`;
+  const same = txOf(EXT).find(t=>(parseDate(t.date)||{}).iso===d.iso && Math.abs(Math.abs(t.amount)-amt)<0.005);
+  if (same && !confirm(`Un mouvement hors comptes de ${eur(amt)} existe déjà au ${same.date} (${same.tiers}). L’ajouter quand même ?`)) return;
+  const row = {date:disp, tiers, high:high||'?', sub:sub||'', amount:-Math.round(amt*100)/100, account:EXT, note:'', flag:false, comment:val('extComment'), owner:''};
+  const btn = f.querySelector('button[type=submit]'); btn.disabled = true;
+  try {
+    if (writeToDb()){ const saved = await window.LS.db.addTransactions([row]); state.tx.push(saved[0]); }
+    else { state.tx.push({id:'local-ext-'+Date.now(), ...row, importV:null, bankRef:''}); saveState(); }
+  } catch(e){ console.error(e); showToast('Mouvement non enregistré : '+escH(extHint(e.message||String(e))), 'err'); btn.disabled = false; return; }
+  logTimeline({title:'Dépense hors comptes ajoutée', kind:'manual', description:`${tiers} · ${eur(amt)} le ${disp} · ${high||'à catégoriser'}${sub?' › '+sub:''}. Comptée dans la comptabilité, sans effet sur les comptes de l’ACP.`});
+  showToast(`Dépense de ${eur(amt)} ajoutée hors comptes : elle apparaît dans la comptabilité, les soldes ne bougent pas.`, '', 5000);
+  renderAll();
+}
 function renderAcctInfo(acct){
   const box=document.getElementById('acctInfo'); if(!box) return;
   acct = acct || curAcct || 'pay';
+  if (acct===EXT){ renderExtInfo(box); return; }
   const ed = canWrite();
   const iban = (state.ibans&&state.ibans[acct])||'';
   const holder = acctHolder(acct);
@@ -1060,9 +1134,12 @@ document.getElementById('acctseg')?.addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   document.querySelectorAll('#acctseg button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
-  const acct=b.dataset.acct;
+  const acct=b.dataset.acct, ext=acct===EXT;
   document.getElementById('resTarget').style.display = acct==='res'?'block':'none';
-  document.getElementById('statRow') && (document.querySelectorAll('#statRow').forEach(r=>r.style.display = acct==='res'?'none':'grid'));
+  document.getElementById('statRow') && (document.querySelectorAll('#statRow').forEach(r=>r.style.display = acct==='pay'?'grid':'none'));
+  // « Hors comptes » n'a ni solde, ni relevé, ni courbe : restent sa fiche, les filtres et la liste
+  [['bfrCard',''],['repCard','flex'],['acctDrop',''],['chartCard','']].forEach(([id,d])=>{ const e=document.getElementById(id); if(e) e.style.display = ext?'none':d; });
+  if (ext){ renderTx(acct); renderAcctInfo(acct); return; }
   document.getElementById('dropAcct').textContent = acct==='res'?'le compte de réserve':'le compte de paiement';
   importTargetAcct = acct;
   renderChart(acct); renderTx(acct); renderAcctInfo(acct); renderAccountStats(acct);
@@ -5104,7 +5181,8 @@ function fillReportPeriod(){
         <tr class="tot"><td>Total</td><td class="num pos">+${eur(totIn)}</td><td class="num neg">−${eur(totOut)}</td>
           <td class="num ${res>=0?'pos':'neg'}">${res>=0?'+':'−'}${eur(Math.abs(res))}</td><td class="num">100 %</td></tr>
       </table>
-      <div class="r-sub" style="margin-top:8px">Résultat de l'exercice : <b class="${res>=0?'pos':'neg'}">${res>=0?'Excédent ':'Déficit '}${eur(Math.abs(res))}</b></div>`;
+      <div class="r-sub" style="margin-top:8px">Résultat de l'exercice : <b class="${res>=0?'pos':'neg'}">${res>=0?'Excédent ':'Déficit '}${eur(Math.abs(res))}</b></div>
+      ${(ext=>ext.length ? `<div class="r-sub" style="margin-top:4px">Dont <b>${eur(Math.abs(sum(ext.map(t=>t.amount))))}</b> de dépenses payées hors des comptes de l’ACP (${ext.map(t=>`${escH(t.tiers)}, ${t.date}`).join(' ; ')}) : comprises dans ce résultat, sans effet sur les soldes des comptes.</div>` : '')(txList.filter(isExt))}`;
   }
   function ownersSection(){
     const led = ownerLedger(), ly = led.length ? led[0].year : '', qTot = sum(led.map(o=>+o.q||0))||1000;
@@ -5519,7 +5597,7 @@ function exportTransactionsCSV(){
   const head=['Date','Compte','Tiers','Catégorie','Sous-catégorie','Copropriétaire','Montant','Note','Flag','Commentaire'];
   const rows=[head];
   state.tx.slice().sort((a,b)=>{const da=parseDate(a.date),db=parseDate(b.date);return (da?da.iso:'').localeCompare(db?db.iso:'');})
-    .forEach(t=>rows.push([t.date, t.account==='res'?'réserve':'paiement', t.tiers, t.high, t.sub||'',
+    .forEach(t=>rows.push([t.date, t.account==='res'?'réserve':isExt(t)?'hors comptes ACP':'paiement', t.tiers, t.high, t.sub||'',
       ownerOfTx(t), String(t.amount).replace('.',','), t.note||'', isFlagged(t)?'oui':'', t.comment||'']));
   const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
   downloadBlob(new Blob(['﻿'+csv],{type:'text/csv'}), `lazysyndic-transactions-${new Date().toISOString().slice(0,10)}.csv`);
@@ -5767,7 +5845,7 @@ function showTxDetail(t){
   card.innerHTML=`
     <div class="h-row"><h2 id="txDetailTitle" style="margin:0">Mouvement du ${t.date}</h2><button class="icon-btn" id="txDetailClose" type="button" aria-label="Fermer">✕</button></div>
     ${locked?`<div class="sub" style="margin:-4px 0 6px">Exercice ${closedYearOf((parseDate(t.date)||{}).iso)} clôturé : seuls le drapeau et le commentaire restent modifiables.</div>`:''}
-    ${line('Compte', t.account==='res'?'Compte de réserve':'Compte de paiement')}
+    ${line('Compte', isExt(t) ? 'Hors comptes de l’ACP <span class="sub">· sans effet sur les soldes</span>' : t.account==='res'?'Compte de réserve':'Compte de paiement')}
     ${line('Tiers', escH(t.tiers))}
     ${line('Montant', `<span class="${t.amount<0?'neg':'pos'}">${signed(t.amount)}</span>`)}
     ${line('Catégorie', free
@@ -5895,9 +5973,13 @@ function cfBuild(){
   const totIn={},totOut={},totNet={};
   mkeys.forEach(k=>{ let i=0,o=0; tx.forEach(t=>{ if(t._k===k){ if(t.amount>0)i+=t.amount; else o+=t.amount; } }); totIn[k]=i;totOut[k]=o;totNet[k]=i+o; });
   const opening = cfScope==='all' ? ((state.opening&&state.opening.pay||0)+(state.opening&&state.opening.res||0)) : (state.opening&&state.opening[cfScope]||0);
-  let run = opening + sum(cfTx().filter(t=>t._k<mkeys[0]).map(t=>t.amount));
-  const treso={}; mkeys.forEach(k=>{ run+=totNet[k]; treso[k]=run; });
-  return {months,mkeys,agg,catTot,order,subsOf,totIn,totOut,totNet,treso};
+  // Hors comptes de l'ACP : dans les catégories et les totaux (c'est une charge de l'immeuble),
+  // jamais dans la trésorerie, qui reste celle des comptes bancaires.
+  const extNet={}; tx.filter(isExt).forEach(t=>{ extNet[t._k]=(extNet[t._k]||0)+t.amount; });
+  const hasExt = Object.keys(extNet).length>0;
+  let run = opening + sum(cfTx().filter(t=>t._k<mkeys[0] && !isExt(t)).map(t=>t.amount));
+  const treso={}; mkeys.forEach(k=>{ run+=totNet[k]-(extNet[k]||0); treso[k]=run; });
+  return {months,mkeys,agg,catTot,order,subsOf,totIn,totOut,totNet,treso,extNet,hasExt};
 }
 function renderComptabilite(){
   const box=document.getElementById('cfMatrix'); if(!box) return;
@@ -5926,8 +6008,9 @@ function renderComptabilite(){
   h+=`<tr class="cf-tot"><td>Total entrées</td>${mkeys.map(k=>`<td class="cf-pos">${D.totIn[k]?cfFmt(D.totIn[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-pos">${cfFmt(rowSum(D.totIn))}</td><td class="cf-avg-col cf-pos">${cfFmt(rowSum(D.totIn)/N)}</td></tr>`;
   h+=`<tr class="cf-tot"><td>Total sorties</td>${mkeys.map(k=>`<td class="cf-neg">${D.totOut[k]?cfFmt(D.totOut[k]):'·'}</td>`).join('')}<td class="cf-tot-col cf-neg">${cfFmt(rowSum(D.totOut))}</td><td class="cf-avg-col cf-neg">${cfFmt(rowSum(D.totOut)/N)}</td></tr>`;
   h+=`<tr class="cf-tot"><td>Flux net</td>${mkeys.map(k=>cell(D.totNet[k])).join('')}${tcell(rowSum(D.totNet))}${acell(rowSum(D.totNet)/N)}</tr>`;
+  if(D.hasExt) h+=`<tr class="cf-sub" title="Payé ailleurs que sur les comptes de l’ACP : compris dans les lignes ci-dessus, exclu de la trésorerie ci-dessous"><td>dont hors comptes de l’ACP</td>${mkeys.map(k=>cell(D.extNet[k]||0)).join('')}${tcell(rowSum(D.extNet))}${acell(rowSum(D.extNet)/N)}</tr>`;
   const tresoAvg = mkeys.reduce((a,k)=>a+(D.treso[k]||0),0)/N;
-  h+=`<tr class="cf-tot" style="border-top:none"><td>Trésorerie fin de mois</td>${mkeys.map(k=>`<td>${eur(D.treso[k]).replace(' €','')}</td>`).join('')}<td class="cf-tot-col">—</td><td class="cf-avg-col">${eur(tresoAvg).replace(' €','')}</td></tr>`;
+  h+=`<tr class="cf-tot" style="border-top:none"><td>Trésorerie fin de mois${D.hasExt?' <span style="font-weight:400">(comptes de l’ACP)</span>':''}</td>${mkeys.map(k=>`<td>${eur(D.treso[k]).replace(' €','')}</td>`).join('')}<td class="cf-tot-col">—</td><td class="cf-avg-col">${eur(tresoAvg).replace(' €','')}</td></tr>`;
   h+='</tbody></table></div>';
   box.innerHTML=h;
   // cartes de synthèse
@@ -5936,7 +6019,7 @@ function renderComptabilite(){
   const sm=document.getElementById('cfSummary');
   if(sm) sm.innerHTML =
     card('Entrées sur la période','+'+eur(sIn),'var(--success)')+
-    card('Sorties sur la période','−'+eur(Math.abs(sOut)),'')+
+    card('Sorties sur la période','−'+eur(Math.abs(sOut)),'', D.hasExt ? `<div class="sub" style="margin-top:4px">dont ${eur(Math.abs(rowSum(D.extNet)))} hors comptes de l’ACP</div>` : '')+
     card('Flux net',(net>=0?'+':'−')+eur(Math.abs(net)),net>=0?'var(--success)':'')+
     card('Trésorerie fin de période',eur(D.treso[mkeys[mkeys.length-1]]),'',cfSparkline(mkeys.map(k=>D.treso[k])));
   renderCfFlow(D);
@@ -6037,7 +6120,8 @@ function exportComptabilite(){
   lines.push(['Total entrées',...mkeys.map(k=>f(D.totIn[k])),f(rowSum(D.totIn)),f(rowSum(D.totIn)/N)].join(';'));
   lines.push(['Total sorties',...mkeys.map(k=>f(D.totOut[k])),f(rowSum(D.totOut)),f(rowSum(D.totOut)/N)].join(';'));
   lines.push(['Flux net',...mkeys.map(k=>f(D.totNet[k])),f(rowSum(D.totNet)),f(rowSum(D.totNet)/N)].join(';'));
-  lines.push(['Trésorerie fin de mois',...mkeys.map(k=>f(D.treso[k])),'',f(mkeys.reduce((a,k)=>a+(D.treso[k]||0),0)/N)].join(';'));
+  if(D.hasExt) lines.push(['dont hors comptes de l’ACP',...mkeys.map(k=>f(D.extNet[k])),f(rowSum(D.extNet)),f(rowSum(D.extNet)/N)].join(';'));
+  lines.push([D.hasExt?'Trésorerie fin de mois (comptes de l’ACP)':'Trésorerie fin de mois',...mkeys.map(k=>f(D.treso[k])),'',f(mkeys.reduce((a,k)=>a+(D.treso[k]||0),0)/N)].join(';'));
   downloadBlob(new Blob(['﻿'+lines.join('\n')],{type:'text/csv'}), `comptabilite_${cfScope}_${cfPeriod}.csv`);
 }
 /* contrôles */
