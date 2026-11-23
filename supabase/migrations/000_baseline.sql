@@ -209,7 +209,8 @@ create table if not exists public.ls_settings (
   categories     jsonb default '[]'::jsonb,        -- catégories personnalisées, en plus des défauts (tableau de textes)
   annual_note    text,                             -- note libre du rapport annuel
   budget_keys    jsonb default '{}'::jsonb,        -- poste → 'quote' | 'indiv' (ancienne répartition ; lu seulement)
-  dues_by_year   jsonb default '{}'::jsonb         -- exercice → { clé du copropriétaire → {pay, res} } : le dû de chaque exercice (exercices-du.sql)
+  dues_by_year   jsonb default '{}'::jsonb,        -- exercice → { clé du copropriétaire → {pay, res} } : le dû de chaque exercice (exercices-du.sql)
+  budget_extras  jsonb default '{}'::jsonb         -- exercice → [{id,label,cat,note,at}] : postes non prévus au budget (postes-imprevus.sql)
 );
 insert into public.ls_settings (id) values (1) on conflict (id) do nothing;
 -- déploiements existants : ajoute chaque colonne si absente (toutes, pour qu'une base
@@ -234,6 +235,7 @@ alter table public.ls_settings add column if not exists categories     jsonb def
 alter table public.ls_settings add column if not exists annual_note    text;
 alter table public.ls_settings add column if not exists budget_keys    jsonb default '{}'::jsonb;
 alter table public.ls_settings add column if not exists dues_by_year   jsonb default '{}'::jsonb;
+alter table public.ls_settings add column if not exists budget_extras  jsonb default '{}'::jsonb;
 
 -- ============================================================
 --  6. HISTORIQUE D'IMPORTS (relevés déposés)

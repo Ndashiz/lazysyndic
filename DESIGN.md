@@ -98,10 +98,10 @@ réservé à ce qui demande une action (retards, écarts, suppressions).
 |---|---|---|---|
 | `/` | `dash` | Bonjour {prénom} | Tout ce qu'il faut savoir sur votre copropriété, aujourd'hui. |
 | `/comptes` | `acc` | Comptes bancaires | Tous les mouvements de votre copropriété. |
-| `/comptabilite` | `cpta` | Comptabilité | Les flux de trésorerie de votre copropriété, dérivés des transactions. |
+| `/comptabilite` | `cpta` | Comptabilité (sous-onglets : Paiement des charges · Exercice en cours · Calcul des charges) | Ce que chacun a versé, où en est le budget voté, et comment se calculent les charges. |
 | `/import` | `imp` | Importer des relevés | Préparez vos mouvements bancaires avant leur validation. |
 | `/assemblees` | `ag` | Assemblées générales (ou titre de l'AG en cours) | Les décisions qui font avancer votre copropriété. |
-| `/budget` | `budget` | Budget & copropriétaires | Un budget partagé, une répartition transparente. |
+| `/budget` | `budget` | Copropriétaires & clés | Qui possède quoi, et comment les charges se répartissent. |
 | `/contrats` | `ct` | Contrats & prestataires | Vos partenaires au service de l'immeuble. |
 | `/historique` | `timeline` | Vie de l'immeuble | Le fil des interventions et des événements… |
 | `/regles` | `rules` | Règles de catégorisation | Règles, alias de tiers et sauvegardes. |

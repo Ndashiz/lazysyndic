@@ -50,7 +50,7 @@ attendu_colonnes(t, c) as (values
   ('ls_settings','contrib'), ('ls_settings','iban_map'), ('ls_settings','subcats'), ('ls_settings','ledger_live'),
   ('ls_settings','holders'), ('ls_settings','charges'), ('ls_settings','copro_name'), ('ls_settings','copro_addr'),
   ('ls_settings','copro_kbo'), ('ls_settings','recon'), ('ls_settings','owner_rules'), ('ls_settings','iban_pay'),
-  ('ls_settings','iban_res'), ('ls_settings','categories'), ('ls_settings','annual_note'), ('ls_settings','budget_keys'), ('ls_settings','dues_by_year'),
+  ('ls_settings','iban_res'), ('ls_settings','categories'), ('ls_settings','annual_note'), ('ls_settings','budget_keys'), ('ls_settings','dues_by_year'), ('ls_settings','budget_extras'),
   ('ls_imports','id'), ('ls_imports','v'), ('ls_imports','label'), ('ls_imports','meta'), ('ls_imports','cur'),
   ('ls_imports','created_at'), ('ls_imports','stmt'), ('ls_imports','pending'),
   ('ls_timeline','id'), ('ls_timeline','event_date'), ('ls_timeline','title'), ('ls_timeline','description'),

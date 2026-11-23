@@ -63,7 +63,7 @@ au lieu de devenir une recette de charges : un remboursement ou un versement d'u
    procurations, votes, documents, PV) et, en pièce jointe, la **convocation complète
    avec le formulaire de procuration** (PDF, deux pages, instructions de vote par point).
    Pour tous les copropriétaires ou nominativement pour un seul (e-mails et lots dans
-   Budget & copro › Copropriétaires & lots) : « Aperçu » montre le message tel qu'il sera
+   Copropriétaires & clés › Copropriétaires & lots) : « Aperçu » montre le message tel qu'il sera
    reçu ; « Composer » ouvre la messagerie du syndic (`mailto:`) avec les destinataires,
    copie le modèle à coller dans le message (⌘V) et télécharge le PDF à joindre ;
    « Copier pour Outlook » ne fait que la copie ; « Fichier .eml » est un brouillon
@@ -87,9 +87,29 @@ Prérequis : lancer [`supabase/ag.sql`](supabase/ag.sql) à la main (colonnes
 `bureau` / `signature` / `email`, bucket privé `ls-docs`). Tests du lecteur de
 signatures : `node --test tests/signature.test.mjs`.
 
+## Comptabilité : trois sous-onglets
+
+L'écran **Comptabilité** se lit en trois temps (lien profond `#cpta?tab=pay|exo|chg`) :
+
+1. **Paiement des charges** — les versements des copropriétaires, exercice par exercice.
+2. **Exercice en cours** — le budget voté face à ce qui est déjà dépensé, poste par poste
+   (voté, dépensé, reste, avancement, avec le repère « part de l'année écoulée »), puis l'analyse
+   des flux de trésorerie et la clôture des exercices. Un budget publié est figé : une dépense que
+   personne n'avait prévue se suit par un **poste non prévu** (nom, catégorie de la comptabilité,
+   raison), gardé à côté du budget, qui ne change pas. Les dépenses qu'aucun poste ne reprend sont
+   listées par catégorie, avec « En faire un poste non prévu ». Calcul : `LSCharges.tracking`
+   (`charges.js`, pur) ; tests : `node --test tests/charges.test.mjs`. Prérequis en ligne :
+   [`supabase/postes-imprevus.sql`](supabase/postes-imprevus.sql) (colonne `ls_settings.budget_extras`) ;
+   sans elle l'écran le dit et n'enregistre rien.
+3. **Calcul des charges** — la préparation du budget (ci-dessous), le fonds de réserve, la
+   répartition, les provisions et l'Annexe 4.
+
+L'écran **Copropriétaires & clés** (ancien « Budget & copropriétaires ») ne garde que le référentiel :
+copropriétaires, lots et clés de répartition.
+
 ## Calcul des charges
 
-Écran **Budget & copropriétaires** › « Calcul des charges ». Un budget par exercice
+Écran **Comptabilité** › « Calcul des charges ». Un budget par exercice
 (flèches ‹ ›) ; l'écran s'ouvre sur l'année qui suit celle en cours, puisque la prévision
 se prépare pour l'année d'après sur le réel à ce jour. Un budget est fait de postes de dépense :
 
@@ -184,7 +204,7 @@ relevé reprend les mêmes explications. Code : `recon.js` (pur) ; tests : `node
 
 ## Appels de fonds
 
-Écran **Budget & copropriétaires** › Calcul des charges › « Provisions attendues par copropriétaire »,
+Écran **Comptabilité** › Calcul des charges › « Provisions attendues par copropriétaire »,
 une fois le budget appliqué : un bouton **PDF** et un bouton **E-mail** par copropriétaire, et « Tous les
 appels de fonds en un PDF » (une page par copropriétaire). L'appel reprend le dû de l'exercice
 (charges courantes et fonds de réserve), l'**échéancier** au centime selon la périodicité du
@@ -226,7 +246,7 @@ dit quoi lancer. Un exercice clôturé refuse aussi l'ajout : il faut le rouvrir
 
 ## Versements des copropriétaires et dû par exercice
 
-**Comptabilité › Versements des copropriétaires** montre, pour un exercice (année civile), ce que
+**Comptabilité › Paiement des charges** montre, pour un exercice (année civile), ce que
 chacun a versé sur ce qu'il doit : une barre par compte (paiement, réserve) et un repère pour ce
 qui est attendu à ce jour. Une échéance compte une fois son mois terminé
 (`LSCalls.expectedToDate`) : en avril, trois mensualités sont attendues. Le report des exercices
@@ -263,7 +283,7 @@ exercice serait perdu au prochain budget appliqué.
 
 ## Exercices comptables
 
-Écran **Comptabilité** › carte « Exercices » : une ligne par année civile, avec les soldes
+Écran **Comptabilité** › Exercice en cours › carte « Exercices » : une ligne par année civile, avec les soldes
 d'ouverture et de clôture des deux comptes. Un exercice se clôture quand l'année est finie,
 l'exercice précédent clôturé, les deux comptes rapprochés sur un relevé qui couvre le 31/12, et
 sans brouillon en attente ; la carte dit sinon ce qui manque. « Clôturer » fige les soldes,

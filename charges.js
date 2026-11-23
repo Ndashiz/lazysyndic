@@ -264,6 +264,55 @@ function uncovered(tx, postes, year){
 let _n = 0;
 const newId = () => 'p' + Date.now().toString(36) + (++_n).toString(36) + Math.random().toString(36).slice(2,6);
 
+/* ------------------------------------------------------------
+   Suivi de l'exercice en cours : ce que le budget a prévu, ce qui est déjà dépensé.
+   Un poste NON PRÉVU = {id, label, cat, note, at} : ajouté en cours d'exercice, hors du budget voté
+   (un budget publié est figé). Il n'a pas de montant prévu, seulement une catégorie de la
+   comptabilité : ses dépenses sortent du « hors budget » et se lisent sur leur propre ligne.
+   ------------------------------------------------------------ */
+function cleanExtras(list){
+  return (Array.isArray(list) ? list : []).filter(p => p && typeof p === 'object').map(p => ({
+    id: String(p.id || newId()),
+    label: String(p.label || '').slice(0, 80),
+    note: String(p.note || '').slice(0, 160),
+    cat: p.cat && p.cat.high ? { high: String(p.cat.high), sub: String(p.cat.sub || '') } : null,
+    at: typeof p.at === 'string' ? p.at.slice(0, 10) : '',
+  }));
+}
+// Dépenses de l'année qu'aucun poste ne reprend, regroupées par catégorie › sous-catégorie
+// (les mouvements « à catégoriser » sous {high:'?'}), de la plus lourde à la plus légère.
+function uncoveredByCat(tx, postes, year){
+  const cats = (postes || []).map(p => p.cat).filter(Boolean), by = new Map();
+  tx.filter(t => counts(t) && yearOf(t) === String(year) && t.amount < 0
+      && (t.high === '?' || !t.high || isExpenseCat(t.high)) && !cats.some(c => matches(t, c)))
+    .forEach(t => { const cat = !t.high || t.high === '?' ? { high:'?', sub:'' } : { high:t.high, sub:t.sub || '' }, k = catKey(cat);
+      const g = by.get(k) || { cat, total:0, count:0 }; g.total -= cents(t.amount); g.count++; by.set(k, g); });
+  return [...by.values()].map(g => ({ ...g, total: g.total/100 })).sort((a, b) => b.total - a.total);
+}
+// Voté / dépensé à ce jour, poste par poste, pour l'exercice `year`. Dépensé = dépenses nettes du
+// compte de paiement (un remboursement vient en déduction) + ce qui a été payé hors comptes.
+//   rows   : postes du budget puis postes non prévus (extra:true, voted 0) ;
+//            spent null pour un poste sans catégorie (rien ne peut lui être rattaché)
+//   other  : ce qu'aucun poste ne reprend, par catégorie (uncoveredByCat)
+//   totals : voted, spent (postes + non prévus + hors budget), planned (les seuls postes du budget),
+//            extra (non prévus), other (hors budget), left = voted − spent
+function tracking(tx, postes, extras, year){
+  const line = (p, extra) => { const r = reference(tx, p.cat, year, null);
+    const voted = extra ? 0 : cents(p.forecast), spent = r ? cents(r.total) + cents(r.ext) : null;
+    return { id:p.id, label:p.label || '', cat:p.cat || null, note:p.note || p.fcNote || '', key:p.key || '', extra, at:p.at || '',
+      voted: voted/100, spent: spent == null ? null : spent/100, ext: r ? r.ext : 0, count: r ? r.count : 0,
+      left: spent == null ? voted/100 : (voted - spent)/100,
+      pct: spent == null || !voted ? null : Math.round(spent / voted * 1000) / 10,
+      over: spent != null && spent > voted && (extra ? spent > 0 : true) }; };
+  const rows = [...(postes || []).map(p => line(p, false)), ...(extras || []).map(p => line(p, true))];
+  const other = uncoveredByCat(tx, [...(postes || []), ...(extras || [])], year);
+  const c = v => cents(v || 0), add = l => l.reduce((a, r) => a + c(r.spent), 0);
+  const voted = rows.reduce((a, r) => a + c(r.voted), 0), planned = add(rows.filter(r => !r.extra)), extra = add(rows.filter(r => r.extra));
+  const oth = other.reduce((a, g) => a + c(g.total), 0), spent = planned + extra + oth;
+  return { rows, other, totals: { voted: voted/100, spent: spent/100, planned: planned/100, extra: extra/100, other: oth/100, left: (voted - spent)/100,
+    pct: voted ? Math.round(spent / voted * 1000) / 10 : null } };
+}
+
 // Postes proposés depuis les dépenses de l'année de référence : une catégorie entière quand
 // certains mouvements n'ont pas de sous-catégorie, sinon une ligne par sous-catégorie — jamais
 // deux postes sur les mêmes mouvements. Prévision = moyenne mensuelle × 12, arrondie à l'euro supérieur.
@@ -416,7 +465,7 @@ function cleanSnapshot(s){
   };
 }
 
-const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished, evolution,
+const api = { catLabel, catKey, overlaps, matches, conflicts, coverage, reference, shares, split, uncovered, uncoveredByCat, tracking, cleanExtras, seed, clean, newId, isExpenseCat, vendorOf, matchPrev, isPublished, evolution,
               cleanMarge, evalFormula, shortFormula, fieldsFor, resolve, groupPostes, annexModel, REAL_FORMULA, FC_FORMULA,
               reserveSpan, reserveCall, legalBase, reserveSplit, cleanReserve, LEGAL_RATE,
               ownersSnapshot, ownersDiff, cleanSnapshot };

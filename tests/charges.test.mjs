@@ -394,3 +394,47 @@ test('dépenses hors comptes : dans le réel du poste, sans être ramenées à 1
   const tx2 = [...tx, T('2025-03-05', 'pay', 'Assurance', 'Incendie', -100, 'AG'), T('2025-01-01', 'ext', 'Assurance', 'Incendie', -878.88, 'AG Assurance')];
   assert.equal(C.fieldsFor(tx2, { cat:inc }, 2026, C.coverage(tx2, 2026), [], 3)['réel précédent'], 978.88);
 });
+
+// ---- Suivi de l'exercice en cours : voté / dépensé, postes non prévus, hors budget ----
+const txExo = [
+  { iso:'2026-01-10', account:'pay', high:'Énergie', sub:'Électricité', amount:-100 },
+  { iso:'2026-02-10', account:'pay', high:'Énergie', sub:'Électricité', amount:-120 },
+  { iso:'2026-03-01', account:'pay', high:'Énergie', sub:'Électricité', amount:20 },      // remboursement : en déduction
+  { iso:'2026-02-15', account:'ext', high:'Assurance', sub:'Incendie', amount:-400 },      // payé hors comptes de l'ACP
+  { iso:'2026-04-02', account:'pay', high:'Entretien', sub:'Toiture', amount:-850 },       // rien de prévu
+  { iso:'2026-04-20', account:'pay', high:'Entretien', sub:'Toiture', amount:-150 },
+  { iso:'2026-05-05', account:'pay', high:'?', sub:'', amount:-30 },                       // à catégoriser
+  { iso:'2026-05-06', account:'pay', high:'Charges', sub:'Alex', amount:500 },             // rentrée : jamais une dépense
+  { iso:'2026-06-01', account:'res', high:'Entretien', sub:'Toiture', amount:-999 },       // compte de réserve : hors charges courantes
+  { iso:'2025-12-30', account:'pay', high:'Énergie', sub:'Électricité', amount:-70 },      // autre exercice
+];
+const postesExo = [
+  { id:'a', label:'Électricité', cat:{high:'Énergie', sub:'Électricité'}, key:'quote', forecast:600 },
+  { id:'b', label:'Assurance', cat:{high:'Assurance', sub:''}, key:'quote', forecast:350 },
+  { id:'c', label:'Imprévus', cat:null, key:'quote', forecast:100 },
+];
+
+test('suivi de l’exercice : dépensé net par poste, hors comptes compris, reste et dépassement', () => {
+  const t = C.tracking(txExo, postesExo, [], 2026);
+  const [a, b, c] = t.rows;
+  assert.equal(a.spent, 200); assert.equal(a.left, 400); assert.equal(a.pct, 33.3); assert.equal(a.over, false);
+  assert.equal(b.spent, 400); assert.equal(b.ext, 400); assert.equal(b.left, -50); assert.equal(b.over, true);
+  assert.equal(c.spent, null); assert.equal(c.left, 100); assert.equal(c.pct, null);   // sans catégorie : rien à rattacher
+  assert.deepEqual(t.other.map(g => [g.cat.high, g.cat.sub, g.total, g.count]), [['Entretien', 'Toiture', 1000, 2], ['?', '', 30, 1]]);
+  assert.deepEqual(t.totals, { voted:1050, spent:1630, planned:600, extra:0, other:1030, left:-580, pct:155.2 });
+});
+
+test('poste non prévu : ses dépenses quittent le hors budget, le total dépensé ne bouge pas', () => {
+  const extras = C.cleanExtras([{ id:'x', label:'Réparation toiture', cat:{high:'Entretien', sub:'Toiture'}, note:'fuite d’avril', at:'2026-04-03T10:00:00Z' }]);
+  assert.deepEqual(extras[0], { id:'x', label:'Réparation toiture', note:'fuite d’avril', cat:{high:'Entretien', sub:'Toiture'}, at:'2026-04-03' });
+  const t = C.tracking(txExo, postesExo, extras, 2026), x = t.rows[3];
+  assert.equal(x.extra, true); assert.equal(x.voted, 0); assert.equal(x.spent, 1000); assert.equal(x.over, true); assert.equal(x.pct, null);
+  assert.deepEqual(t.other.map(g => g.cat.high), ['?']);
+  assert.equal(t.totals.extra, 1000); assert.equal(t.totals.other, 30); assert.equal(t.totals.spent, 1630); assert.equal(t.totals.voted, 1050);
+});
+
+test('cleanExtras : rien d’inattendu ne passe', () => {
+  assert.deepEqual(C.cleanExtras(null), []);
+  const [e] = C.cleanExtras([{ label:'x'.repeat(200), cat:{sub:'seul'} }, 'bruit']);
+  assert.equal(e.label.length, 80); assert.equal(e.cat, null); assert.ok(e.id);
+});

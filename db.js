@@ -129,6 +129,9 @@
       // colonne, la clé est absente de la ligne : l'app le sait et le dit (duesStoreMissing).
       duesByYear: settings.dues_by_year || {},
       duesStoreMissing: !('dues_by_year' in settings),
+      // Postes non prévus au budget, par exercice (supabase/postes-imprevus.sql) : { "2026": [{id,label,cat,note,at}] }.
+      budgetExtras: settings.budget_extras || {},
+      extrasStoreMissing: !('budget_extras' in settings),
       owners: ownersRows.map(r=>({id:r.id, n:r.name, short:r.short, q:r.quotite, c:r.color||'#2F6B53',
         due_pay:Number(r.due_pay||0), due_res:Number(r.due_res||0), email:r.email||'',
         ogm:r.ogm||'', periodicity:r.periodicity||'month'})),   // appels de fonds (supabase/calls.sql)

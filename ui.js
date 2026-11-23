@@ -140,14 +140,14 @@
     if (admin){
       // octobre → décembre sans budget N+1 : c'est le moment de le préparer
       if (now.getMonth() >= 9 && !has(Y + 1))
-        out.push({ic:'file', t:`Préparez le budget ${Y + 1}`, d:`L'exercice ${Y} touche à sa fin : proposez les postes depuis le réel ${Y}.`, go:'budget'});
+        out.push({ic:'file', t:`Préparez le budget ${Y + 1}`, d:`L'exercice ${Y} touche à sa fin : proposez les postes depuis le réel ${Y}.`, hash:'cpta?tab=chg'});
       // un brouillon et une AG dans les 15 jours : à publier avant la séance
       const dl = ag && typeof convocationDelay === 'function' ? convocationDelay(ag) : null;
       if (dl && dl.days <= 15) years.filter(y => has(y) && !pub(y) && +y >= Y).forEach(y =>
-        out.push({ic:'file', t:`Publiez le budget ${y} avant l'AG`, d: dl.days < 0 ? 'La séance est passée et le budget est toujours en brouillon.' : `Séance dans ${plural(dl.days, 'jour')} : les copropriétaires ne voient qu'un budget publié.`, go:'budget'}));
+        out.push({ic:'file', t:`Publiez le budget ${y} avant l'AG`, d: dl.days < 0 ? 'La séance est passée et le budget est toujours en brouillon.' : `Séance dans ${plural(dl.days, 'jour')} : les copropriétaires ne voient qu'un budget publié.`, hash:'cpta?tab=chg'}));
       // publié mais pas appliqué, alors que son exercice a commencé
       years.filter(y => pub(y) && !all[y].applied && +y <= Y).forEach(y =>
-        out.push({ic:'file', t:`Appliquez le budget ${y} aux provisions`, d:'Le suivi des paiements se fie encore à l’ancien dû.', go:'budget'}));
+        out.push({ic:'file', t:`Appliquez le budget ${y} aux provisions`, d:'Le suivi des paiements se fie encore à l’ancien dû.', hash:'cpta?tab=chg'}));
     }
     // l'année en cours, budget publié : le réel à ce jour projeté sur 12 mois contre la prévision (marge comprise)
     const b = all[Y];
@@ -158,7 +158,7 @@
         (b.postes || []).forEach(p => { if (!p || !p.cat) return;
           const r = LSCharges.reference(tx, p.cat, Y, cov); proj += Math.max(0, r.total) * 12 / cov.months; forecast += Number(p.forecast) || 0; });
         if (proj > forecast * (1 + marge) + 0.005)
-          out.push({ic:'file', t:`Budget ${Y} en dépassement`, d:`Réel projeté sur 12 mois : ${eur(proj)} pour ${eur(forecast)} prévus, marge de ${Math.round(marge * 100)} % comprise (${plural(cov.months, 'mois')} de relevés).`, go:'budget'});
+          out.push({ic:'file', t:`Budget ${Y} en dépassement`, d:`Réel projeté sur 12 mois : ${eur(proj)} pour ${eur(forecast)} prévus, marge de ${Math.round(marge * 100)} % comprise (${plural(cov.months, 'mois')} de relevés).`, hash:'cpta?tab=exo'});
       }
     }
     return out;
@@ -192,8 +192,8 @@
   /* ---------- recherche (pages, comme dans le design) ---------- */
   const KEYWORDS = {
     dash:'accueil page de garde reserve soldes pense-bete', acc:'transactions mouvements iban solde rapport releve compte paiement reserve',
-    cpta:'flux tresorerie bilan entrees sorties', imp:'releve csv pdf swan coller banque synchro synchronisation enable banking', ag:'assemblee pv proces-verbal convocation vote',
-    budget:'charges repartition quotites lots provisions annexe', ct:'contrats fournisseurs prestataires', timeline:'chronologie historique journal notes',
+    cpta:'flux tresorerie bilan entrees sorties budget charges provisions annexe paiement versements exercice depenses postes', imp:'releve csv pdf swan coller banque synchro synchronisation enable banking', ag:'assemblee pv proces-verbal convocation vote',
+    budget:'repartition quotites lots millièmes milliemes proprietaires', ct:'contrats fournisseurs prestataires', timeline:'chronologie historique journal notes',
     rules:'regles alias sauvegarde restauration export',
   };
   const input = $('#tbSearch'), sp = $('#tbSearchPop');
