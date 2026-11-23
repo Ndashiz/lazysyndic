@@ -74,7 +74,8 @@
     // sous-page active (barre latérale, .nav-sub) : « Comptabilité › Exercice en cours »
     const sub = $(`.nav-sub[data-for="${id}"] button.on`), name = [labelOf(id), sub && sub.textContent].filter(Boolean).join(' › ');
     set('tbPage', name);
-    document.title = `${name || 'LazySyndic'} — LazySyndic`;
+    // un rapport ouvert garde son titre : c'est le nom du fichier PDF enregistré
+    if (!document.body.classList.contains('report-open')) document.title = `${name || 'LazySyndic'} — LazySyndic`;
   }
   $('.nav')?.addEventListener('click', e => { if (e.target.closest('button[data-s], .nav-sub button')){ syncCrumb(); setMenu(false); schedule(); } });
   document.addEventListener('ls:subnav', syncCrumb);
