@@ -87,6 +87,12 @@ Prérequis : lancer [`supabase/ag.sql`](supabase/ag.sql) à la main (colonnes
 `bureau` / `signature` / `email`, bucket privé `ls-docs`). Tests du lecteur de
 signatures : `node --test tests/signature.test.mjs`.
 
+## Contrats en cours (Annexe 1)
+
+Écran **Contrats & prestataires** › « Contrats en cours (PDF) » : la liste des contrats qui lient la
+copropriété (nom, référence, fournisseur, description), suivie des contrats clôturés quand il y en a.
+Même aperçu que les autres rapports : « Imprimer / Enregistrer en PDF ».
+
 ## Comptabilité : trois sous-pages
 
 L'écran **Comptabilité** se lit en trois temps. Les sous-pages se choisissent dans la **barre latérale**,
