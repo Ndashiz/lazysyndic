@@ -87,9 +87,11 @@ Prérequis : lancer [`supabase/ag.sql`](supabase/ag.sql) à la main (colonnes
 `bureau` / `signature` / `email`, bucket privé `ls-docs`). Tests du lecteur de
 signatures : `node --test tests/signature.test.mjs`.
 
-## Comptabilité : trois sous-onglets
+## Comptabilité : trois sous-pages
 
-L'écran **Comptabilité** se lit en trois temps (lien profond `#cpta?tab=pay|exo|chg`) :
+L'écran **Comptabilité** se lit en trois temps. Les sous-pages se choisissent dans la **barre latérale**,
+sous l'entrée de l'écran affiché (elles ne sont pas répétées en haut de la page ; le titre de la page et
+le fil d'Ariane disent laquelle est ouverte). Lien profond `#cpta?tab=pay|exo|chg` :
 
 1. **Paiement des charges** — les versements des copropriétaires, exercice par exercice.
 2. **Exercice en cours** — le budget voté face à ce qui est déjà dépensé, poste par poste
@@ -105,7 +107,8 @@ L'écran **Comptabilité** se lit en trois temps (lien profond `#cpta?tab=pay|ex
    répartition, les provisions et l'Annexe 4.
 
 L'écran **Copropriétaires & clés** (ancien « Budget & copropriétaires ») ne garde que le référentiel :
-copropriétaires, lots et clés de répartition.
+copropriétaires, lots et clés de répartition, en deux sous-pages de la barre latérale
+(`#budget?tab=own|keys`). Code : `SUBPAGES`, `showSubPage`, `syncSubnav` dans `app.js`.
 
 ## Calcul des charges
 

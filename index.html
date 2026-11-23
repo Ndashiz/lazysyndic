@@ -101,6 +101,12 @@
   .nav .ic{width:18px;height:18px;flex:none}
   .nav .ic svg{width:18px;height:18px;display:block}
   .nav .nav-gap{height:20px}
+  /* sous-pages d'un écran (Comptabilité, Copropriétaires & clés) : dépliées sous l'entrée active */
+  .nav .nav-sub{display:flex;flex-direction:column;margin:2px 0 6px 20px;padding-left:10px;border-left:1px solid var(--border)}
+  .nav .nav-sub[hidden]{display:none}
+  .nav .nav-sub button{min-height:34px;margin:1px 0;padding:0 10px;font-size:12.5px}
+  .nav .nav-sub button.on{background:transparent;color:var(--primary);font-weight:600;box-shadow:inset 2px 0 0 var(--primary);border-radius:0 6px 6px 0;margin-left:-11px;padding-left:21px}
+  .nav .nav-sub button.on:hover{background:var(--muted)}
   .nav-badge{margin-left:auto;font-size:10px;font-weight:600;line-height:1.5;border-radius:4px;padding:0 6px;background:var(--warning-soft);color:var(--warning-ink)}
   .side-foot{margin-top:auto;padding-top:18px}
   .side-link{display:flex;align-items:center;gap:10px;min-height:38px;padding:0 12px;border-radius:6px;font-size:13px;color:var(--muted-foreground);text-decoration:none;transition:background .15s,color .15s}
@@ -484,10 +490,19 @@
       <button class="on" data-s="dash"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="lbl">Vue d’ensemble</span></button>
       <button data-s="acc"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 22h18"/><path d="M6 18v-7"/><path d="M10 18v-7"/><path d="M14 18v-7"/><path d="M18 18v-7"/><path d="M12 2 20 7H4z"/></svg></span><span class="lbl">Comptes bancaires</span><span class="nav-badge" id="badgeAcc" hidden></span></button>
       <button data-s="cpta"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16v5"/><path d="M16 14v7"/><path d="M20 10v11"/><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15"/><path d="M4 18v3"/><path d="M8 14v7"/></svg></span><span class="lbl">Comptabilité</span></button>
+      <div class="nav-sub" data-for="cpta" hidden>
+        <button type="button" data-sub="pay">Paiement des charges</button>
+        <button type="button" data-sub="exo">Exercice en cours</button>
+        <button type="button" data-sub="chg">Calcul des charges</button>
+      </div>
       <button data-s="imp"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg></span><span class="lbl">Importer des relevés</span><span class="nav-badge" id="badgeImp" hidden></span></button>
       <div class="nav-gap" aria-hidden="true"></div>
       <button data-s="ag"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="lbl">Assemblées générales</span></button>
       <button data-s="budget"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg></span><span class="lbl">Copropriétaires &amp; clés</span></button>
+      <div class="nav-sub" data-for="budget" hidden>
+        <button type="button" data-sub="own">Copropriétaires &amp; lots</button>
+        <button type="button" data-sub="keys">Clés de répartition</button>
+      </div>
       <button data-s="ct"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></span><span class="lbl">Contrats &amp; prestataires</span></button>
       <button data-s="timeline"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4.5"/></svg></span><span class="lbl">Vie de l’immeuble</span></button>
       <button data-s="rules"><span class="ic"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></span><span class="lbl">Règles de catégorisation</span></button>
@@ -705,19 +720,11 @@
     <!-- ============ COMPTABILITÉ ============ -->
     <section class="screen" id="cpta">
       <div class="top">
-        <div><h1>Comptabilité</h1><p class="desc">Ce que chacun a versé, où en est le budget voté, et comment se calculent les charges.</p></div>
+        <div><h1 id="cptaH1">Paiement des charges</h1><p class="desc" id="cptaDesc">Ce que chaque copropriétaire a versé sur ce qu’il doit.</p></div>
         <div class="heading-actions"><button class="btn btn-ghost" id="genBudget" hidden><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg> Générer le budget (Annexe 4)</button></div>
       </div>
 
-      <!-- sous-onglets (showCptaTab dans app.js ; lien profond #cpta?tab=pay|exo|chg) -->
-      <div class="controls">
-        <div class="seg" id="cptaSeg" role="tablist" aria-label="Sections de la comptabilité">
-          <button class="on" data-cpta="pay" role="tab" aria-selected="true">Paiement des charges</button>
-          <button data-cpta="exo" role="tab" aria-selected="false">Exercice en cours</button>
-          <button data-cpta="chg" role="tab" aria-selected="false">Calcul des charges</button>
-        </div>
-      </div>
-
+      <!-- sous-pages : choisies dans la barre latérale (.nav-sub, showCptaTab dans app.js ; lien profond #cpta?tab=pay|exo|chg) -->
       <!-- ===== 1. Paiement des charges ===== -->
       <div class="cptapanel" data-cpta="pay">
         <!-- versements des copropriétaires : versé / dû / attendu à ce jour, par exercice (renderOwnerPayments) -->
@@ -993,16 +1000,10 @@
     <!-- ============ BUDGET & COPRO ============ -->
     <section class="screen" id="budget">
       <div class="top">
-        <div><h1>Copropriétaires &amp; clés</h1><p class="desc">Qui possède quoi, et comment les charges se répartissent.</p></div>
+        <div><h1 id="budH1">Copropriétaires &amp; lots</h1><p class="desc" id="budDesc">Qui possède quoi dans l’immeuble.</p></div>
       </div>
 
-      <div class="controls">
-        <div class="seg" id="budseg">
-          <button class="on" data-bud="own">Copropriétaires &amp; lots</button>
-          <button data-bud="keys">Clés de répartition</button>
-        </div>
-      </div>
-
+      <!-- sous-pages : choisies dans la barre latérale (.nav-sub, showBudTab dans app.js ; lien profond #budget?tab=own|keys) -->
       <div class="budpanel" data-bud="own">
         <!-- fiche de la copropriété : nom, adresse, n° d'entreprise (renderBudgetOwn) -->
         <div class="card data-panel" id="budCopro" style="margin-bottom:16px"></div>
@@ -1077,16 +1078,16 @@
      quatre heures de cache navigateur (et cette page avec dix minutes). Sans lui, la page neuve tourne
      quatre heures avec les anciens scripts : un bouton ajouté ici ne fait rien, une correction n'arrive pas.
      Une seule valeur pour tous les scripts locaux (tests/cache.test.mjs le vérifie). -->
-<script src="config.js?v=2026-11-23a"></script>
-<script src="db.js?v=2026-11-23a"></script>
-<script src="signature.js?v=2026-11-23a"></script>
-<script src="statement.js?v=2026-11-23a"></script>
-<script src="convocation.js?v=2026-11-23a"></script>
-<script src="pdf.js?v=2026-11-23a"></script>
-<script src="charges.js?v=2026-11-23a"></script>
-<script src="calls.js?v=2026-11-23a"></script>
-<script src="recon.js?v=2026-11-23a"></script>
-<script src="app.js?v=2026-11-23a"></script>
+<script src="config.js?v=2026-11-23b"></script>
+<script src="db.js?v=2026-11-23b"></script>
+<script src="signature.js?v=2026-11-23b"></script>
+<script src="statement.js?v=2026-11-23b"></script>
+<script src="convocation.js?v=2026-11-23b"></script>
+<script src="pdf.js?v=2026-11-23b"></script>
+<script src="charges.js?v=2026-11-23b"></script>
+<script src="calls.js?v=2026-11-23b"></script>
+<script src="recon.js?v=2026-11-23b"></script>
+<script src="app.js?v=2026-11-23b"></script>
 
 <style>
   .vote{padding:2px}
@@ -1168,4 +1169,4 @@
 </style>
 
 <!-- Coque du design (barre du haut, page de garde, notifications) : après app.js, dont elle lit l'état. -->
-<script src="ui.js?v=2026-11-23a"></script>
+<script src="ui.js?v=2026-11-23b"></script>

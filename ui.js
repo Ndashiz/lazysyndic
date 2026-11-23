@@ -71,10 +71,13 @@
   const labelOf = id => { const b = $(`.nav button[data-s="${id}"] .lbl`); return b ? b.textContent : ''; };
   function syncCrumb(){
     const id = ($('.screen.on') || {}).id || 'dash';
-    set('tbPage', labelOf(id));
-    document.title = `${labelOf(id) || 'LazySyndic'} — LazySyndic`;
+    // sous-page active (barre latérale, .nav-sub) : « Comptabilité › Exercice en cours »
+    const sub = $(`.nav-sub[data-for="${id}"] button.on`), name = [labelOf(id), sub && sub.textContent].filter(Boolean).join(' › ');
+    set('tbPage', name);
+    document.title = `${name || 'LazySyndic'} — LazySyndic`;
   }
-  $('.nav')?.addEventListener('click', e => { if (e.target.closest('button[data-s]')){ syncCrumb(); setMenu(false); schedule(); } });
+  $('.nav')?.addEventListener('click', e => { if (e.target.closest('button[data-s], .nav-sub button')){ syncCrumb(); setMenu(false); schedule(); } });
+  document.addEventListener('ls:subnav', syncCrumb);
 
   /* ---------- tiroir mobile (le bouton de la barre du haut remplace la barre verte d'app.js) ---------- */
   function setMenu(open){
