@@ -89,9 +89,10 @@ signatures : `node --test tests/signature.test.mjs`.
 
 ## Contrats en cours (Annexe 1)
 
-Écran **Contrats & prestataires** › « Contrats en cours (PDF) » : la liste des contrats qui lient la
-copropriété (nom, référence, fournisseur, description), suivie des contrats clôturés quand il y en a.
-Même aperçu que les autres rapports : « Imprimer / Enregistrer en PDF ».
+Écran **Contrats & prestataires** › « Contrats en cours (PDF) » : télécharge en un clic la liste des
+contrats qui lient la copropriété (nom, référence, fournisseur, description), suivie des contrats
+clôturés quand il y en a. Code : `contracts.js` (modèle pur + PDF dessiné avec pdf-lib, chargée à la
+demande) ; tests : `node --test tests/contracts.test.mjs`.
 
 ## Comptabilité : trois sous-pages
 
