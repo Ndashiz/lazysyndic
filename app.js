@@ -585,6 +585,7 @@ document.querySelectorAll('.nav button[data-s]').forEach(b=>{
     document.getElementById(s).classList.add('on');
     window.scrollTo({top:0});   // un écran s'ouvre par le haut, pas là où le précédent avait défilé
     if(s==='cpta') renderComptabilite();
+    syncSubnav();
     animateBars();
   };
 });
@@ -594,19 +595,50 @@ function animateBars(){ document.querySelectorAll('.fill[data-w]').forEach(f=>{ 
    La routine mensuelle de Jarvis envoie ici : elle doit pouvoir déposer l'utilisateur
    directement sur l'import, ou sur la liste filtrée des mouvements à catégoriser,
    sans qu'il ait à retrouver l'écran lui-même. */
-/* ---- Sous-onglets de la Comptabilité : Paiement des charges · Exercice en cours · Calcul des charges.
-   Lien profond : #cpta?tab=pay|exo|chg. Les graphiques se mesurent à l'affichage : on les redessine
-   quand leur onglet devient visible. */
-let cptaTab = 'pay';
-function showCptaTab(t){
-  if(!document.querySelector(`.cptapanel[data-cpta="${t}"]`)) return;
-  cptaTab = t;
-  document.querySelectorAll('#cptaSeg button').forEach(b=>{ const on=b.dataset.cpta===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on?'true':'false'); });
-  document.querySelectorAll('.cptapanel').forEach(p=>p.style.display = p.dataset.cpta===t ? 'block' : 'none');
-  const gen=document.getElementById('genBudget'); if(gen) gen.hidden = t!=='chg';
-  if(t==='exo') renderComptabilite();
+/* ---- Sous-pages d'un écran, choisies dans la barre latérale (.nav-sub sous l'entrée de l'écran) :
+   Comptabilité → Paiement des charges · Exercice en cours · Calcul des charges ;
+   Copropriétaires & clés → Copropriétaires & lots · Clés de répartition.
+   Lien profond : #cpta?tab=pay|exo|chg, #budget?tab=own|keys. Le sous-menu ne se déplie que sous
+   l'écran affiché ; le titre de la page est celui de la sous-page. */
+const SUBPAGES = {
+  cpta: { panel:'.cptapanel', attr:'cpta', h1:'cptaH1', desc:'cptaDesc', tabs:{
+    pay:['Paiement des charges', 'Ce que chaque copropriétaire a versé sur ce qu’il doit.'],
+    exo:['Exercice en cours', 'Où en est le budget voté, et les flux de trésorerie de l’exercice.'],
+    chg:['Calcul des charges', 'Le budget prévisionnel, sa répartition et les provisions de chacun.'] } },
+  budget: { panel:'.budpanel', attr:'bud', h1:'budH1', desc:'budDesc', tabs:{
+    own:['Copropriétaires & lots', 'Qui possède quoi dans l’immeuble.'],
+    keys:['Clés de répartition', 'Comment les charges se répartissent entre les copropriétaires.'] } },
+};
+let cptaTab = 'pay', budTab = 'own';
+const subTabOf = scr => scr==='cpta' ? cptaTab : scr==='budget' ? budTab : null;
+function syncSubnav(){
+  const cur=(document.querySelector('.screen.on')||{}).id;
+  document.querySelectorAll('.nav-sub').forEach(box=>{ const scr=box.dataset.for;
+    box.hidden = scr!==cur;
+    box.querySelectorAll('button').forEach(b=>{ const on=b.dataset.sub===subTabOf(scr); b.classList.toggle('on', on); if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current'); }); });
+  document.dispatchEvent(new Event('ls:subnav'));   // ui.js : fil d'Ariane et titre d'onglet
 }
-document.getElementById('cptaSeg')?.addEventListener('click', e=>{ const b=e.target.closest('button[data-cpta]'); if(b) showCptaTab(b.dataset.cpta); });
+function showSubPage(scr, t){
+  const cfg=SUBPAGES[scr]; if(!cfg || !cfg.tabs[t]) return;
+  if (scr==='cpta') cptaTab=t; else budTab=t;
+  document.querySelectorAll(cfg.panel).forEach(p=>p.style.display = p.dataset[cfg.attr]===t ? 'block' : 'none');
+  const h=document.getElementById(cfg.h1), d=document.getElementById(cfg.desc);
+  if(h) h.textContent=cfg.tabs[t][0]; if(d) d.textContent=cfg.tabs[t][1];
+  syncSubnav();
+}
+function showCptaTab(t){
+  if(!SUBPAGES.cpta.tabs[t]) return;
+  showSubPage('cpta', t);
+  const gen=document.getElementById('genBudget'); if(gen) gen.hidden = t!=='chg';
+  if(t==='exo') renderComptabilite();   // les graphiques se mesurent à l'affichage
+}
+function showBudTab(t){ showSubPage('budget', t); }
+document.querySelectorAll('.nav-sub button').forEach(b=>b.onclick=()=>{
+  const scr=b.parentElement.dataset.for;
+  if(!document.getElementById(scr).classList.contains('on')) goToScreen(scr);
+  (scr==='cpta' ? showCptaTab : showBudTab)(b.dataset.sub);
+  window.scrollTo({top:0});
+});
 function goToScreen(id){
   const btn = document.querySelector(`.nav button[data-s="${id}"]`);
   if(!btn || btn.disabled) return false;
@@ -621,6 +653,7 @@ function applyDeepLink(){
   if(!goToScreen(screen)) return;
   const params = new URLSearchParams(query || '');
   if(screen === 'cpta' && params.get('tab')) showCptaTab(params.get('tab'));
+  if(screen === 'budget' && params.get('tab')) showBudTab(params.get('tab'));
   const filter = params.get('filter');
   if(filter === 'unmapped'){
     // « À catégoriser » = high '?', la même valeur que pose l'import.
@@ -3803,11 +3836,6 @@ document.getElementById('genCtReport')?.addEventListener('click',()=>{
 /* ============================================================
    BUDGET & COPRO  (démo — recalcul des clés en direct)
    ============================================================ */
-document.getElementById('budseg')?.addEventListener('click',e=>{
-  const b=e.target.closest('button'); if(!b)return;
-  document.querySelectorAll('#budseg button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
-  document.querySelectorAll('.budpanel').forEach(p=>p.style.display=p.dataset.bud===b.dataset.bud?'block':'none');
-});
 const ownersById = ()=>{ const m={}; ownersOf().forEach(o=>{ if(o.id) m[o.id]=o; }); return m; };
 const lotsOf = ()=> state.lots || [];
 
