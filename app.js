@@ -3828,6 +3828,22 @@ document.getElementById('ctModalConfirm')?.addEventListener('click',()=>{
   saveState(); renderContracts();
   dbWrite(db=>db.updateContract(c.id, {status:'cloture', end:c.end, endNote:c.endNote}));
 });
+// « Contrats en cours (PDF) » : l'Annexe 1 téléchargée en un clic. contracts.js dessine le PDF
+// (pdf-lib chargée à la demande, comme pour le relevé de compte) ; rien ne part sur le réseau.
+let ctPdfBusy=false;
+document.getElementById('genCtReport')?.addEventListener('click', async e=>{
+  if (ctPdfBusy || typeof LSContracts==='undefined') return;
+  ctPdfBusy=true;
+  const btn=e.currentTarget, html=btn.innerHTML; btn.disabled=true; btn.textContent='Génération…';
+  try {
+    const d={ copro:{ name:(state.coproName||'').trim()||'Ma copropriété', addr:state.coproAddr||'', kbo:state.coproKbo||'' },
+      contracts:state.contracts||[], at:new Date().toISOString(), logo:await Promise.race([brandLogoPng().catch(()=>null), new Promise(r=>setTimeout(()=>r(null), 2500))]) };   // sans logo plutôt que sans PDF
+    const bytes=await LSContracts.buildContractsPdf(await loadPdfLib(), d), name=LSContracts.contractsFileName(d);
+    saveBytes(bytes, name); showToast('PDF téléchargé : '+name);
+  } catch(err){ console.error(err); showToast('Le PDF n’a pas pu être généré : '+(err.message||err), 'err'); }
+  finally { btn.disabled=false; btn.innerHTML=html; ctPdfBusy=false; }
+});
+
 /* ============================================================
    BUDGET & COPRO  (démo — recalcul des clés en direct)
    ============================================================ */
@@ -5545,22 +5561,6 @@ function fillReportPeriod(){
       body = LSPdf.document({ head: headEl(title, p, {chip:'Annexe 4 · Budget prévisionnel', status, meta, noPeriod:true}), body: budgetSection(cy),
         foot: foot(`Budget prévisionnel ${cy} · Annexe 4${draft?' · brouillon':''}`) });
       return {title, body, docTitle:`LazySyndic – ${COPRO().name} – Budget prévisionnel ${cy}`};
-    } else if (kind==='contracts'){
-      // Annexe 1 : les contrats qui lient l'ACP — nom, référence, fournisseur, description ; les
-      // contrats clôturés suivent, avec leur période, quand il y en a.
-      title = 'Contrats en cours';
-      const C=state.contracts||[], act=C.filter(c=>c.status==='actif'), clo=C.filter(c=>c.status==='cloture');
-      const v = x => x && x!=='—' ? x : '';
-      const cols=[{label:'Nom', w:'24%'}, {label:'Référence', w:'19%'}, {label:'Fournisseur', w:'17%'}, {label:'Description'}];
-      const rowOf = c => [{html:`<b>${LSPdf.esc(c.name||'')}</b>`, sub:[c.type, v(c.start) ? `depuis le ${c.start}` : ''].filter(Boolean).join(' · ')}, v(c.ref), c.fournisseur||'', c.note||''];
-      const closedRow = c => [{html:`<b>${LSPdf.esc(c.name||'')}</b>`, sub:[c.type, [v(c.start), v(c.end)].filter(Boolean).join(' → ')].filter(Boolean).join(' · ')}, v(c.ref), c.fournisseur||'', c.endNote||c.note||''];
-      const inner = LSPdf.section(`Contrats liant ${COPRO().name||'la copropriété'}`, {sub:`${act.length} contrat${act.length>1?'s':''} en cours au ${LSPdf.fmt.date(todayISO())}`})
-        + LSPdf.table({cols, rows:act.map(rowOf), label:'Contrats en cours', empty:'Aucun contrat en cours.'})
-        + (clo.length ? LSPdf.section('Contrats clôturés', {sub:`${clo.length} contrat${clo.length>1?'s':''} arrivé${clo.length>1?'s':''} à terme ou résilié${clo.length>1?'s':''}`})
-            + LSPdf.table({cols, rows:clo.map(closedRow), label:'Contrats clôturés'}) : '');
-      body = LSPdf.document({ head: headEl(title, p, {chip:'Annexe 1 · Contrats en cours', noPeriod:true, meta:[{label:'Contrats en cours', value:String(act.length)}]}),
-        body: inner, foot: foot('Annexe 1 · Contrats en cours') });
-      return {title, body, docTitle:`LazySyndic – ${COPRO().name} – Contrats en cours`};
     }
     return {title, body};
   }
@@ -5590,7 +5590,6 @@ function fillReportPeriod(){
   document.getElementById('repRes')?.addEventListener('click', ()=>openReport('res'));
   document.getElementById('repAG')?.addEventListener('click', ()=>openReport('ag'));
   document.getElementById('genBudget')?.addEventListener('click', ()=>openReport('budget'));
-  document.getElementById('genCtReport')?.addEventListener('click', ()=>openReport('contracts'));
   document.querySelectorAll('.ag-annexes').forEach(b=>b.addEventListener('click', ()=>openReport('ag', periodForYear(b.dataset.year))));
 })();
 
