@@ -594,6 +594,19 @@ function animateBars(){ document.querySelectorAll('.fill[data-w]').forEach(f=>{ 
    La routine mensuelle de Jarvis envoie ici : elle doit pouvoir déposer l'utilisateur
    directement sur l'import, ou sur la liste filtrée des mouvements à catégoriser,
    sans qu'il ait à retrouver l'écran lui-même. */
+/* ---- Sous-onglets de la Comptabilité : Paiement des charges · Exercice en cours · Calcul des charges.
+   Lien profond : #cpta?tab=pay|exo|chg. Les graphiques se mesurent à l'affichage : on les redessine
+   quand leur onglet devient visible. */
+let cptaTab = 'pay';
+function showCptaTab(t){
+  if(!document.querySelector(`.cptapanel[data-cpta="${t}"]`)) return;
+  cptaTab = t;
+  document.querySelectorAll('#cptaSeg button').forEach(b=>{ const on=b.dataset.cpta===t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on?'true':'false'); });
+  document.querySelectorAll('.cptapanel').forEach(p=>p.style.display = p.dataset.cpta===t ? 'block' : 'none');
+  const gen=document.getElementById('genBudget'); if(gen) gen.hidden = t!=='chg';
+  if(t==='exo') renderComptabilite();
+}
+document.getElementById('cptaSeg')?.addEventListener('click', e=>{ const b=e.target.closest('button[data-cpta]'); if(b) showCptaTab(b.dataset.cpta); });
 function goToScreen(id){
   const btn = document.querySelector(`.nav button[data-s="${id}"]`);
   if(!btn || btn.disabled) return false;
@@ -606,7 +619,9 @@ function applyDeepLink(){
   if(!raw) return;
   const [screen, query] = raw.split('?');
   if(!goToScreen(screen)) return;
-  const filter = new URLSearchParams(query || '').get('filter');
+  const params = new URLSearchParams(query || '');
+  if(screen === 'cpta' && params.get('tab')) showCptaTab(params.get('tab'));
+  const filter = params.get('filter');
   if(filter === 'unmapped'){
     // « À catégoriser » = high '?', la même valeur que pose l'import.
     const cf = document.getElementById('catFilter');
@@ -2872,7 +2887,7 @@ function agBudgetYear(ag){
 function standardAgenda(ag){
   const y=agYearOf(ag), N=y-1, by=agBudgetYear(ag), cn=(state.coproName||'').trim()||'la copropriété';
   const bal=a=>eur(balanceAt(a, `${N}-12-31`));
-  let budgetBody=`Budget ${by} à préparer dans Budget & copropriétaires › Calcul des charges ; l'Annexe 4 sera jointe à la convocation.`;
+  let budgetBody=`Budget ${by} à préparer dans Comptabilité › Calcul des charges ; l'Annexe 4 sera jointe à la convocation.`;
   try {
     const b=chargesBudget(by);
     if (b.postes.length || b.reserve.length){
@@ -3201,7 +3216,7 @@ function renderConvInfo(){
   else delay=`<div class="alert"><span class="ic">!</span> ${dl.days<0?'La date de l’AG est passée.':`Seulement ${dl.days} jour${dl.days>1?'s':''} avant la séance : le minimum légal est de 15 jours (art. 3.87 §3), sauf urgence.`}</div>`;
   el.innerHTML=`<div class="mini-h" style="margin-top:0">Destinataires — un message nominatif par copropriétaire, ou un envoi groupé</div>
     <div class="sg-signers cv-list">${who||'<div class="sub">Aucun autre copropriétaire.</div>'}</div>
-    ${r.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Budget &amp; copro › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
+    ${r.missing.length?`<div class="sub" style="margin-top:6px">Ajoutez les e-mails dans <b>Copropriétaires &amp; clés › Copropriétaires &amp; lots</b> ; en attendant, complétez le destinataire dans votre messagerie.</div>`:''}
     ${missing}
     ${delay}
     ${currentAG.convocation_date?`<div class="sub" style="margin-bottom:10px">Convocation marquée envoyée le ${escH(currentAG.convocation_date)}.</div>`:''}`;
@@ -4304,7 +4319,7 @@ function renderCharges(){
   if (ed && pub) notes.push(`Publié${bud.publishedAt?` le ${fmtDateLong(String(bud.publishedAt).slice(0,10))}`:''} : postes, fonds de réserve et marge sont figés, la base refuse toute modification, et la répartition est celle des copropriétaires du jour de la publication. Pour corriger : « Repasser en brouillon »${bud.applied?`, ce qui annule l'application aux provisions (le dû de chacun reste tel quel jusqu'à une nouvelle application)`:''}${bud.approved?` ; approuvé par l'AG du ${fmtDateLong(bud.approved.date)}, une modification demande une nouvelle décision de l'assemblée`:''}.`);
   if (ed && !pub) notes.push(`Brouillon : seul le syndic voit ce budget ${y}, fonds de réserve et répartition compris. « Publier » le rend consultable par les copropriétaires ; l'appliquer aux provisions le publie aussi. À la publication, les estimations calculées par formule sont figées.`);
   if (unc.count) notes.push(`Dépenses ${ref} reprises par aucun poste : ${eur(unc.total)} (${unc.count} mouvement${unc.count>1?'s':''})${unc.uncategorized.count?`, dont ${eur(unc.uncategorized.total)} encore à catégoriser`:''}.`);
-  if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; lots).');
+  if (postes.some(p=>p.key==='quote') && !sum(ownersOf().map(o=>+o.q||0))) notes.push('Aucune quotité enregistrée : la clé Millièmes ne peut rien répartir (Copropriétaires &amp; clés › Copropriétaires &amp; lots).');
   const badge = (ed || bud.approved) ? ` <span class="status ${bud.approved?'success':pub?'success':'warning'}" style="vertical-align:middle;margin-left:6px"${pub&&bud.publishedAt?` title="Publié le ${new Date(bud.publishedAt).toLocaleDateString('fr-BE',{day:'numeric',month:'long',year:'numeric'})}"`:''}>${bud.approved?`Approuvé par l'AG du ${fmtDateLong(bud.approved.date)}`:pub?'Publié':'Brouillon'}</span>` : '';
   const margeUi = edit ? `<label class="chg-marge">Marge <input class="fld" id="chgMarge" inputmode="decimal" value="${num(marge)}" aria-label="Marge appliquée aux estimations"> %</label>` : `<span class="sub">Marge ${num(marge)} %</span>`;
   card.innerHTML = `
@@ -4379,6 +4394,7 @@ function renderCharges(){
   }
   renderReserve(y, postes, reserve);
   renderChargesSplit(y);
+  renderExercice();   // le suivi de l'exercice lit le même budget
 }
 // Fonds de réserve : postes à constituer sur une durée, plus la ligne du minimum légal (charges.js).
 function renderReserve(y, postes, reserve){
@@ -5448,7 +5464,7 @@ function fillReportPeriod(){
     const all=state.charges||{};
     const others=Object.keys(all).filter(y=>/^\d{4}$/.test(y) && y!==String(cy) && ((all[y]||{}).postes||[]).length && (budgetPublished(all[y])||canWrite())).sort();
     return `<h2 class="pdf-h2" style="margin-top:18px"><span class="pdf-h2-t">Annexe 4 — Budget prévisionnel ${cy}</span></h2>`
-      + LSPdf.note(`Aucun budget prévisionnel ${cy} n'est ${canWrite()?'préparé':'publié'}. Le budget se prépare dans Budget & copropriétaires › Calcul des charges ; l'Annexe 4 le reprend dès qu'il a des postes.${others.length?` Budgets existants : ${others.join(', ')}.`:''}`, {kind:'info', title:'Annexe 4 absente.'});
+      + LSPdf.note(`Aucun budget prévisionnel ${cy} n'est ${canWrite()?'préparé':'publié'}. Le budget se prépare dans Comptabilité › Calcul des charges ; l'Annexe 4 le reprend dès qu'il a des postes.${others.length?` Budgets existants : ${others.join(', ')}.`:''}`, {kind:'info', title:'Annexe 4 absente.'});
   }
   function chronoSection(p){
     const evs=(state.timeline||[]).filter(e=>{ const d=e.date||''; return d>=p.fromIso && d<=p.toIso; })
@@ -5646,7 +5662,7 @@ function fillReportPeriod(){
     const mailInfo = !admin ? '' : `<div class="st-mail">${rec.to.length
         ? `E-mail adressé à ${escH(rec.to.join(', '))}, relevé en pièce jointe.`
         : 'Aucune adresse e-mail de copropriétaire enregistrée : complétez les destinataires dans votre messagerie.'}${rec.missing.length
-        ? ` Sans e-mail : ${escH(rec.missing.join(', '))} (à ajouter dans Budget &amp; copro › Copropriétaires &amp; lots).` : ''}</div>`;
+        ? ` Sans e-mail : ${escH(rec.missing.join(', '))} (à ajouter dans Copropriétaires &amp; clés › Copropriétaires &amp; lots).` : ''}</div>`;
     card.innerHTML = `
       <div class="h-row"><h2 id="stTitle">Relevé de compte (PDF)</h2><button class="lk" id="stClose" aria-label="Fermer" style="font-size:16px">✕</button></div>
       <div class="sub" style="margin:-6px 0 2px">À envoyer aux copropriétaires : pour chaque compte, la date d’extraction, le titulaire, l’IBAN, le solde disponible et toutes les transactions de la période.</div>
@@ -6254,8 +6270,165 @@ function renderOwnerPayments(){
   card.querySelector('#opPrev').onclick=()=>{ if (i>0){ opYear=years[i-1]; renderOwnerPayments(); } };
   card.querySelector('#opNext').onclick=()=>{ if (i<years.length-1){ opYear=years[i+1]; renderOwnerPayments(); } };
 }
+/* ============================================================
+   EXERCICE EN COURS — budget voté / déjà dépensé, poste par poste
+   Comptabilité › Exercice en cours. Le calcul est dans charges.js (LSCharges.tracking) :
+   dépensé = mouvements du compte de paiement de la catégorie du poste, plus le payé hors comptes.
+   Un budget publié est figé : une dépense que personne n'avait prévue se suit par un POSTE NON
+   PRÉVU, gardé à part (state.budgetExtras = ls_settings.budget_extras, supabase/postes-imprevus.sql :
+   { "2026": [{id, label, cat, note, at}] }) — le budget voté, lui, ne bouge pas.
+   ============================================================ */
+let exoYear = null;
+const extrasOf = y => LSCharges.cleanExtras((state.budgetExtras||{})[y]);
+function saveExtras(y, list){
+  if(!canWrite()) return;
+  const next={...(state.budgetExtras||{})};
+  if (list.length) next[y]=list; else delete next[y];
+  state.budgetExtras=next; saveState(); renderExercice();
+  if (!writeToDb()){ toastSaved(); return; }
+  window.LS.db.updateSettings({budget_extras: next}).then(()=>{ state.extrasStoreMissing=false; toastSaved(); },
+    e=>{ const m=e.message||String(e); state.extrasStoreMissing=/budget_extras|schema cache|column/i.test(m);
+      if (state.extrasStoreMissing) renderExercice(); else toastError(m); });
+}
+function ensureExoCss(){
+  if (document.getElementById('exoCss')) return;
+  const s=document.createElement('style'); s.id='exoCss';
+  s.textContent=`
+    #exoCard{padding-bottom:18px}
+    #exoCard .exo-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 22px 18px}
+    @media (max-width:900px){ #exoCard .exo-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    #exoCard .exo-kpis .v{font-size:20px}
+    #exoCard>.chg-actions,#exoCard>.chg-note,#exoCard>.exo-empty,#exoCard>.exo-warn{margin-left:22px;margin-right:22px}
+    @media (max-width:640px){ #exoCard .exo-kpis,#exoCard>.chg-actions,#exoCard>.chg-note,#exoCard>.exo-empty,#exoCard>.exo-warn{margin-left:14px;margin-right:14px} }
+    #exoCard .exo-empty{font-size:13px;color:var(--ink-soft);padding:4px 0 14px}
+    #exoCard .exo-warn{font-size:12.5px;color:var(--warning-ink);background:var(--warning-soft);border-radius:6px;padding:8px 12px;margin-top:12px}
+    #exoTable td{vertical-align:middle}
+    #exoTable td.num,#exoTable th.num{white-space:nowrap;font-variant-numeric:tabular-nums}
+    #exoTable .exo-poste{min-width:180px}
+    #exoTable .exo-bar{min-width:120px;width:22%}
+    #exoTable .exo-track{position:relative;height:10px;background:var(--muted);border-radius:999px}
+    #exoTable .exo-fill{height:100%;border-radius:999px;background:var(--primary);max-width:100%}
+    #exoTable .exo-fill.over{background:var(--danger)}
+    #exoTable .exo-fill.extra{background:var(--warning)}
+    #exoTable .exo-pace{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--foreground);border-radius:2px;transform:translateX(-1px)}
+    #exoTable .exo-pct{font-size:11.5px;color:var(--ink-faint);margin-top:4px;font-variant-numeric:tabular-nums}
+    #exoTable tr.exo-group td{background:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding-top:8px;padding-bottom:8px}
+    #exoTable tr.exo-group td span{font-weight:400;text-transform:none;letter-spacing:0}
+    #exoTable .exo-edit{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;width:210px;max-width:100%}
+    #exoTable .exo-edit .fld{font-size:13px;padding:6px 8px;width:100%;min-width:0;box-sizing:border-box}
+    #exoTable .exo-over{color:var(--danger);font-weight:600}
+    #exoCard .exo-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-faint);margin:0 22px 12px}
+    #exoCard .exo-legend i{display:inline-block;vertical-align:middle;margin-right:6px}`;
+  document.head.appendChild(s);
+}
+function renderExercice(){
+  const card=document.getElementById('exoCard'); if(!card || typeof LSCharges==='undefined') return;
+  ensureChargesCss(); ensureExoCss();
+  const nowY=exerciseNow();
+  if (exoYear==null) exoYear=nowY;
+  const y=exoYear, ed=canWrite(), bud=chargesBudget(y), pub=budgetPublished(bud);
+  const postes = (ed || pub) ? bud.postes : [];          // un brouillon reste invisible du copropriétaire
+  const extras=extrasOf(y), tx=chargesTx(), T=LSCharges.tracking(tx, postes, extras, y), tt=T.totals;
+  const closed=periodsOf().find(p=>+p.year===y && p.closed_at);
+  const edit = ed && !closed && !(writeToDb() && state.extrasStoreMissing);
+  // part de l'année écoulée : le repère de rythme (une dépense régulière en est là de son budget)
+  const start=new Date(y,0,1), end=new Date(y+1,0,1), now=new Date();
+  const pace = y<nowY ? 100 : y>nowY ? 0 : Math.round((now-start)/(end-start)*1000)/10;
+  const lastIso = tx.filter(t=>t.iso.slice(0,4)===String(y) && t.account!=='ext').map(t=>t.iso).sort().pop();
+  const yearNav = `<div class="chg-year"><button class="lk" id="exoPrev" aria-label="Exercice ${y-1}">‹</button><b>${y}</b><button class="lk" id="exoNext" aria-label="Exercice ${y+1}">›</button></div>`;
+  const badge = !postes.length ? `<span class="status warning" style="vertical-align:middle;margin-left:6px">Pas de budget ${ed?'':'publié'}</span>`
+    : bud.approved ? `<span class="status success" style="vertical-align:middle;margin-left:6px">Voté · AG du ${fmtDateLong(bud.approved.date)}</span>`
+    : pub ? `<span class="status success" style="vertical-align:middle;margin-left:6px">Publié</span>`
+    : `<span class="status warning" style="vertical-align:middle;margin-left:6px">Brouillon, pas encore voté</span>`;
+  const votedLbl = pub || !postes.length ? 'Voté' : 'Prévu';
+  const when = closed ? `Exercice clôturé le ${fmtDateLong(String(closed.closed_at).slice(0,10))}.` : y>nowY ? 'Exercice à venir.' : y<nowY ? 'Exercice terminé, pas encore clôturé.'
+    : lastIso ? `Dernier mouvement connu : ${fmtDateLong(lastIso)}.` : 'Aucun relevé importé pour cet exercice.';
+  const bar = r => {
+    if (r.spent==null) return '<span class="sub">—</span>';
+    const w = r.extra ? (r.spent>0?100:0) : r.voted>0 ? Math.max(0, Math.min(100, r.spent/r.voted*100)) : (r.spent>0?100:0);
+    const paceMark = !r.extra && r.voted>0 && y===nowY ? `<span class="exo-pace" style="left:${pace}%" title="${String(pace).replace('.',',')} % de l'année écoulée"></span>` : '';
+    const txt = r.extra ? 'hors budget' : r.voted>0 ? `${String(r.pct).replace('.',',')} % du ${votedLbl.toLowerCase()}` : (r.spent>0 ? 'rien de prévu' : '');
+    return `<div class="exo-track" role="img" aria-label="${escH(txt)}"><div class="exo-fill ${r.extra?'extra':r.over?'over':''}" style="width:${w}%"></div>${paceMark}</div><div class="exo-pct">${txt}</div>`;
+  };
+  const leftCell = r => r.extra ? (r.spent>0.005 ? `<span class="exo-over">−${eur(r.spent)}</span><div class="chg-sub">non prévu</div>` : '<span class="sub">—</span>')
+    : r.spent==null ? `${eur(r.voted)}` : r.left<-0.005 ? `<span class="exo-over">−${eur(-r.left)}</span><div class="chg-sub">dépassement</div>` : `${eur(r.left)}`;
+  const spentCell = r => r.spent==null ? `<span class="sub">—</span><div class="chg-sub">poste sans catégorie</div>`
+    : `${eur(r.spent)}<div class="chg-sub">${r.count ? `${r.count} mouvement${r.count>1?'s':''}${r.ext?` · dont ${eur(r.ext)} hors comptes`:''}` : 'aucun mouvement'}</div>`;
+  const all=[...postes, ...extras];
+  const row = r => {
+    if (!r.extra) return `<tr><td class="exo-poste"><b>${escH(r.label||LSCharges.catLabel(r.cat))}</b><div class="chg-sub" style="white-space:normal">${escH(r.cat?LSCharges.catLabel(r.cat):'Sans catégorie de la comptabilité')}</div></td>
+      <td class="num">${eur(r.voted)}</td><td class="num">${spentCell(r)}</td><td class="num">${leftCell(r)}</td><td class="exo-bar">${bar(r)}</td></tr>`;
+    const p=extras.find(e=>e.id===r.id), since=p.at?`ajouté le ${fmtDateLong(p.at)}`:'';
+    const poste = edit ? `<div class="exo-edit">
+        <input class="fld exo-label" data-id="${escH(p.id)}" value="${escH(p.label)}" placeholder="Nom du poste" aria-label="Nom du poste non prévu">
+        <select class="fld exo-cat" data-id="${escH(p.id)}" aria-label="Catégorie de la comptabilité">${chargeCatOptions(p, all).replace('Nouveau poste (sans historique)','Choisir la catégorie…')}</select>
+        <input class="fld exo-note" data-id="${escH(p.id)}" value="${escH(p.note)}" maxlength="160" placeholder="Pourquoi cette dépense (repris tel quel) — ex. fuite en toiture, devis accepté en urgence" aria-label="Raison de la dépense">
+      </div><div class="chg-sub">${since?since+' · ':''}<button class="lk exo-del" data-id="${escH(p.id)}" title="Retirer ce poste (ses dépenses retournent dans « Dépenses sans poste »)">Retirer</button></div>`
+      : `<b>${escH(p.label||LSCharges.catLabel(p.cat))}</b><div class="chg-sub" style="white-space:normal">${[p.cat?LSCharges.catLabel(p.cat):'', p.note, since].filter(Boolean).map(escH).join(' · ')}</div>`;
+    return `<tr><td class="exo-poste">${poste}</td><td class="num"><span class="sub">—</span></td><td class="num">${p.cat?spentCell(r):'<span class="sub">—</span><div class="chg-sub">catégorie à choisir</div>'}</td>
+      <td class="num">${leftCell(r)}</td><td class="exo-bar">${bar(r)}</td></tr>`;
+  };
+  const otherRow = (g,i) => { const unc=g.cat.high==='?';
+    return `<tr><td class="exo-poste">${unc?'<b>À catégoriser</b>':`<b>${escH(g.cat.sub||g.cat.high)}</b><div class="chg-sub" style="white-space:normal">${escH(g.cat.sub?g.cat.high:'sans sous-catégorie')}</div>`}</td>
+      <td class="num"><span class="sub">—</span></td><td class="num">${eur(g.total)}<div class="chg-sub">${g.count} mouvement${g.count>1?'s':''}</div></td>
+      <td class="num"><span class="exo-over">−${eur(g.total)}</span></td>
+      <td class="exo-bar">${unc ? `<button class="lk" type="button" data-hash="acc?filter=unmapped">Catégoriser ces mouvements →</button>` : edit ? `<button class="lk exo-make" data-i="${i}" title="Suivre cette dépense sur sa propre ligne, sans toucher au budget voté">+ En faire un poste non prévu</button>` : ''}</td></tr>`; };
+  const pl=T.rows.filter(r=>!r.extra), ex=T.rows.filter(r=>r.extra);
+  const group=(t,d)=>`<tr class="exo-group"><td colspan="5">${t}${d?` <span>· ${d}</span>`:''}</td></tr>`;
+  const body = (pl.length ? group(`Postes du budget ${y}`) + pl.map(row).join('') : '')
+    + (ex.length ? group('Postes non prévus au budget', 'ajoutés en cours d’exercice, le budget voté ne change pas') + ex.map(row).join('') : '')
+    + (T.other.length ? group('Dépenses sans poste', 'aucun poste du budget ne les reprend') + T.other.map(otherRow).join('') : '');
+  const totLeft = tt.left<-0.005 ? `<span class="exo-over">−${eur(-tt.left)}</span><div class="chg-sub">dépassement</div>` : eur(tt.left);
+  const table = body ? `<div class="table-wrap"><table id="exoTable">
+      <tr><th scope="col">Poste</th><th class="num" scope="col">${votedLbl}</th><th class="num" scope="col">Dépensé</th><th class="num" scope="col">Reste</th><th scope="col">Avancement</th></tr>
+      ${body}
+      <tr class="chg-tot"><td>Total</td><td class="num">${eur(tt.voted)}</td><td class="num">${eur(tt.spent)}${tt.extra+tt.other>0.005?`<div class="chg-sub">dont ${eur(tt.extra+tt.other)} hors budget</div>`:''}</td><td class="num">${totLeft}</td>
+        <td class="exo-bar">${bar({spent:tt.spent, voted:tt.voted, pct:tt.pct, over:tt.left<-0.005, extra:false})}</td></tr>
+    </table></div>` : '';
+  const kpi=(l,v,sub,c)=>`<div class="kpi"><div class="l">${l}</div><div class="v"${c?` style="color:${c}"`:''}>${v}</div>${sub?`<div class="sub" style="margin-top:4px">${sub}</div>`:''}</div>`;
+  const kpis = `<div class="exo-kpis">
+      ${kpi(`Budget ${votedLbl.toLowerCase()}`, postes.length?eur(tt.voted):'—', postes.length?`${postes.length} poste${postes.length>1?'s':''} de charges courantes`:`aucun budget ${y}`)}
+      ${kpi('Déjà dépensé', eur(tt.spent), tt.pct!=null?`${String(tt.pct).replace('.',',')} % du budget${y===nowY?` · ${String(pace).replace('.',',')} % de l'année écoulée`:''}`:when)}
+      ${kpi(tt.left<-0.005?'Dépassement':'Reste à dépenser', postes.length?eur(Math.abs(tt.left)):'—', '', tt.left<-0.005?'var(--danger)':'')}
+      ${kpi('Hors budget', eur(tt.extra+tt.other), tt.extra+tt.other>0.005?`${eur(tt.extra)} en postes non prévus · ${eur(tt.other)} sans poste`:'tout est repris par un poste', tt.extra+tt.other>0.005?'var(--warning-ink)':'')}
+    </div>`;
+  const empty = postes.length ? '' : `<div class="exo-empty">${ed ? `Aucun budget n'est préparé pour ${y} : les dépenses de l'exercice sont listées par catégorie, sans rien à quoi les comparer.` : `Le budget ${y} n'est pas encore publié par le syndic.`}
+      ${ed?`<button class="lk" id="exoToBudget">Préparer le budget ${y} →</button>`:''}</div>`;
+  const legend = body && y===nowY && pl.some(r=>r.voted>0) ? `<div class="exo-legend"><span><i style="width:2px;height:12px;background:var(--foreground);border-radius:2px"></i>part de l'année écoulée : une dépense régulière en est là de son budget</span></div>` : '';
+  const actions = edit ? `<div class="chg-actions"><button class="btn btn-ghost" id="exoAdd"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Ajouter un poste non prévu</button></div>` : '';
+  const notes=[];
+  notes.push(`Dépensé = mouvements du compte de paiement rangés dans la catégorie du poste (un remboursement vient en déduction), plus ce qui a été payé hors comptes de l'ACP. ${when}`);
+  if (ed && pub) notes.push(`Le budget ${y} est publié, donc figé : une dépense que personne n'avait prévue se suit par un poste non prévu, sans modifier ce qui a été voté.`);
+  const warn = ed && writeToDb() && state.extrasStoreMissing ? `<div class="exo-warn">Les postes non prévus ne peuvent pas encore être enregistrés : lancez <b>supabase/postes-imprevus.sql</b> dans Supabase (SQL Editor), puis rechargez la page.</div>` : '';
+  card.innerHTML = `
+    <div class="h-row"><div><h2>Exercice ${y} · budget et dépenses${badge}</h2><div class="sub">Ce que le budget prévoyait, poste par poste, et ce qui est déjà sorti du compte de paiement.</div></div>
+      <div class="chg-head-right">${yearNav}</div></div>
+    ${kpis}${empty}${legend}${table}${actions}${warn}${notes.map(n=>`<div class="chg-note">${n}</div>`).join('')}`;
+
+  card.querySelector('#exoPrev').onclick=()=>{ exoYear=y-1; renderExercice(); };
+  card.querySelector('#exoNext').onclick=()=>{ exoYear=y+1; renderExercice(); };
+  card.querySelector('#exoToBudget')?.addEventListener('click', ()=>{ chgYear=y; chgEdit=null; renderCharges(); showCptaTab('chg'); });
+  if (!edit) return;
+  const upd=(id, patch)=>saveExtras(y, extras.map(p=>p.id===id ? {...p, ...patch} : p));
+  card.querySelectorAll('.exo-label').forEach(i=>i.onchange=()=>upd(i.dataset.id, {label:i.value.trim()}));
+  card.querySelectorAll('.exo-note').forEach(i=>i.onchange=()=>upd(i.dataset.id, {note:i.value.trim()}));
+  card.querySelectorAll('.exo-cat').forEach(sel=>sel.onchange=()=>{ const cat=catFromKey(sel.value), p=extras.find(e=>e.id===sel.dataset.id);
+    upd(sel.dataset.id, {cat, ...(cat && !p.label ? {label:cat.sub||cat.high} : {})}); });
+  card.querySelectorAll('.exo-del').forEach(b=>b.onclick=()=>{ const p=extras.find(e=>e.id===b.dataset.id);
+    if (!confirm(`Retirer le poste non prévu « ${p.label||LSCharges.catLabel(p.cat)} » de l'exercice ${y} ?\n\nSes dépenses restent dans les comptes : elles retournent dans « Dépenses sans poste ».`)) return;
+    saveExtras(y, extras.filter(e=>e.id!==p.id)); });
+  card.querySelectorAll('.exo-make').forEach(b=>b.onclick=()=>{ const g=T.other[+b.dataset.i]; if(!g) return;
+    saveExtras(y, [...extras, {id:LSCharges.newId(), label:g.cat.sub||g.cat.high, cat:g.cat, note:'', at:todayISO()}]);
+    logTimeline({title:`Poste non prévu ajouté à l'exercice ${y}`, kind:'manual', description:`« ${g.cat.sub||g.cat.high} » : ${eur(g.total)} déjà dépensés, hors du budget voté.`}); });
+  card.querySelector('#exoAdd').onclick=()=>{
+    saveExtras(y, [...extras, {id:LSCharges.newId(), label:'', cat:null, note:'', at:todayISO()}]);
+    const l=[...document.querySelectorAll('#exoTable .exo-label')].pop(); if(l) l.focus();
+  };
+}
+
 function renderComptabilite(){
   renderOwnerPayments();
+  renderExercice();
   const box=document.getElementById('cfMatrix'); if(!box) return;
   ensureCfCss();
   renderPeriods();
