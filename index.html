@@ -90,7 +90,8 @@
   .ws-ic,.tile{width:32px;height:32px;border-radius:5px;background:var(--secondary);color:var(--primary);display:grid;place-items:center;flex:none}
   .ws-ic svg,.tile svg{width:17px;height:17px}
   .workspace b{display:block;font-size:12px;font-weight:600;line-height:1.3}
-  .workspace span{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:3px}
+  /* le sous-titre seulement : « .workspace span » attrapait aussi la pastille .ws-ic et décentrait son icône */
+  .workspace div>span{display:block;font-size:10.5px;color:var(--muted-foreground);margin-top:3px}
   .nav-label{color:var(--sidebar-muted);font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;margin:0 12px 10px}
   .nav{display:flex;flex-direction:column}
   .nav button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:12px;min-height:42px;padding:0 12px;margin:2px 0;
