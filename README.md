@@ -83,6 +83,15 @@ au lieu de devenir une recette de charges : un remboursement ou un versement d'u
    (art. 3.87 §10). Le suivi continue dans l'historique après la clôture de l'AG.
    L'offre gratuite couvre 3 signatures par mois, chaque signataire compte.
 
+**Tableaux dans le texte d'un point** (étape 1) **et dans les notes de séance** (étape 4) : un
+tableau collé depuis Excel, Numbers ou une page web reste un tableau ; « Insérer un tableau » en
+crée un, et les outils (+ Ligne, + Colonne…) apparaissent quand le curseur est dedans ; Tab et
+Entrée passent d'une cellule à l'autre. Le texte enregistré reste du texte brut (aucun changement
+de base) : un tableau y est une suite de lignes à tabulations, la première étant l'en-tête. Le
+PV (PDF et Word) et la convocation (e-mail, texte, PDF) redessinent le tableau : montants à
+droite, « Total » en gras, en-tête répété d'une page à l'autre. Code : `richtext.js` (`LSText`,
+sans DOM ni réseau) et `rtMount` dans `app.js` ; tests : `node --test tests/richtext.test.mjs`.
+
 Prérequis : lancer [`supabase/ag.sql`](supabase/ag.sql) à la main (colonnes
 `bureau` / `signature` / `email`, bucket privé `ls-docs`). Tests du lecteur de
 signatures : `node --test tests/signature.test.mjs`.

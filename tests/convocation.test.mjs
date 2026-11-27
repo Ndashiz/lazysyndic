@@ -190,3 +190,28 @@ test('PDF : lettre + procuration, deux pages, métadonnées', { skip: !PDFLib &&
   const big = await PDFLib.PDFDocument.load(await C.buildPdf(PDFLib, many));
   assert.ok(big.getPageCount() >= 4);
 });
+
+// Un tableau dans le texte d'un point (richtext.js) : lignes à tabulations
+const withTable = () => { const d = base(); d.points[0].body = 'Budget proposé :\nLot\t2026\t2027\nRDC & GARAGE\t79,39 €\t113,35 €\nTotal\t203,34 €\t275,48 €\nDétail en annexe.'; return d; };
+
+test('tableau dans un point : texte brut à barres, HTML en <table>, sans tabulation', () => {
+  const d = withTable();
+  const txt = C.text(d);
+  assert.match(txt, /^ {3}RDC & GARAGE \| 79,39 € \| 113,35 €$/m);
+  assert.ok(!txt.includes('\t'));
+  const h = C.html(d);
+  assert.ok(h.includes('>RDC &amp; GARAGE</td>') && h.includes('>Lot</th>'), 'le tableau est dans le message');
+  assert.match(h, /<td align="right"[^>]*>113,35 €<\/td>/);
+  assert.ok(h.includes('Budget proposé :') && h.includes('Détail en annexe.'));
+  // un point sans tableau garde son rendu d'avant
+  assert.ok(C.html(base()).includes('Comptes joints.<br>Questions bienvenues.'));
+});
+
+test('PDF : un tableau dans un point, court ou sur plusieurs pages', { skip: !PDFLib && 'pdf-lib absent (npm i --no-save pdf-lib@1.17.1)' }, async () => {
+  const doc = await PDFLib.PDFDocument.load(await C.buildPdf(PDFLib, withTable()));
+  assert.ok(doc.getPageCount() >= 2 && doc.getPageCount() <= 3);
+  const d = base();
+  d.points[0].body = 'Poste\tMontant\n' + Array.from({ length: 150 }, (_, i) => `Poste ${i + 1}\t${i + 1},00 €`).join('\n');
+  const long = await PDFLib.PDFDocument.load(await C.buildPdf(PDFLib, d));
+  assert.ok(long.getPageCount() >= 4, 'le tableau continue sur les pages suivantes');
+});
