@@ -357,6 +357,8 @@ function matchSigners(expected, sigs){
             points:[{n, title, body, notes, info?, maj, rule, pour, contre, abst, adopted}],
             signers:[{name, roles:[]}], generatedAt (ISO) }
    ============================================================ */
+// Le texte des points : paragraphes et tableaux (richtext.js, chargé avant ce fichier)
+const LSText = root.LSText || (typeof require==='function' ? require('./richtext.js') : null);
 const SUBST={'\u202f':' ','\u2009':' ','\u2007':' ','\t':' ','\u2192':'->','\u2190':'<-','\u2713':'OK','\u2714':'OK','\u2265':'>=','\u2264':'<=','\u2260':'!=','\u2011':'-','\u2010':'-'};
 async function buildPvPdf(PDFLib, d){
   const {PDFDocument, StandardFonts, rgb} = PDFLib;
@@ -413,6 +415,27 @@ async function buildPvPdf(PDFLib, d){
     y-=8;
   }
 
+  // Texte d'un point ou notes de séance : les paragraphes, et les tableaux redessinés (LSText).
+  // `prefix` (« Débats : ») ouvre le premier paragraphe, ou tient sur sa ligne devant un tableau.
+  function rich(text,opts,prefix){
+    const bl=LSText.blocks(text), indent=opts.indent||0;
+    bl.forEach((b,i)=>{
+      const pre=i===0&&prefix?prefix:'';
+      if(b.type==='text'){ para(pre+b.text,opts); return; }
+      if(pre) para(pre.trim(),{...opts,gap:2});
+      y-=2;
+      LSText.drawTable(b.rows,{ x:M+indent, width:CW-indent, size:9, lh:1.32, pad:4,
+        measure:(t,bold)=>(bold?F.b:F.r).widthOfTextAtSize(safe(t),9),
+        wrap:(t,bold,w)=>wrap(t,bold?F.b:F.r,9,w),
+        y:()=>y, setY:v=>{ y=v; },
+        need:h=>{ if(y-h<BOTTOM){ newPage(); return true; } return false; },
+        text:(t,x,yy,bold)=>page.drawText(t,{x,y:yy,size:9,font:bold?F.b:F.r,color:C.ink}),
+        rule:(x1,x2,yy,strong)=>page.drawLine({start:{x:x1,y:yy},end:{x:x2,y:yy},thickness:strong?.8:.4,color:strong?C.soft:C.line}),
+      });
+      y-=(opts.gap||3)+5;
+    });
+  }
+
   newPage();
   para('Procès-verbal',{font:F.b,size:21,gap:2,color:C.green});
   para(`Assemblée générale ${String(d.type||'ordinaire').toLowerCase()} des copropriétaires — ${d.copro}`,{font:F.b,size:12.5,gap:10});
@@ -435,8 +458,8 @@ async function buildPvPdf(PDFLib, d){
   (d.points||[]).forEach(p=>{
     need(60);
     para(`${p.n}. ${p.title||''}`,{font:F.b,size:11,gap:3});
-    if(p.body) para(p.body,{indent:14,color:C.soft,gap:3});
-    if(p.notes) para(`Débats : ${p.notes}`,{indent:14,font:F.i,gap:3});
+    if(p.body) rich(p.body,{indent:14,color:C.soft,gap:3});
+    if(p.notes) rich(p.notes,{indent:14,font:F.i,gap:3},'Débats : ');
     if(p.info){ para('Point d’information — pas de vote.',{indent:14,font:F.i,color:C.soft,gap:8}); return; }
     const g=(lbl,x)=>`${lbl} : ${x.names.length?x.names.join(', '):'—'} (${x.q} quotités)`;
     para(`Majorité requise : ${p.maj} — ${p.rule}.`,{indent:14,gap:1});

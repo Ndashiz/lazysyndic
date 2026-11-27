@@ -39,6 +39,8 @@ const FONT = "'Hanken Grotesk','Segoe UI',Helvetica,Arial,sans-serif";
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const nl2br = s => esc(s).replace(/\r?\n/g, '<br>');
+// Le texte des points : paragraphes et tableaux (richtext.js, chargé avant ce fichier)
+const LSText = root.LSText || (typeof require === 'function' ? require('./richtext.js') : null);
 const slug = s => String(s||'').normalize('NFD').replace(/\p{M}/gu,'').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
 
 const typeLabel = d => (String(d.type||'ordinaire').toLowerCase() === 'extraordinaire') ? 'extraordinaire' : 'ordinaire';
@@ -77,7 +79,7 @@ function text(d){
   const cn = coproName(d), ty = typeLabel(d);
   const points = (d.points||[]).map(p => {
     const head = `${p.n}. ${p.title} · ${isDecision(p) ? `décision (${p.maj})` : 'information'}`;
-    return p.body ? head + '\n' + p.body.split('\n').map(l => '   ' + l).join('\n') : head;
+    return p.body ? head + '\n' + LSText.plain(p.body).split('\n').map(l => '   ' + l).join('\n') : head;
   }).join('\n\n');
   const extra = rules(d).map(([k, v]) => `${k} : ${v}`).join('\n\n');
   return `${greeting(d)}
@@ -175,6 +177,15 @@ function replyLinks(d){
   };
 }
 
+// Le texte d'un point : tel quel s'il n'a pas de tableau ; sinon paragraphes et tableaux (LSText),
+// styles en ligne et police sur chaque cellule (Outlook ne l'hérite pas).
+function bodyHtml(body){
+  if (!LSText.hasTable(body)) return nl2br(body);
+  const c = `${base}font-size:12px;line-height:17px;color:${T.ink};border:1px solid ${T.line};padding:4px 8px`;
+  return LSText.html(body, { p:'margin:0 0 6px', table:'border-collapse:collapse;margin:6px 0 8px',
+    th:`${c};font-weight:700;background-color:${T.secondary}`, td:c, total:'font-weight:700' });
+}
+
 function pointRows(d){
   const pts = d.points || [];
   if (!pts.length) return `<tr>${td(`${base}font-size:14px;line-height:20px;color:${T.muted};padding:14px 0`, 'Aucun point à l’ordre du jour pour le moment.')}</tr>`;
@@ -185,7 +196,7 @@ function pointRows(d){
       : chip('Information', T.soft, T.muted);
     return `<tr>
 ${td(`${top}padding:14px 0;width:40px`, `<table ${TBL}><tr><td align="center" bgcolor="${T.secondary}" style="background-color:${T.secondary};width:28px;height:28px;border-radius:8px;${base}font-size:13px;line-height:28px;font-weight:800;color:${T.primary}">${p.n}</td></tr></table>`, 'valign="top" width="40"')}
-${td(`${top}padding:17px 0 15px`, `<div style="${base}font-size:15px;line-height:21px;font-weight:700;color:${T.ink}">${esc(p.title)}</div><div style="margin-top:6px;line-height:20px">${tag}</div>${p.body ? `<div style="${base}font-size:13px;line-height:19px;color:${T.muted};margin-top:7px">${nl2br(p.body)}</div>` : ''}`, 'valign="top"')}
+${td(`${top}padding:17px 0 15px`, `<div style="${base}font-size:15px;line-height:21px;font-weight:700;color:${T.ink}">${esc(p.title)}</div><div style="margin-top:6px;line-height:20px">${tag}</div>${p.body ? `<div style="${base}font-size:13px;line-height:19px;color:${T.muted};margin-top:7px">${bodyHtml(p.body)}</div>` : ''}`, 'valign="top"')}
 </tr>`;
   }).join('\n');
 }
@@ -540,7 +551,7 @@ async function buildPdf(PDFLib, d){
   const PAD = 5, LH = 1.3;
   const pts = d.points || [];
   function rowH(lines){ return Math.max(...lines.map(ls => ls.reduce((h,l) => h + l.size*LH, 0)), 10*LH) + 2*PAD; }
-  function drawRow(cells, {zebra=false}={}){
+  function drawRow(cells, {zebra=false, rule=true}={}){
     const lines = cells.map((parts, k) => {
       const out = [];
       parts.filter(p => p && p.t).forEach(p => wrap(p.t, p.font||F.r, p.size||9.5, cols[k].w - 2*PAD).forEach(l => out.push({t:l, font:p.font||F.r, size:p.size||9.5, color:p.color||C.ink})));
@@ -555,15 +566,46 @@ async function buildPdf(PDFLib, d){
       ls.forEach(l => { yy -= l.size; page.drawText(l.t, {x:x+PAD, y:yy+1.5, size:l.size, font:l.font, color:l.color}); yy -= l.size*(LH-1); });
       x += cols[k].w;
     });
-    y -= h; hline(y, {t:.35});
+    y -= h; if (rule) hline(y, {t:.35});
+  }
+  // Un point dont le texte porte un tableau : le titre et ce qui précède restent dans la rangée ;
+  // le tableau et la suite se dessinent dessous, sur toute la largeur à droite du numéro.
+  function drawRich(blocks){
+    const x = M + cols[0].w + PAD, width = CW - cols[0].w - 2*PAD, size = 8.5;
+    const cont = () => { newPage(); heading('Ordre du jour (suite)'); };
+    blocks.forEach(b => {
+      if (b.type === 'text'){
+        wrap(b.text, F.r, 8.8, width).forEach(l => {
+          if (y - 8.8*LH < BOTTOM) cont();
+          page.drawText(l, {x, y: y - 8.8, size:8.8, font:F.r, color:C.soft}); y -= 8.8*LH;
+        });
+        y -= 4; return;
+      }
+      LSText.drawTable(b.rows, { x, width, size, lh:1.3, pad:3.5,
+        measure:(t, bold) => tw(safe(t), bold ? F.b : F.r, size),
+        wrap:(t, bold, w) => wrap(t, bold ? F.b : F.r, size, w),
+        y:() => y, setY:v => { y = v; },
+        need:h => { if (y - h < BOTTOM){ cont(); return true; } return false; },
+        text:(t, tx, ty, bold) => page.drawText(t, {x:tx, y:ty, size, font: bold ? F.b : F.r, color:C.ink}),
+        rule:(x1, x2, yy, strong) => hline(yy, {x1, x2, t: strong ? .8 : .35, color: strong ? C.soft : C.line}),
+      });
+      y -= 7;
+    });
+    hline(y, {t:.35});
   }
   if (!pts.length) para('Aucun point à l\'ordre du jour.', {font:F.i, color:C.soft});
-  pts.forEach((p, i) => drawRow([
-    [{t:String(p.n), font:F.b, color:C.green}],
-    [{t:p.title, font:F.b}, p.body && {t:p.body, size:8.8, color:C.soft}],
-    [{t: isDecision(p) ? p.maj + (p.pct ? ` (${p.pct} %)` : '') : '', size:8.8, color:C.soft}],
-    [{t: isDecision(p) ? 'Décision' : 'Information', size:8.8, color: isDecision(p) ? C.ink : C.soft}],
-  ], {zebra: i % 2 === 1}));
+  pts.forEach((p, i) => {
+    const bl = p.body && LSText.hasTable(p.body) ? LSText.blocks(p.body) : null;
+    const k = bl ? bl.findIndex(b => b.type === 'table') : -1;
+    const lead = bl ? LSText.join(bl.slice(0, k)) : p.body;      // le texte avant le premier tableau
+    drawRow([
+      [{t:String(p.n), font:F.b, color:C.green}],
+      [{t:p.title, font:F.b}, lead && {t:lead, size:8.8, color:C.soft}],
+      [{t: isDecision(p) ? p.maj + (p.pct ? ` (${p.pct} %)` : '') : '', size:8.8, color:C.soft}],
+      [{t: isDecision(p) ? 'Décision' : 'Information', size:8.8, color: isDecision(p) ? C.ink : C.soft}],
+    ], {zebra: i % 2 === 1, rule: !bl});
+    if (bl){ y -= 5; drawRich(bl.slice(k)); }
+  });
   y -= 14;
 
   /* Pas d'encadré « À savoir » dans la lettre (retiré à la demande du syndic, 2026-11-20) : le rappel

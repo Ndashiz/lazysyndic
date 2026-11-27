@@ -2822,7 +2822,7 @@ async function agSaveDraft(quiet){
   const cards=[...document.querySelectorAll('#agenda > .card')];
   ag.points.forEach((p,i)=>{
     const c=cards[i]; p.pos=i; if(!c) return;
-    Object.assign(p,{title:c.querySelector('.pt-title').value, body:c.querySelector('.pt-body').innerText,
+    Object.assign(p,{title:c.querySelector('.pt-title').value, body:rtSerialize(c.querySelector('.pt-body')),
       kind:c.querySelector('.pt-kind').value, majorite:c.querySelector('.pt-maj').value, cle:c.querySelector('.pt-cle').value});
   });
   agSaving=true; agDraftNote();
@@ -2845,6 +2845,165 @@ document.getElementById('agSaveDraft')?.addEventListener('click',()=>agSaveDraft
 document.querySelector('#ag .agpanel[data-panel="1"]')?.addEventListener('input',()=>{ if(currentAG&&canWrite()) agMarkDirty(); });
 window.addEventListener('beforeunload',e=>{ if(agDirty && currentAG && canWrite()){ e.preventDefault(); e.returnValue=''; } });
 
+/* --- Texte d'un point : paragraphes et tableaux (richtext.js, LSText) ---------------------------
+   Le champ reste un contenteditable, mais ce qui s'enregistre est du texte brut où un tableau est
+   une suite de lignes à tabulations (LSText.blocks). Coller depuis Excel, Numbers ou une page web
+   garde le tableau ; « Insérer un tableau » en crée un ; Tab et Entrée passent d'une cellule à
+   l'autre. Le même texte sert au PV (PDF, Word) et à la convocation, qui redessinent le tableau. */
+const RT_ICON='<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>';
+const rtLine=l=>`<div>${escH(l)||'<br>'}</div>`;
+function rtTableHtml(rows){
+  const al=LSText.align(rows), head=LSText.hasHead(rows);
+  return `<table class="rt-table"><tbody>${rows.map((r,i)=>{
+    const h=head&&i===0, t=h?'th':'td';
+    return `<tr${!h&&LSText.isTotal(r)?' class="rt-total"':''}>${r.map((c,k)=>`<${t}${al[k]==='right'?' class="rt-num"':''}>${escH(c)||'<br>'}</${t}>`).join('')}</tr>`;
+  }).join('')}</tbody></table>`;
+}
+function rtBlocksHtml(bl){ return bl.map(b=>b.type==='table' ? rtTableHtml(b.rows) : b.text.split('\n').map(rtLine).join('')).join(''); }
+// L'affichage : une ligne par <div>, un <table> par tableau. En édition, une ligne vide entoure
+// les tableaux du bord, pour qu'on puisse toujours écrire au-dessus et en dessous.
+function rtRender(el, text){
+  const bl=LSText.blocks(text), edit=el.getAttribute('contenteditable')!=null;
+  const html=[];
+  bl.forEach((b,i)=>{
+    if(b.type==='table' && edit && (i===0 || bl[i-1].type==='table')) html.push(rtLine(''));
+    html.push(rtBlocksHtml([b]));
+  });
+  if(edit && bl.length && bl[bl.length-1].type==='table') html.push(rtLine(''));
+  el.innerHTML=html.join('');
+}
+// Du DOM au texte brut. `pasted` : du HTML venu du presse-papiers, où les blancs ne comptent pas.
+function rtSerialize(el, pasted){
+  let out='';
+  const nl=()=>{ if(out && !out.endsWith('\n')) out+='\n'; };
+  const BLOCK=/^(DIV|P|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|SECTION|ARTICLE|HEADER|FOOTER|DL|DT|DD|TR|HR)$/;
+  (function walk(n){
+    n.childNodes.forEach(c=>{
+      if(c.nodeType===3){ out+=pasted ? c.nodeValue.replace(/\s+/g,' ') : c.nodeValue.replace(/[ \t]/g,' '); return; }
+      if(c.nodeType!==1) return;
+      const tag=c.tagName;
+      if(/^(STYLE|SCRIPT|META|LINK|TITLE|HEAD)$/.test(tag)) return;
+      if(tag==='BR'){ if(c.nextSibling || !c.previousSibling) out+='\n'; return; }   // le <br> de fin de ligne du navigateur ne compte pas
+      if(tag==='TABLE'){
+        nl(); if(out) out+='\n';           // une ligne vide autour : deux tableaux qui se suivent restent deux tableaux
+        [...c.rows].filter(r=>r.cells.length).forEach(r=>{ out+=[...r.cells].map(td=>td.textContent.replace(/\s+/g,' ').trim()).join('\t')+'\n'; });
+        out+='\n';
+        return;
+      }
+      const block=BLOCK.test(tag);
+      if(block) nl();
+      walk(c);
+      if(block) nl();
+    });
+  })(el);
+  if(pasted) out=out.replace(/\n +/g,'\n');
+  return LSText.trim(out.replace(/ +\n/g,'\n').replace(/\n{3,}/g,'\n\n'));
+}
+function rtCell(el){
+  const s=getSelection(); if(!s.rangeCount) return null;
+  let n=s.anchorNode; n=n&&n.nodeType===3?n.parentElement:n;
+  const c=n&&n.closest?n.closest('td,th'):null;
+  return c&&el.contains(c)?c:null;
+}
+function rtSelect(node, collapseEnd){
+  const r=document.createRange(); r.selectNodeContents(node); if(collapseEnd) r.collapse(false);
+  const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+const rtTouched=el=>el.dispatchEvent(new Event('input',{bubbles:true}));   // l'étape 1 y lit « modifications non enregistrées »
+function rtRowAdd(tr){
+  const nr=document.createElement('tr'); nr.innerHTML='<td><br></td>'.repeat(tr.cells.length||1); tr.after(nr); return nr;
+}
+function rtPaste(el, e){
+  const cd=e.clipboardData; if(!cd) return;
+  e.preventDefault();
+  const h=cd.getData('text/html'), t=(cd.getData('text/plain')||'').replace(/\r\n?/g,'\n');
+  const text=h && /<table[\s>]/i.test(h) ? rtSerialize(new DOMParser().parseFromString(h,'text/html').body, true) : t;
+  if(rtCell(el)){ document.execCommand('insertText', false, text.replace(/\s+/g,' ').trim()); return; }   // dans une cellule : une seule valeur
+  if(!LSText.hasTable(text)){ document.execCommand('insertText', false, text); return; }
+  document.execCommand('insertHTML', false, rtBlocksHtml(LSText.blocks(text))+rtLine(''));
+}
+function rtKey(el, e){
+  const c=rtCell(el); if(!c || e.isComposing) return;
+  if(e.key==='Tab'){
+    e.preventDefault();
+    let cells=[...c.closest('table').querySelectorAll('td,th')], i=cells.indexOf(c)+(e.shiftKey?-1:1);
+    if(i<0) return;
+    if(i>=cells.length){ rtRowAdd(c.parentElement); rtTouched(el); cells=[...c.closest('table').querySelectorAll('td,th')]; }
+    rtSelect(cells[i]);
+  } else if(e.key==='Enter'){
+    e.preventDefault();
+    const tr=c.parentElement, k=c.cellIndex;
+    let nx=tr.nextElementSibling; if(!nx){ nx=rtRowAdd(tr); rtTouched(el); }
+    rtSelect(nx.cells[Math.min(k,nx.cells.length-1)]);
+  }
+}
+function rtAct(el, act){
+  const c=rtCell(el);
+  if(act==='table'){
+    const host=document.createElement('div');
+    host.innerHTML=`<table class="rt-table"><tbody><tr>${'<th><br></th>'.repeat(3)}</tr>${('<tr>'+'<td><br></td>'.repeat(3)+'</tr>').repeat(2)}</tbody></table>`;
+    const t=host.firstChild;
+    // sous le bloc où se trouve le curseur (sous le tableau, si on est dans un tableau) ; à la fin sinon
+    const s=getSelection(); let n=s.rangeCount&&el.contains(s.anchorNode)&&s.anchorNode!==el ? s.anchorNode : null;
+    while(n && n.parentNode!==el) n=n.parentNode;
+    const blank=()=>{ const d=document.createElement('div'); d.innerHTML='<br>'; return d; };
+    if(n && n.nodeName==='TABLE'){ const d=blank(); n.after(d); n=d; }
+    if(n) n.after(t); else el.appendChild(t);
+    if(!t.nextSibling) t.after(blank());
+    el.focus(); rtSelect(t.rows[0].cells[0]); rtTouched(el); return;
+  }
+  if(!c) return;
+  const t=c.closest('table'), tr=c.parentElement, k=c.cellIndex;
+  if(act==='row+'){ rtSelect(rtRowAdd(tr).cells[k]); }
+  else if(act==='col+'){
+    [...t.rows].forEach(r=>{ const ref=r.cells[Math.min(k,r.cells.length-1)], nc=document.createElement(ref?ref.tagName:'td'); nc.innerHTML='<br>'; if(ref) ref.after(nc); else r.appendChild(nc); });
+    rtSelect(tr.cells[k+1]);
+  }
+  else if(act==='row-'){
+    const to=tr.nextElementSibling||tr.previousElementSibling; tr.remove();
+    if(to) rtSelect(to.cells[Math.min(k,to.cells.length-1)]); else t.remove();
+  }
+  else if(act==='col-'){
+    [...t.rows].forEach(r=>{ if(r.cells[k]) r.cells[k].remove(); });
+    if(!tr.cells.length) t.remove(); else rtSelect(tr.cells[Math.min(k,tr.cells.length-1)]);
+  }
+  else if(act==='del'){
+    if(t.textContent.trim() && !confirm('Supprimer ce tableau et son contenu ?')) return;
+    const nx=t.nextSibling; t.remove(); if(nx) rtSelect(nx,true);
+  }
+  rtTouched(el);
+}
+// Les outils de tableau n'apparaissent que lorsque le curseur est dans un tableau.
+document.addEventListener('selectionchange',()=>{
+  const s=getSelection(); let n=s.rangeCount?s.anchorNode:null; n=n&&n.nodeType===3?n.parentElement:n;
+  const c=n&&n.closest?n.closest('.rt td,.rt th'):null, bar=c?c.closest('.rt').nextElementSibling:null;
+  document.querySelectorAll('.rt-bar.in-table').forEach(b=>{ if(b!==bar) b.classList.remove('in-table'); });
+  if(bar && bar.classList.contains('rt-bar')) bar.classList.add('in-table');
+});
+/** Monte l'éditeur sur `el` (un contenteditable, ou un simple bloc en lecture seule).
+ *  `onSave(texte)` est appelé quand on quitte le champ et que le texte a changé. */
+function rtMount(el, text, onSave){
+  el.classList.add('rt'); rtRender(el, text);
+  if(el.getAttribute('contenteditable')==null) return;
+  let last=rtSerialize(el);
+  el.addEventListener('paste',e=>rtPaste(el,e));
+  el.addEventListener('keydown',e=>rtKey(el,e));
+  el.addEventListener('blur',()=>{
+    const t=rtSerialize(el);
+    if(t!==last){ last=t; onSave(t); }
+    // On remet le texte au propre (colonnes de montants à droite, total en gras) — sauf si c'est
+    // la fenêtre qui a perdu la main : on y revient avec son curseur là où il était.
+    if(document.hasFocus()) rtRender(el, t);
+  });
+  const bar=document.createElement('div'); bar.className='rt-bar';
+  bar.innerHTML=`<button type="button" class="lk" data-rt="table" title="Un tableau de 3 colonnes, à compléter">${RT_ICON} Insérer un tableau</button>
+    <span class="rt-hint">ou collez-le depuis Excel, Numbers ou une page web</span>
+    <span class="rt-ctx"><button type="button" class="lk" data-rt="row+">+ Ligne</button><button type="button" class="lk" data-rt="col+">+ Colonne</button><button type="button" class="lk" data-rt="row-">− Ligne</button><button type="button" class="lk" data-rt="col-">− Colonne</button><button type="button" class="lk del" data-rt="del">Supprimer le tableau</button></span>`;
+  el.after(bar);
+  bar.addEventListener('mousedown',e=>{ if(e.target.closest('[data-rt]')) e.preventDefault(); });   // le champ garde le curseur
+  bar.addEventListener('click',e=>{ const b=e.target.closest('[data-rt]'); if(b) rtAct(el,b.dataset.rt); });
+}
+
 function renderAgenda(){
   const wrap=document.getElementById('agenda'); if(!wrap||!currentAG) return; wrap.innerHTML='';
   const pts=currentAG.points; const ro=!canWrite();
@@ -2860,7 +3019,7 @@ function renderAgenda(){
         <button class="flagbtn pt-down" style="opacity:.5" title="Descendre">↓</button>
         <button class="flagbtn pt-del" style="opacity:.5" title="Supprimer">✕</button>
       </div>
-      <div ${ro?'':'contenteditable'} class="fld pt-body" style="padding:10px 12px;min-height:44px;font-size:13.5px;color:var(--ink-soft)">${p.body||''}</div>
+      <div ${ro?'':'contenteditable'} class="fld pt-body" style="padding:10px 12px;min-height:44px;font-size:13.5px;color:var(--ink-soft)"></div>
       <div class="pt-majwrap" style="display:${isDec?'flex':'none'};gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
         <label style="font-size:12px;color:var(--ink-faint)">Majorité requise</label>
         <select class="fld pt-maj" ${ro?'disabled':''}>${majOptions(p.majorite)}</select>
@@ -2868,9 +3027,9 @@ function renderAgenda(){
         <label style="font-size:12px;color:var(--ink-faint);margin-left:10px">Clé</label>
         <select class="fld pt-cle" ${ro?'disabled':''}><option ${p.cle==='Acte de base'?'selected':''}>Acte de base</option><option ${p.cle!=='Acte de base'?'selected':''}>Individuelle</option></select>
       </div>`;
+    rtMount(card.querySelector('.pt-body'), p.body, t=>{ persistPoint(p,{body:t}); renderSeance(); });
     if(!ro){
       card.querySelector('.pt-title').onchange=e=>persistPoint(p,{title:e.target.value});
-      card.querySelector('.pt-body').onblur=e=>persistPoint(p,{body:e.target.innerText});
       card.querySelector('.pt-kind').onchange=e=>{persistPoint(p,{kind:e.target.value}); renderAgenda(); renderSeance();};
       card.querySelector('.pt-maj').onchange=e=>{persistPoint(p,{majorite:e.target.value}); card.querySelector('.pt-pct').textContent=MAJPCT[e.target.value]+' %'; renderSeance();};
       card.querySelector('.pt-cle').onchange=e=>persistPoint(p,{cle:e.target.value});
@@ -3028,7 +3187,7 @@ function convocationData(ag, owner){
     type:String(ag.type||'ordinaire').toLowerCase(),
     dateLabel:ag.ag_date||'', dateLong:d?d.toLocaleDateString('fr-BE',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):'',
     timeLabel:agTimeLabel(ag.ag_date||''), start:agStart(ag), lieu:ag.lieu||'',
-    points:(ag.points||[]).map((p,i)=>({n:i+1, title:p.title||'', kind:p.kind, maj:MAJ[p.majorite]||'', pct:MAJPCT[p.majorite]||0, body:String(p.body||'').trim()})),
+    points:(ag.points||[]).map((p,i)=>({n:i+1, title:p.title||'', kind:p.kind, maj:MAJ[p.majorite]||'', pct:MAJPCT[p.majorite]||0, body:LSText.trim(p.body)})),
     syndic:{name:r.syndic, email:r.from},
     sentLabel:ag.convocation_date||new Date().toLocaleDateString('fr-BE'),
     recipient:owner?{name:owner.n, lots}:null,
@@ -3343,8 +3502,8 @@ function renderSeance(){
     card.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--display);font-weight:600;color:var(--ink-faint)">${idx+1}</span>
       <b style="flex:1;font-size:14.5px">${p.title}</b>${isDec?`<span class="cat acp">${MAJ[p.majorite]}</span>`:'<span class="cat ent">Information</span>'}</div>
       <div class="sub" style="margin-top:10px">Notes de séance — reprises dans le PV</div>
-      <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:4px;min-height:38px;font-size:13px;color:var(--ink-soft);white-space:pre-wrap">${escH(p.seance_notes||'')}</div>${votesHtml}`;
-    if(!ro){ const sn=card.querySelector('.pt-snotes'); if(sn) sn.onblur=e=>persistPoint(p,{seance_notes:e.target.innerText}); }
+      <div ${ro?'':'contenteditable'} class="fld pt-snotes" style="width:100%;margin-top:4px;min-height:38px;font-size:13px;color:var(--ink-soft);"></div>${votesHtml}`;
+    rtMount(card.querySelector('.pt-snotes'), p.seance_notes, t=>persistPoint(p,{seance_notes:t}));
     wrap.appendChild(card);
   });
   if(!ro){
@@ -3382,7 +3541,9 @@ document.getElementById('genPV')?.addEventListener('click',()=>{
     let dec='';
     if(p.kind==='decision'){ const t=agTally(currentAG,p);
       dec=`<div><b>Décision :</b> ${t.adopted?'ADOPTÉ':'REJETÉ'} (pour ${t.pour} · contre ${t.contre} · abst. ${t.abst} — ${t.rule})</div>`; }
-    return `<div style="margin:14px 0"><b>${i+1}. ${p.title}</b>${p.body?`<div style="color:#555">${p.body}</div>`:''}${p.seance_notes?`<div style="font-style:italic">Notes : ${p.seance_notes}</div>`:''}${dec}</div>`;
+    // texte et notes : paragraphes et tableaux (LSText), bordures en dur pour Word
+    const WORD={table:'border-collapse:collapse;margin:6px 0 10px', th:'border:1px solid #999;padding:3px 8px;font-weight:bold;background-color:#EEF2EE', td:'border:1px solid #999;padding:3px 8px'};
+    return `<div style="margin:14px 0"><b>${i+1}. ${escH(p.title)}</b>${p.body?`<div style="color:#555">${LSText.html(p.body,WORD)}</div>`:''}${p.seance_notes?`<div><i>Notes :</i>${LSText.html(p.seance_notes,{...WORD,p:'margin:0 0 6px;font-style:italic'})}</div>`:''}${dec}</div>`;
   }).join('');
   const html=`<html><head><meta charset="utf-8"></head><body style="font-family:Georgia,serif;max-width:720px;margin:auto">
     <h1>Procès-verbal — ${currentAG.type||''} ${cn}</h1>

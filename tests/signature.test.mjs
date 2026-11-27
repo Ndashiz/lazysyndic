@@ -94,3 +94,20 @@ test('PV généré (si pdf-lib est installé)', async t => {
   assert.equal(new TextDecoder().decode(b.subarray(0, 5)), '%PDF-');
   assert.equal((await S.readSignatures(b)).signatures.length, 0);
 });
+
+test('PV généré : un tableau dans le texte et dans les notes (si pdf-lib est installé)', async t => {
+  let PDFLib;
+  try { PDFLib = require('pdf-lib'); } catch { t.skip('npm i --no-save pdf-lib@1.17.1 pour ce test'); return; }
+  const table = 'Lot\t2026\t2027\nRDC & GARAGE\t79,39 €\t113,35 €\nTotal\t203,34 €\t275,48 €';
+  const point = (n, body, notes) => ({ n, title: `Budget ${n}`, body, notes, maj: 'Majorité absolue', rule: 'plus de la moitié',
+    pour: { names: ['Alex Martin'], q: 500 }, contre: { names: [], q: 0 }, abst: { names: [], q: 0 }, adopted: true });
+  const data = pts => ({ copro: 'ACP Démo', type: 'Ordinaire', dateLabel: '28/10/2026 19h00', lieu: 'RDC',
+    president: 'Alex Martin', secretaire: 'Alex Martin', presences: [{ name: 'Alex Martin', quot: 500, status: 'Présent' }],
+    attendance: { n: 1, of: 1, q: 500, tot: 500 }, points: pts, signers: EXPECTED, generatedAt: '2026-10-05T12:00:00Z' });
+  const one = await S.buildPvPdf(PDFLib, data([point(1, 'Présentation.\n' + table, table)]));
+  assert.equal(new TextDecoder().decode(one.subarray(0, 5)), '%PDF-');
+  // un très long tableau passe sur les pages suivantes sans casser
+  const long = 'Poste\tMontant\n' + Array.from({ length: 120 }, (_, i) => `Poste ${i + 1}\t${i + 1},00 €`).join('\n');
+  const many = await PDFLib.PDFDocument.load(await S.buildPvPdf(PDFLib, data([point(1, long, '')])));
+  assert.ok(many.getPageCount() >= 3);
+});
